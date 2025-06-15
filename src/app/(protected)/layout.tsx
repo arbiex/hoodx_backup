@@ -1,0 +1,32 @@
+'use client'
+
+import Header from '@/components/Header'
+import BottomSidebar from '@/components/BottomSidebar'
+import MatrixRain from '@/components/MatrixRain'
+import { AuthWrapper } from '@/components/AuthWrapper'
+
+export default function ProtectedLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <AuthWrapper>
+    <div className="relative min-h-screen bg-black/95">
+      {/* Efeito de chuva matrix de fundo */}
+      <MatrixRain />
+      
+      {/* Conteúdo */}
+      <div className="relative z-10">
+        <div className="max-w-[720px] mx-auto">
+          <Header />
+          <div className="pb-24">
+            {children}
+          </div>
+        </div>
+        <BottomSidebar />
+      </div>
+    </div>
+    </AuthWrapper>
+  )
+} 

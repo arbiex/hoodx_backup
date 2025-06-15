@@ -1,0 +1,15 @@
+{
+  "functions": {
+    "src/app/api/**/*.ts": {
+      "regions": ["gru1"]
+    },
+    "api/**/*.js": {
+      "regions": ["gru1"]
+    },
+    "api/**/*.ts": {
+      "regions": ["gru1"]
+    }
+  },
+  "regions": ["gru1"],
+  "framework": "nextjs"
+} 

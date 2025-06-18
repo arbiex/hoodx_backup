@@ -36,9 +36,17 @@ const userConnections = new Map<string, UserConnection>();
 // Função para autenticar usuário via Edge Function
 async function authenticateUser(userId: string): Promise<{ jsessionId: string; pragmaticUserId: string } | null> {
   try {
-    console.log(`🔑 [AUTH] Autenticando usuário: ${userId.substring(0, 8)}...`);
+    console.log(`🔑 [AUTH] Iniciando autenticação para: ${userId.substring(0, 8)}...`);
     
     const edgeFunctionUrl = `${process.env.SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
+    console.log(`📡 [AUTH] Chamando: ${edgeFunctionUrl}`);
+    
+    const requestBody = {
+      action: 'authenticate',
+      user_id: userId
+    };
+    
+    console.log(`📤 [AUTH] Enviando:`, { action: requestBody.action, user_id: userId.substring(0, 8) + '...' });
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
@@ -46,25 +54,31 @@ async function authenticateUser(userId: string): Promise<{ jsessionId: string; p
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
       },
-      body: JSON.stringify({
-        action: 'authenticate',
-        user_id: userId
-      })
+      body: JSON.stringify(requestBody)
     });
 
+    console.log(`📥 [AUTH] Resposta HTTP: ${response.status} ${response.statusText}`);
+
     if (!response.ok) {
-      console.error(`❌ [AUTH] Erro na Edge Function: ${response.status}`);
+      const errorText = await response.text();
+      console.error(`❌ [AUTH] Erro ${response.status}:`, errorText.substring(0, 200));
       return null;
     }
 
     const result = await response.json();
+    console.log(`📋 [AUTH] Resultado:`, { 
+      success: result.success, 
+      hasData: !!result.data,
+      hasJsessionId: !!result.data?.jsessionId,
+      error: result.error 
+    });
     
     if (!result.success || !result.data?.jsessionId) {
-      console.error(`❌ [AUTH] Edge Function falhou:`, result.error);
+      console.error(`❌ [AUTH] Edge Function falhou:`, result.error || 'Sem jsessionId');
       return null;
     }
 
-    console.log(`✅ [AUTH] JSESSIONID obtido: ${result.data.jsessionId.substring(0, 10)}...`);
+    console.log(`✅ [AUTH] SUCESSO! JSESSIONID: ${result.data.jsessionId.substring(0, 10)}...`);
     
     return {
       jsessionId: result.data.jsessionId,
@@ -72,7 +86,11 @@ async function authenticateUser(userId: string): Promise<{ jsessionId: string; p
     };
     
   } catch (error: any) {
-    console.error(`❌ [AUTH] Erro:`, error.message);
+    console.error(`❌ [AUTH] ERRO CATCH:`, {
+      name: error.name,
+      message: error.message,
+      code: error.code
+    });
     return null;
   }
 }
@@ -247,27 +265,32 @@ wss.on('connection', (ws, req) => {
     message: `Conectado ao servidor HoodX Railway`
   }));
 
-  // Auto-iniciar monitoramento após 2 segundos
-  setTimeout(async () => {
-    if (ws.readyState === WebSocket.OPEN) {
-      console.log(`🎯 Auto-iniciando monitoramento para usuário ${userId.substring(0, 8)}...`);
+  // Auto-iniciar monitoramento IMEDIATAMENTE
+  console.log(`🎯 Iniciando monitoramento IMEDIATO para usuário ${userId.substring(0, 8)}...`);
+  
+  // Autenticar usuário (sem delay)
+  authenticateUser(userId).then(authResult => {
+    if (authResult && ws.readyState === WebSocket.OPEN) {
+      console.log(`✅ Autenticação OK para ${userId.substring(0, 8)}, conectando ao Pragmatic...`);
+      userConnection.jsessionId = authResult.jsessionId;
+      userConnection.isMonitoring = true;
       
-      // Autenticar usuário
-      const authResult = await authenticateUser(userId);
-      if (authResult) {
-        userConnection.jsessionId = authResult.jsessionId;
-        userConnection.isMonitoring = true;
-        
-        // Conectar ao Pragmatic Play
-        connectToPragmatic(userConnection);
-      } else {
-        sendToUser(userId, {
-          type: 'authentication_error',
-          message: 'Falha na autenticação'
-        });
-      }
+      // Conectar ao Pragmatic Play
+      connectToPragmatic(userConnection);
+    } else {
+      console.log(`❌ Autenticação FALHOU para ${userId.substring(0, 8)}`);
+      sendToUser(userId, {
+        type: 'authentication_error',
+        message: 'Falha na autenticação'
+      });
     }
-  }, 2000);
+  }).catch(error => {
+    console.error(`❌ Erro na autenticação para ${userId.substring(0, 8)}:`, error);
+    sendToUser(userId, {
+      type: 'authentication_error',
+      message: 'Erro na autenticação'
+    });
+  });
 
   // Handlers do WebSocket
   ws.on('message', (data) => {

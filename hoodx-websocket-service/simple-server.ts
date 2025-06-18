@@ -40,38 +40,65 @@ interface GameResult {
 // Armazenar conexões dos usuários
 const userConnections = new Map<string, UserConnection>();
 
-// Função para autenticar usuário no Pragmatic Play
+// Função para autenticar usuário no Pragmatic Play via Edge Function
 async function authenticateUser(userId: string): Promise<{ jsessionId: string; pragmaticUserId: string } | null> {
   try {
-    console.log(`🔑 Iniciando autenticação para usuário: ${userId}`);
+    console.log(`🔑 [AUTH] Iniciando autenticação para usuário: ${userId.substring(0, 8)}...`);
     
-    // Tentar via Edge Function primeiro
-    try {
-      const { data: authData, error: authError } = await supabase.functions.invoke('machine_learning_blaze_megaroulette', {
-        body: { action: 'authenticate', user_id: userId }
-      });
+    // Usar a mesma Edge Function que o Next.js usa: blaze_history_megaroulette
+    const edgeFunctionUrl = `${process.env.SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
+    
+    console.log(`📡 [AUTH] Chamando Edge Function: ${edgeFunctionUrl}`);
+    
+    const response = await fetch(edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
+        action: 'authenticate',
+        user_id: userId
+      })
+    });
 
-      if (!authError && authData?.success && authData.data?.jsessionId) {
-        console.log(`✅ Autenticação via Edge Function realizada para ${userId}`);
-        return {
-          jsessionId: authData.data.jsessionId,
-          pragmaticUserId: authData.data.pragmaticUserId || userId
-        };
-      }
-    } catch (edgeError) {
-      console.warn(`⚠️ Edge Function falhou para ${userId}:`, edgeError);
+    if (!response.ok) {
+      console.error(`❌ [AUTH] Erro na requisição Edge Function: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      console.error(`❌ [AUTH] Resposta da Edge Function:`, errorText.substring(0, 200));
+      return null;
     }
 
-    // Fallback para simulação básica (para desenvolvimento)
-    console.log(`⚠️ Usando autenticação simulada para ${userId}`);
-    const simulatedSessionId = `SIM_${userId}_${Date.now()}`;
-    return {
-      jsessionId: simulatedSessionId,
-      pragmaticUserId: userId
-    };
+    const result = await response.json();
+    console.log(`📋 [AUTH] Resposta da Edge Function:`, { 
+      success: result.success, 
+      hasData: !!result.data,
+      hasJsessionId: !!result.data?.jsessionId 
+    });
+    
+    if (!result.success) {
+      console.error(`❌ [AUTH] Edge Function retornou erro:`, result.error);
+      return null;
+    }
 
-  } catch (error) {
-    console.error(`❌ Erro na autenticação para ${userId}:`, error);
+    if (!result.data?.jsessionId) {
+      console.error(`❌ [AUTH] Edge Function não retornou jsessionId`);
+      return null;
+    }
+
+    console.log(`✅ [AUTH] Autenticação realizada com sucesso para usuário ${userId.substring(0, 8)}...`);
+    console.log(`🔑 [AUTH] JSESSIONID obtido: ${result.data.jsessionId.substring(0, 10)}...`);
+    
+    return {
+      jsessionId: result.data.jsessionId,
+      pragmaticUserId: result.data.pragmaticUserId || userId
+    };
+    
+  } catch (error: any) {
+    console.error(`❌ [AUTH] Erro na autenticação para ${userId.substring(0, 8)}:`, {
+      message: error.message,
+      name: error.name
+    });
     return null;
   }
 }

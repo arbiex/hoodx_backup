@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Play, Square, RefreshCw, Zap } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import DebugStrategyModal from '@/components/DebugStrategyModal';
+import { useMegaRouletteWebSocket } from '@/hooks/useMegaRouletteWebSocket';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,7 +22,7 @@ interface HistoryItem {
   color: string;
 }
 
-export default function DebugPage() {
+export default function BotPage() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -48,8 +49,6 @@ export default function DebugPage() {
   const [operationLoading, setOperationLoading] = useState(false);
   const [operationStatus, setOperationStatus] = useState<string>('INATIVO');
   const [operationError, setOperationError] = useState<string | null>(null);
-  const [websocketLogs, setWebsocketLogs] = useState<Array<{ timestamp: number; message: string; type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' }>>([]);
-  const [gameResults, setGameResults] = useState<Array<{ gameId: string; result: string; timestamp: number; number?: number; color?: string }>>([]);
 
   // Estados para seleção de padrão
   const [selectedPattern, setSelectedPattern] = useState<{
@@ -100,10 +99,29 @@ export default function DebugPage() {
     }>;
   } | null>(null);
 
-
   const monitoringRef = useRef<boolean>(false);
   const operationRef = useRef<boolean>(false);
   const userIdRef = useRef<string>('');
+
+  // Hook do WebSocket (agora no frontend!)
+  const webSocket = useMegaRouletteWebSocket({
+    userId: userIdRef.current || '', // Garantir que nunca seja undefined
+    onPatternUpdate: (newPatterns) => {
+      console.log('🔄 Padrões atualizados:', newPatterns);
+      setPatterns(newPatterns);
+      setLastUpdate(Date.now());
+    },
+    onGameResult: (result) => {
+      console.log('🎯 Resultado recebido:', result);
+      setHistory(prev => [{
+        gameId: result.gameId,
+        gameResult: result.result,
+        timestamp: result.timestamp,
+        number: result.number || 0,
+        color: result.color || 'green'
+      }, ...prev.slice(0, 49)]);
+    }
+  });
 
   useEffect(() => {
     checkUser();
@@ -112,6 +130,17 @@ export default function DebugPage() {
       fetchOperationReport();
     }, 1000);
   }, []);
+
+  // Efeito para debug do hook WebSocket
+  useEffect(() => {
+    console.log('🔍 WebSocket State:', {
+      userId: userIdRef.current,
+      isConnected: webSocket.isConnected,
+      logsCount: webSocket.logs.length,
+      gameResultsCount: webSocket.gameResults.length,
+      connectionStatus: webSocket.connectionStatus
+    });
+  }, [webSocket.isConnected, webSocket.logs.length, webSocket.gameResults.length, webSocket.connectionStatus]);
 
   useEffect(() => {
     return () => {
@@ -144,7 +173,7 @@ export default function DebugPage() {
     if (!userIdRef.current) return;
     
     try {
-      const { data: patternsData, error: patternsError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: patternsData, error: patternsError } = await supabase.functions.invoke('machine_learning_blaze_megaroulette', {
         body: { 
           action: 'get_patterns', 
           user_id: userIdRef.current
@@ -184,7 +213,7 @@ export default function DebugPage() {
       try {
         // Primeiro parar apostas automáticas se estiverem ativas
         if (autoBettingActive) {
-          const stopResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+          const stopResponse = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -202,7 +231,7 @@ export default function DebugPage() {
         }
 
         // Depois limpar padrão selecionado
-        const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+        const response = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -234,7 +263,7 @@ export default function DebugPage() {
       console.log('🎯 [DEBUG] Estratégia selecionada:', strategyName);
       
       // Primeiro configurar a estratégia de apostas automáticas
-      const configResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+      const configResponse = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -252,7 +281,7 @@ export default function DebugPage() {
       }
 
       // Depois iniciar monitoramento de padrões
-      const monitorResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+      const monitorResponse = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -291,7 +320,7 @@ export default function DebugPage() {
       try {
         console.log('🔄 Verificando mudanças...');
         
-        const { data: monitorData, error: monitorError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+        const { data: monitorData, error: monitorError } = await supabase.functions.invoke('machine_learning_blaze_megaroulette', {
           body: { 
             action: 'monitor_changes', 
             user_id: userIdRef.current
@@ -357,7 +386,7 @@ export default function DebugPage() {
       userIdRef.current = user.id;
 
       // Primeiro iniciar sessão na Edge Function
-      const { data: sessionData, error: sessionError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: sessionData, error: sessionError } = await supabase.functions.invoke('machine_learning_blaze_megaroulette', {
         body: { action: 'start_session', user_id: user.id }
       });
 
@@ -367,7 +396,7 @@ export default function DebugPage() {
       }
 
       // Autenticar
-      const { data: authData, error: authError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: authData, error: authError } = await supabase.functions.invoke('machine_learning_blaze_megaroulette', {
         body: { action: 'authenticate', user_id: user.id }
       });
 
@@ -377,7 +406,7 @@ export default function DebugPage() {
       }
 
       // Buscar histórico inicial
-      const { data: historyData, error: historyError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: historyData, error: historyError } = await supabase.functions.invoke('machine_learning_blaze_megaroulette', {
         body: { action: 'get_history', user_id: user.id }
       });
 
@@ -411,7 +440,7 @@ export default function DebugPage() {
     if (!userIdRef.current) return;
     
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+      const response = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -425,8 +454,7 @@ export default function DebugPage() {
       const result = await response.json();
 
       if (result.success) {
-        setWebsocketLogs(result.data.logs || []);
-        setGameResults(result.data.results || []);
+        // Logs agora são gerenciados pelo hook webSocket
         
         // Atualizar status baseado na conexão
         const connectionStatus = result.data.connectionStatus;
@@ -458,7 +486,7 @@ export default function DebugPage() {
     if (!userIdRef.current) return;
 
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+      const response = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -496,7 +524,7 @@ export default function DebugPage() {
             
             // Primeiro verificar se apostas já estão ativas
             try {
-              const statusResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+              const statusResponse = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
@@ -518,7 +546,7 @@ export default function DebugPage() {
                 // Apostas não estão ativas, tentar iniciar
                 console.log('🚀 Iniciando apostas automáticas...');
                 
-                const startBettingResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+                const startBettingResponse = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
@@ -572,7 +600,7 @@ export default function DebugPage() {
 
     setAutoBettingLoading(true);
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+      const response = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -604,7 +632,7 @@ export default function DebugPage() {
 
     setAutoBettingLoading(true);
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+      const response = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -635,7 +663,7 @@ export default function DebugPage() {
     if (!userIdRef.current) return;
 
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+      const response = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -662,7 +690,7 @@ export default function DebugPage() {
     if (!userIdRef.current) return;
 
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+      const response = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -705,7 +733,7 @@ export default function DebugPage() {
     if (!userIdRef.current) return;
 
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+      const response = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -753,10 +781,7 @@ export default function DebugPage() {
     let logsInterval: NodeJS.Timeout | null = null;
 
     if (isOperating && operationRef.current) {
-      // Buscar logs a cada 2 segundos
-      logsInterval = setInterval(() => {
-        fetchWebSocketLogs();
-      }, 2000);
+      // Logs agora vêm automaticamente do hook webSocket
     }
 
     return () => {
@@ -802,127 +827,78 @@ export default function DebugPage() {
     };
   }, [isOperating]);
 
-  // Função para conectar ao WebSocket de apostas E iniciar monitoramento
+  // ✅ OPERAÇÃO: Usar apenas UMA conexão WebSocket
   const handleOperate = async () => {
+    if (operationLoading) return;
+    
+    // Se já está operando, parar
     if (isOperating) {
-      // Parar operação E monitoramento
+      console.log('🛑 Parando operação...');
+      
+      // Desconectar WebSocket
+      webSocket.disconnect();
+      
       setIsOperating(false);
       operationRef.current = false;
-      setOperationStatus('INATIVO');
+      setOperationStatus('PARADO');
       setOperationError(null);
-      
-      // Parar também o monitoramento
-      setIsRunning(false);
-      monitoringRef.current = false;
-      setError(null);
-      
-      // Limpar estados relacionados
-      setSelectedPattern(null);
-      setWaitingForPattern(false);
-      setAutoBettingActive(false);
-      setAutoBettingStatus(null);
-      setLastProcessedPatternId(null);
-      
       return;
     }
-
+    
     setOperationLoading(true);
+    setOperationStatus('CONECTANDO');
     setOperationError(null);
-    
-    // RESETAR RELATÓRIO quando iniciar nova operação
-    await resetOperationReport();
-    
+
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+      const user = await supabase.auth.getUser();
+      if (!user.data.user) {
         setOperationError('Usuário não autenticado');
-        return;
-      }
-
-      userIdRef.current = user.id;
-      console.log('🎮 Conectando ao WebSocket para operação...');
-      setOperationStatus('CONECTANDO...');
-
-      // 1️⃣ PRIMEIRO: Iniciar sessão e autenticação do histórico
-      const { data: sessionData, error: sessionError } = await supabase.functions.invoke('blaze_history_megaroulette', {
-        body: { action: 'start_session', user_id: user.id }
-      });
-
-      if (sessionError || !sessionData?.success) {
-        setOperationError(`Erro ao iniciar sessão: ${sessionError?.message || sessionData?.error}`);
         setOperationStatus('ERRO');
         return;
       }
 
-      // Autenticar
-      const { data: authData, error: authError } = await supabase.functions.invoke('blaze_history_megaroulette', {
-        body: { action: 'authenticate', user_id: user.id }
-      });
+      console.log('🚀 Iniciando operação completa...');
 
-      if (authError || !authData?.success) {
-        setOperationError(`Erro na autenticação: ${authError?.message || authData?.error}`);
+      // 1️⃣ Conectar ao WebSocket Railway
+      console.log('🔌 Conectando WebSocket frontend...');
+      await webSocket.connect();
+
+      // Aguardar conexão Railway estabelecer
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      if (!webSocket.isConnected) {
+        setOperationError('Falha ao conectar ao servidor Railway');
         setOperationStatus('ERRO');
         return;
       }
 
-      // Buscar histórico inicial
-      const { data: historyData, error: historyError } = await supabase.functions.invoke('blaze_history_megaroulette', {
-        body: { action: 'get_history', user_id: user.id }
-      });
-
-      if (historyError || !historyData?.success) {
-        setOperationError(`Erro ao buscar histórico: ${historyError?.message || historyData?.error}`);
-        setOperationStatus('ERRO');
-        return;
-      }
-
-      const initialHistory = historyData.data.history || [];
-      setHistory(initialHistory);
-      setLastUpdate(Date.now());
-
-      // Buscar padrões iniciais
-      await fetchPatterns();
-
-      // 2️⃣ SEGUNDO: Conectar ao WebSocket da Pragmatic
-      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          action: 'bet-connect',
-          gameConfig: {
-            tableId: 'mrbras531mrbr532'
-          }
-        })
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        setOperationError(`Erro na conexão WebSocket: ${result.error}`);
-        setOperationStatus('ERRO');
-        return;
-      }
-
-      // 3️⃣ TERCEIRO: Ativar ambos os sistemas
-      console.log('✅ Conectado ao WebSocket com sucesso');
-      console.log('✅ Monitoramento de histórico ativado');
+      console.log('✅ Railway conectado, aguardando Pragmatic Play...');
       
+      // Definir como operando mesmo se Pragmatic ainda não conectou
       setIsOperating(true);
       operationRef.current = true;
-      setOperationStatus('OPERANDO');
+      setOperationStatus('CONECTANDO_PRAGMATIC');
       setOperationError(null);
 
-      // Ativar monitoramento de histórico
-      setIsRunning(true);
-      startMonitoring();
+      // Aguardar um pouco mais para Pragmatic conectar
+      await new Promise(resolve => setTimeout(resolve, 5000));
 
-      // Buscar logs iniciais do WebSocket
-      setTimeout(() => {
-        fetchWebSocketLogs();
-      }, 1000);
+      // Verificar se Pragmatic conectou
+      const pragmaticConnectedLog = webSocket.logs.find(log => 
+        log.message.includes('Conectado ao Pragmatic Play') ||
+        log.message.includes('🎰 Conectado ao Pragmatic Play')
+      );
+
+      if (pragmaticConnectedLog) {
+        setOperationStatus('OPERANDO');
+        console.log('✅ Sistema completo conectado (Railway + Pragmatic)');
+      } else {
+        setOperationStatus('RAILWAY_APENAS');
+        console.log('⚠️ Apenas Railway conectado, Pragmatic pode estar indisponível');
+      }
+
+      // Iniciar monitoramento independente do status Pragmatic
+      startWebSocketMonitoring();
 
     } catch (error) {
       console.error('❌ Erro ao conectar:', error);
@@ -931,6 +907,59 @@ export default function DebugPage() {
     } finally {
       setOperationLoading(false);
     }
+  };
+
+  // ✅ MONITORAMENTO: Buscar apenas dados não fornecidos pelo WebSocket
+  const startWebSocketMonitoring = () => {
+    const monitor = async () => {
+      if (!operationRef.current) return;
+
+      try {
+        const user = await supabase.auth.getUser();
+        if (!user.data.user) return;
+
+        // Buscar apenas padrão selecionado (não fornecido pelo WebSocket)
+        const patternResponse = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.data.user.id,
+            action: 'get-selected-pattern'
+          })
+        });
+
+        const patternData = await patternResponse.json();
+        if (patternData.success && patternData.data.selectedPattern) {
+          setSelectedPattern(patternData.data.selectedPattern);
+        }
+
+        // Buscar status de apostas automáticas (não fornecido pelo WebSocket)
+        const bettingResponse = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.data.user.id,
+            action: 'get-auto-betting-status'
+          })
+        });
+
+        const bettingData = await bettingResponse.json();
+        if (bettingData.success) {
+          setAutoBettingStatus(bettingData.data);
+        }
+
+      } catch (error) {
+        console.error('Erro no monitoramento:', error);
+      }
+
+      // Continuar monitoramento se ainda operando (reduzido para 10 segundos)
+      if (operationRef.current) {
+        setTimeout(monitor, 10000); // Monitorar a cada 10 segundos (menos agressivo)
+      }
+    };
+
+    // Iniciar monitoramento
+    monitor();
   };
 
   return (
@@ -944,7 +973,7 @@ export default function DebugPage() {
           {/* Header */}
           <div className="text-center space-y-2">
             <h1 className="text-2xl font-bold text-green-400 font-mono">
-              🎯 DEBUG_MEGA_ROULETTE
+              🤖 BOT_MEGA_ROULETTE
             </h1>
             {userEmail && (
               <p className="text-gray-400 font-mono text-sm">
@@ -957,10 +986,10 @@ export default function DebugPage() {
           <Card className="border-blue-500/30 backdrop-blur-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
-                ⚡ OPERAÇÃO_WEBSOCKET
+                🤖 BOT_OPERAÇÃO_WEBSOCKET
               </CardTitle>
               <CardDescription className="text-gray-400 font-mono text-xs">
-                {`// Conexão WebSocket para apostas no MegaRoulette`}
+                {`// Bot automatizado para apostas no MegaRoulette`}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -987,19 +1016,50 @@ export default function DebugPage() {
                     </span>
                   </div>
                   
-                  {isOperating && (websocketLogs.length > 0 || gameResults.length > 0) && (
-                    <div className="text-xs font-mono text-gray-500">
-                      LOGS: {websocketLogs.length} | JOGOS: {gameResults.length}
+                  <div className="flex items-center gap-4">
+                    {/* Status Railway WebSocket */}
+                    <div className="flex items-center gap-1">
+                      <div className={`w-2 h-2 rounded-full ${
+                        webSocket.connectionStatus === 'connected' 
+                          ? 'bg-green-400 animate-pulse' 
+                          : webSocket.connectionStatus === 'connecting'
+                            ? 'bg-yellow-400 animate-pulse'
+                            : webSocket.connectionStatus === 'error'
+                              ? 'bg-red-400'
+                              : 'bg-gray-400'
+                      }`}></div>
+                      <span className="text-xs font-mono text-gray-400">
+                        RAILWAY: {webSocket.connectionStatus.toUpperCase()}
+                      </span>
                     </div>
-                  )}
+
+                    {/* Status Pragmatic Play */}
+                    <div className="flex items-center gap-1">
+                      <div className={`w-2 h-2 rounded-full ${
+                        webSocket.pragmaticConnected 
+                          ? 'bg-blue-400 animate-pulse' 
+                          : 'bg-gray-400'
+                      }`}></div>
+                      <span className="text-xs font-mono text-gray-400">
+                        PRAGMATIC: {webSocket.pragmaticConnected ? 'CONECTADO' : 'DESCONECTADO'}
+                      </span>
+                    </div>
+
+                    {/* Contadores */}
+                    {isOperating && (webSocket.logs.length > 0 || webSocket.gameResults.length > 0) && (
+                      <div className="text-xs font-mono text-gray-500">
+                        LOGS: {webSocket.logs.length} | JOGOS: {webSocket.gameResults.length}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Resultados dos Jogos */}
-                {gameResults.length > 0 && (
+                {webSocket.gameResults.length > 0 && (
                   <div className="space-y-2">
                     <div className="text-xs font-mono text-blue-400 font-semibold">🎯 ÚLTIMOS_RESULTADOS:</div>
                     <div className="grid grid-cols-10 gap-1 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg max-h-16 overflow-hidden">
-                      {gameResults.slice(0, 20).map((result, index) => {
+                      {webSocket.gameResults.slice(0, 20).map((result: any, index: number) => {
                         const baseClasses = "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold font-mono shadow-sm transition-all duration-300 hover:scale-110 cursor-pointer";
                         const colorClasses = result.color === 'red' 
                           ? 'bg-red-500 text-white shadow-red-500/50' 
@@ -1055,11 +1115,11 @@ export default function DebugPage() {
                 )}
 
                 {/* Logs do WebSocket */}
-                {websocketLogs.length > 0 && (
+                {webSocket.logs.length > 0 && (
                   <div className="space-y-2">
                     <div className="text-xs font-mono text-blue-400 font-semibold">📋 LOGS_WEBSOCKET:</div>
                     <div className="max-h-96 overflow-y-auto p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1">
-                      {websocketLogs.slice(0, 20).map((log, index) => (
+                      {webSocket.logs.slice(0, 20).map((log: any, index: number) => (
                         <div key={`log-${index}-${log.timestamp}`} className="text-xs font-mono flex items-start gap-2">
                           <span className="text-gray-500 text-xs">
                             {new Date(log.timestamp).toLocaleTimeString('pt-BR')}
@@ -1199,6 +1259,36 @@ export default function DebugPage() {
                       )}
                     </div>
                   )}
+
+                {/* Logs WebSocket em Tempo Real */}
+                {webSocket.logs.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-xs font-mono text-blue-400 font-semibold">📡 LOGS_WEBSOCKET:</div>
+                    <div className="max-h-32 overflow-y-auto bg-blue-500/5 border border-blue-500/20 rounded-lg p-3">
+                      {webSocket.logs.slice(0, 10).map((log: any, index: number) => {
+                        const typeColors = {
+                          'info': 'text-blue-400',
+                          'success': 'text-green-400',
+                          'error': 'text-red-400',
+                          'game': 'text-yellow-400',
+                          'bets-open': 'text-green-300',
+                          'bets-closed': 'text-orange-400'
+                        };
+                        
+                        return (
+                          <div key={`log-${index}-${log.timestamp}`} className="flex items-start gap-2 text-xs font-mono mb-1">
+                            <span className="text-gray-500 flex-shrink-0">
+                              {new Date(log.timestamp).toLocaleTimeString('pt-BR')}
+                            </span>
+                            <span className={typeColors[log.type as keyof typeof typeColors] || 'text-gray-300'}>
+                              {log.message}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 </div>
 
               </div>
@@ -1210,10 +1300,10 @@ export default function DebugPage() {
             <Card className="border-cyan-500/30 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-cyan-400 font-mono">
-                  📊 RELATÓRIO_OPERAÇÕES
+                  📊 RELATÓRIO_BOT
                 </CardTitle>
                 <CardDescription className="text-gray-400 font-mono text-xs">
-                  {`// Estatísticas acumulativas de todas as operações (reseta ao clicar OPERAR)`}
+                  {`// Estatísticas do bot - apostas automáticas (reseta ao clicar OPERAR)`}
                 </CardDescription>
               </CardHeader>
               <CardContent>

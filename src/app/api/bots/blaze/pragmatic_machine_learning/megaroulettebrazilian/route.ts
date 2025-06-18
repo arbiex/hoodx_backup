@@ -9,7 +9,7 @@ interface MegaRouletteConfig {
   tableId?: string;
   language?: string;
   currency?: string;
-  action?: 'bet-connect' | 'bet-place' | 'bet-state' | 'get-websocket-logs' | 'monitor-patterns' | 'get-selected-pattern' | 'clear-selected-pattern' | 'start-auto-betting' | 'stop-auto-betting' | 'get-auto-betting-status' | 'configure-auto-betting' | 'get-operation-report' | 'reset-operation-report';
+  action?: 'authenticate' | 'bet-connect' | 'bet-place' | 'bet-state' | 'get-websocket-logs' | 'monitor-patterns' | 'get-selected-pattern' | 'clear-selected-pattern' | 'start-auto-betting' | 'stop-auto-betting' | 'get-auto-betting-status' | 'configure-auto-betting' | 'get-operation-report' | 'reset-operation-report';
   jsessionId?: string;
   gameConfig?: any;
   martingaleName?: string;
@@ -167,7 +167,22 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Ações de bet disponíveis
+    // Ações disponíveis
+    if (action === 'authenticate') {
+      const authResult = await performAuthentication(userId);
+      if (!authResult.success) {
+        return NextResponse.json({
+          success: false,
+          error: authResult.error
+        }, { status: 401 });
+      }
+      
+      return NextResponse.json({
+        success: true,
+        data: authResult.data
+      });
+    }
+
     if (action === 'bet-connect') {
       return await connectToBettingGame(userId, wsGameConfig);
     }
@@ -436,6 +451,18 @@ async function connectToBettingGame(userId: string, gameConfig: any) {
     console.log('🎮 [BET-CONNECT] Conectando ao jogo para apostas...');
     addWebSocketLog(userId, 'Iniciando conexão ao MegaRoulette...', 'info');
     
+    // ✅ VERIFICAR SE JÁ EXISTE CONEXÃO ATIVA
+    if (activeWebSockets[userId] && activeWebSockets[userId].readyState === 1) {
+      addWebSocketLog(userId, '⚠️ Conexão WebSocket já ativa - usando conexão existente', 'info');
+      return NextResponse.json({
+        success: true,
+        data: {
+          message: 'Conexão WebSocket já ativa',
+          readyForBetting: true
+        }
+      });
+    }
+    
     // Limpar status anterior e parar conexões existentes (sem definir erro)
     stopAllConnections(userId, false);
     resetReconnectionControl(userId);
@@ -511,6 +538,9 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     // Incrementar tentativas apenas se for uma reconexão (não primeira conexão)
     if (control.attempts > 0 || control.lastAttempt > 0) {
       control.attempts++;
+      addWebSocketLog(userId, `🔄 RECONEXÃO #${control.attempts} detectada (última tentativa: ${Math.round((now - control.lastAttempt)/1000)}s atrás)`, 'info');
+    } else {
+      addWebSocketLog(userId, '🆕 PRIMEIRA CONEXÃO WebSocket', 'info');
     }
     control.lastAttempt = now;
 
@@ -784,25 +814,25 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
       // Reconectar apenas em casos específicos de erro de rede
       const control = reconnectionControl[userId];
       
-      // Só reconectar para códigos de erro de rede (não para fechamentos normais)
-      if (code !== 1000 && code !== 1001 && code !== 1005 && code !== 1006) {
-        // Verificar se não excedeu tentativas máximas
-        if (control && control.attempts < control.maxAttempts) {
-          const delay = Math.min((control.backoffDelay || 5000) * Math.pow(1.5, control.attempts), 30000); // Backoff exponencial, max 30s
-          addWebSocketLog(userId, `🔄 Reconectando em ${delay/1000}s (erro de rede)...`, 'info');
+      // ✅ RECONEXÃO MAIS CONSERVADORA: Só reconectar em casos muito específicos
+      if (code === 1006) { // Conexão perdida inesperadamente (erro de rede real)
+        // Verificar se não excedeu tentativas máximas E se conexão era saudável
+        if (control && control.attempts < 2 && connectionHealthy) { // Máximo 2 tentativas
+          const delay = 10000; // Delay fixo de 10 segundos
+          addWebSocketLog(userId, `🔄 Reconectando em ${delay/1000}s (conexão perdida)...`, 'info');
           
           setTimeout(() => {
-            startWebSocketConnection(userId, config);
+            // Verificar se ainda é necessário reconectar
+            if (connectionStatus[userId]?.connected === false) {
+              startWebSocketConnection(userId, config);
+            }
           }, delay);
-          
-          // Aumentar delay para próxima tentativa
-          control.backoffDelay = Math.min(control.backoffDelay * 1.2, 15000);
         } else {
-          addWebSocketLog(userId, '❌ Máximo de tentativas de reconexão atingido', 'error');
+          addWebSocketLog(userId, '❌ Reconexão automática desabilitada (muitas tentativas ou conexão instável)', 'error');
         }
       } else {
-        // Para fechamentos normais (1000, 1001) ou outros códigos, não reconectar automaticamente
-        addWebSocketLog(userId, '🔌 Conexão encerrada (não será reconectada automaticamente)', 'info');
+        // Para todos os outros códigos (incluindo 1000, 1001, 1005), não reconectar
+        addWebSocketLog(userId, `🔌 Conexão encerrada (código: ${code}) - não será reconectada automaticamente`, 'info');
       }
     });
 

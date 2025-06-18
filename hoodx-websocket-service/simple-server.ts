@@ -13,104 +13,73 @@ const wss = new WebSocketServer({ server });
 // Middleware para JSON
 app.use(express.json());
 
-// Interfaces simples
+// Interfaces
 interface UserConnection {
   userId: string;
   ws: WebSocket;
   pragmaticWs: WebSocket | null;
   jsessionId: string | null;
-  isMonitoring: boolean;
-  lastPing: number;
 }
 
-interface GameResult {
-  gameId: string;
-  number: number;
-  color: 'red' | 'black' | 'green';
-  timestamp: number;
-}
-
-// Armazenar conexões ativas
+// Conexões ativas
 const userConnections = new Map<string, UserConnection>();
 
-// Função para autenticar usuário via Edge Function
-async function authenticateUser(userId: string): Promise<{ jsessionId: string; pragmaticUserId: string } | null> {
+// Autenticar via Edge Function
+async function authenticateUser(userId: string): Promise<string | null> {
   try {
-    console.log(`🔑 [AUTH] Iniciando autenticação para: ${userId.substring(0, 8)}...`);
+    console.log(`🔑 AUTH start: ${userId.substring(0, 8)}`);
     
-    const edgeFunctionUrl = `${process.env.SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
-    console.log(`📡 [AUTH] Chamando: ${edgeFunctionUrl}`);
-    
-    const requestBody = {
-      action: 'authenticate',
-      user_id: userId
-    };
-    
-    console.log(`📤 [AUTH] Enviando:`, { action: requestBody.action, user_id: userId.substring(0, 8) + '...' });
-    
-    const response = await fetch(edgeFunctionUrl, {
+    const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/blaze_history_megaroulette`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({
+        action: 'authenticate',
+        user_id: userId
+      })
     });
 
-    console.log(`📥 [AUTH] Resposta HTTP: ${response.status} ${response.statusText}`);
+    console.log(`📡 AUTH response: ${response.status}`);
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ [AUTH] Erro ${response.status}:`, errorText.substring(0, 200));
+      console.error(`❌ AUTH failed: ${response.status}`);
       return null;
     }
 
     const result = await response.json();
-    console.log(`📋 [AUTH] Resultado:`, { 
-      success: result.success, 
-      hasData: !!result.data,
-      hasJsessionId: !!result.data?.jsessionId,
-      error: result.error 
-    });
     
     if (!result.success || !result.data?.jsessionId) {
-      console.error(`❌ [AUTH] Edge Function falhou:`, result.error || 'Sem jsessionId');
+      console.error(`❌ AUTH no session: ${result.error}`);
       return null;
     }
 
-    console.log(`✅ [AUTH] SUCESSO! JSESSIONID: ${result.data.jsessionId.substring(0, 10)}...`);
-    
-    return {
-      jsessionId: result.data.jsessionId,
-      pragmaticUserId: result.data.pragmaticUserId || userId
-    };
+    console.log(`✅ AUTH success: ${result.data.jsessionId.substring(0, 10)}...`);
+    return result.data.jsessionId;
     
   } catch (error: any) {
-    console.error(`❌ [AUTH] ERRO CATCH:`, {
-      name: error.name,
-      message: error.message,
-      code: error.code
-    });
+    console.error(`❌ AUTH error: ${error.message}`);
     return null;
   }
 }
 
-// Função para conectar ao Pragmatic Play
+// Conectar ao Pragmatic
 function connectToPragmatic(userConnection: UserConnection): void {
   if (!userConnection.jsessionId) {
-    console.error(`❌ Sem JSESSIONID para usuário ${userConnection.userId}`);
+    console.error(`❌ No JSESSIONID for ${userConnection.userId.substring(0, 8)}`);
     return;
   }
 
   try {
     const wsUrl = `wss://games.pragmaticplaylive.net/websocket?JSESSIONID=${userConnection.jsessionId}`;
-    console.log(`🔌 Conectando ao Pragmatic Play...`);
+    console.log(`🔌 Connecting to Pragmatic: ${userConnection.userId.substring(0, 8)}`);
 
     const pragmaticWs = new WebSocket(wsUrl);
     userConnection.pragmaticWs = pragmaticWs;
 
     pragmaticWs.onopen = () => {
-      console.log(`✅ Conectado ao Pragmatic Play`);
+      console.log(`✅ PRAGMATIC CONNECTED: ${userConnection.userId.substring(0, 8)}`);
       sendToUser(userConnection.userId, {
         type: 'pragmatic_connected',
         message: 'Conectado ao Pragmatic Play'
@@ -130,7 +99,6 @@ function connectToPragmatic(userConnection: UserConnection): void {
             const number = parseInt(numberMatch[1]);
             const gameId = gameIdMatch[1];
             
-            // Determinar cor
             let color: 'red' | 'black' | 'green' = 'green';
             if ([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36].includes(number)) {
               color = 'red';
@@ -138,17 +106,13 @@ function connectToPragmatic(userConnection: UserConnection): void {
               color = 'black';
             }
 
-            const gameResult: GameResult = {
+            console.log(`🎯 RESULT: ${number} (${color})`);
+            sendToUser(userConnection.userId, {
+              type: 'game_result',
               gameId,
               number,
               color,
               timestamp: Date.now()
-            };
-
-            console.log(`🎯 Resultado: ${number} (${color})`);
-            sendToUser(userConnection.userId, {
-              type: 'game_result',
-              ...gameResult
             });
           }
         }
@@ -156,11 +120,9 @@ function connectToPragmatic(userConnection: UserConnection): void {
         // Game started
         if (message.includes('gameStarted')) {
           const gameIdMatch = message.match(/"gameId":"([^"]+)"/);
-          const gameId = gameIdMatch?.[1] || 'N/A';
-          
           sendToUser(userConnection.userId, {
             type: 'game_started',
-            gameId: gameId
+            gameId: gameIdMatch?.[1] || 'N/A'
           });
         }
 
@@ -172,37 +134,37 @@ function connectToPragmatic(userConnection: UserConnection): void {
         }
 
       } catch (error) {
-        console.error(`❌ Erro ao processar mensagem do Pragmatic:`, error);
+        console.error(`❌ Message error: ${error}`);
       }
     };
 
     pragmaticWs.onerror = (error) => {
-      console.error(`❌ Erro WebSocket Pragmatic:`, error);
+      console.error(`❌ PRAGMATIC ERROR: ${error}`);
       sendToUser(userConnection.userId, {
         type: 'pragmatic_error',
-        message: 'Erro na conexão com Pragmatic Play'
+        message: 'Erro na conexão Pragmatic'
       });
     };
 
     pragmaticWs.onclose = (event) => {
-      console.log(`🔌 Desconectado do Pragmatic Play - Código: ${event.code}`);
+      console.log(`🔌 PRAGMATIC CLOSED: ${event.code}`);
       userConnection.pragmaticWs = null;
       sendToUser(userConnection.userId, {
         type: 'pragmatic_disconnected',
-        message: 'Desconectado do Pragmatic Play'
+        message: 'Desconectado do Pragmatic'
       });
     };
 
   } catch (error) {
-    console.error(`❌ Erro ao conectar ao Pragmatic Play:`, error);
+    console.error(`❌ PRAGMATIC CONNECT ERROR: ${error}`);
     sendToUser(userConnection.userId, {
       type: 'pragmatic_error',
-      message: 'Falha ao conectar com Pragmatic Play'
+      message: 'Falha ao conectar Pragmatic'
     });
   }
 }
 
-// Função para enviar mensagem para usuário
+// Enviar mensagem
 function sendToUser(userId: string, data: any): void {
   const userConnection = userConnections.get(userId);
   if (userConnection && userConnection.ws.readyState === WebSocket.OPEN) {
@@ -210,137 +172,98 @@ function sendToUser(userId: string, data: any): void {
   }
 }
 
-// Rotas básicas
+// Rotas
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'Server is healthy',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    connections: userConnections.size
   });
 });
 
 app.get('/connections', (req, res) => {
   const connections = Array.from(userConnections.entries()).map(([userId, conn]) => ({
     userId: userId.substring(0, 8) + '...',
-    isMonitoring: conn.isMonitoring,
     hasJSessionId: !!conn.jsessionId,
-    pragmaticConnected: conn.pragmaticWs?.readyState === WebSocket.OPEN,
-    lastPing: new Date(conn.lastPing).toISOString()
+    pragmaticConnected: conn.pragmaticWs?.readyState === WebSocket.OPEN
   }));
 
   res.json({ 
-    totalConnections: userConnections.size,
+    total: userConnections.size,
     connections 
   });
 });
 
-// WebSocket handler
+// WebSocket
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url!, `http://${req.headers.host}`);
   const userId = url.searchParams.get('userId');
 
   if (!userId) {
-    ws.close(1008, 'userId é obrigatório');
+    ws.close(1008, 'userId obrigatório');
     return;
   }
 
-  console.log(`🔌 Nova conexão WebSocket para usuário: ${userId.substring(0, 8)}...`);
+  console.log(`🔌 NEW CONNECTION: ${userId.substring(0, 8)}`);
 
-  // Criar conexão do usuário
   const userConnection: UserConnection = {
     userId,
     ws,
     pragmaticWs: null,
-    jsessionId: null,
-    isMonitoring: false,
-    lastPing: Date.now()
+    jsessionId: null
   };
 
   userConnections.set(userId, userConnection);
 
-  // Enviar mensagem de boas-vindas
+  // Welcome
   ws.send(JSON.stringify({
     type: 'welcome',
-    message: `Conectado ao servidor HoodX Railway`
+    message: 'Conectado ao Railway'
   }));
 
-  // Auto-iniciar monitoramento IMEDIATAMENTE
-  console.log(`🎯 Iniciando monitoramento IMEDIATO para usuário ${userId.substring(0, 8)}...`);
-  
-  // Autenticar usuário (sem delay)
-  authenticateUser(userId).then(authResult => {
-    if (authResult && ws.readyState === WebSocket.OPEN) {
-      console.log(`✅ Autenticação OK para ${userId.substring(0, 8)}, conectando ao Pragmatic...`);
-      userConnection.jsessionId = authResult.jsessionId;
-      userConnection.isMonitoring = true;
-      
-      // Conectar ao Pragmatic Play
+  // CONECTAR IMEDIATAMENTE
+  console.log(`⚡️ IMMEDIATE AUTH: ${userId.substring(0, 8)}`);
+  authenticateUser(userId).then(jsessionId => {
+    if (jsessionId && ws.readyState === WebSocket.OPEN) {
+      console.log(`⚡️ AUTH OK, connecting Pragmatic: ${userId.substring(0, 8)}`);
+      userConnection.jsessionId = jsessionId;
       connectToPragmatic(userConnection);
     } else {
-      console.log(`❌ Autenticação FALHOU para ${userId.substring(0, 8)}`);
+      console.log(`❌ AUTH FAILED: ${userId.substring(0, 8)}`);
       sendToUser(userId, {
         type: 'authentication_error',
         message: 'Falha na autenticação'
       });
     }
-  }).catch(error => {
-    console.error(`❌ Erro na autenticação para ${userId.substring(0, 8)}:`, error);
-    sendToUser(userId, {
-      type: 'authentication_error',
-      message: 'Erro na autenticação'
-    });
   });
 
-  // Handlers do WebSocket
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data.toString());
-      
-      switch (message.type) {
-        case 'ping':
-          userConnection.lastPing = Date.now();
-          ws.send(JSON.stringify({ type: 'pong' }));
-          break;
-          
-        case 'start_monitoring':
-          // Já iniciado automaticamente
-          break;
-          
-        case 'stop_monitoring':
-          userConnection.isMonitoring = false;
-          if (userConnection.pragmaticWs) {
-            userConnection.pragmaticWs.close();
-            userConnection.pragmaticWs = null;
-          }
-          break;
+      if (message.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
       }
     } catch (error) {
-      console.error('❌ Erro ao processar mensagem WebSocket:', error);
+      console.error('❌ Message error:', error);
     }
   });
 
   ws.on('close', () => {
-    console.log(`🔌 Desconectado: ${userId.substring(0, 8)}...`);
-    
-    // Fechar conexão Pragmatic se existir
+    console.log(`🔌 DISCONNECTED: ${userId.substring(0, 8)}`);
     if (userConnection.pragmaticWs) {
       userConnection.pragmaticWs.close();
     }
-    
-    // Remover da lista de conexões
     userConnections.delete(userId);
   });
 
   ws.on('error', (error) => {
-    console.error(`❌ Erro WebSocket para ${userId.substring(0, 8)}:`, error);
+    console.error(`❌ WS ERROR: ${error}`);
   });
 });
 
-// Iniciar servidor
+// Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Servidor Railway rodando na porta ${PORT}`);
-  console.log(`🔗 WebSocket disponível em: ws://localhost:${PORT}`);
-  console.log(`💚 Health check: http://localhost:${PORT}/health`);
+  console.log(`🚀 Railway server running on port ${PORT}`);
 }); 

@@ -410,7 +410,9 @@ app.get('/connections', (req, res) => {
     userId: userId.substring(0, 8) + '...', // Mascarar ID por privacidade
     isMonitoring: conn.isMonitoring,
     hasJSessionId: !!conn.jsessionId,
+    jsessionIdPreview: conn.jsessionId ? conn.jsessionId.substring(0, 10) + '...' : null,
     pragmaticConnected: conn.pragmaticWs?.readyState === WebSocket.OPEN,
+    pragmaticReadyState: conn.pragmaticWs?.readyState || null,
     lastPing: new Date(conn.lastPing).toISOString()
   }));
 
@@ -418,6 +420,102 @@ app.get('/connections', (req, res) => {
     totalConnections: userConnections.size,
     connections 
   });
+});
+
+// Endpoint específico para testar conexão Pragmatic
+app.post('/test-pragmatic', async (req, res) => {
+  const { userId = 'test-user' } = req.body;
+  
+  try {
+    console.log(`🧪 Testando conexão Pragmatic para usuário: ${userId}`);
+    
+    // 1. Testar autenticação
+    const authResult = await authenticateUser(userId);
+    if (!authResult) {
+      res.json({
+        success: false,
+        step: 'authentication',
+        error: 'Falha na autenticação'
+      });
+      return;
+    }
+    
+    console.log(`✅ Autenticação OK: ${authResult.jsessionId.substring(0, 10)}...`);
+    
+    // 2. Testar conexão WebSocket Pragmatic
+    new Promise<void>((resolve) => {
+      const wsUrl = `wss://games.pragmaticplaylive.net/websocket?JSESSIONID=${authResult.jsessionId}`;
+      console.log(`🔌 Testando conexão: ${wsUrl}`);
+      
+      const testWs = new WebSocket(wsUrl);
+      let connected = false;
+      
+      const timeout = setTimeout(() => {
+        if (!connected) {
+          testWs.close();
+          res.json({
+            success: false,
+            step: 'websocket_timeout',
+            error: 'Timeout na conexão WebSocket',
+            jsessionId: authResult.jsessionId.substring(0, 10) + '...',
+            wsUrl: 'wss://games.pragmaticplaylive.net/websocket?JSESSIONID=***'
+          });
+          resolve();
+        }
+      }, 10000);
+      
+      testWs.onopen = () => {
+        connected = true;
+        clearTimeout(timeout);
+        testWs.close();
+        
+        res.json({
+          success: true,
+          step: 'websocket_connected',
+          message: 'Conexão Pragmatic OK',
+          jsessionId: authResult.jsessionId.substring(0, 10) + '...',
+          wsUrl: 'wss://games.pragmaticplaylive.net/websocket?JSESSIONID=***'
+        });
+        resolve();
+      };
+      
+      testWs.onerror = () => {
+        connected = false;
+        clearTimeout(timeout);
+        
+        res.json({
+          success: false,
+          step: 'websocket_error',
+          error: 'Erro na conexão WebSocket',
+          jsessionId: authResult.jsessionId.substring(0, 10) + '...',
+          wsUrl: 'wss://games.pragmaticplaylive.net/websocket?JSESSIONID=***'
+        });
+        resolve();
+      };
+      
+      testWs.onclose = (event) => {
+        if (!connected) {
+          clearTimeout(timeout);
+          res.json({
+            success: false,
+            step: 'websocket_closed',
+            error: `WebSocket fechou: código ${event.code}`,
+            jsessionId: authResult.jsessionId.substring(0, 10) + '...',
+            wsUrl: 'wss://games.pragmaticplaylive.net/websocket?JSESSIONID=***'
+          });
+          resolve();
+        }
+      };
+    });
+    
+  } catch (error: any) {
+    console.error('❌ Erro no teste Pragmatic:', error);
+    res.json({
+      success: false,
+      step: 'general_error',
+      error: error.message
+    });
+  }
 });
 
 // Cleanup: Verificar conexões órfãs a cada 5 minutos

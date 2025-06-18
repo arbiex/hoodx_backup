@@ -287,6 +287,28 @@ wss.on('connection', (ws, req) => {
     message: `Conectado ao servidor HoodX Railway para usuário ${userId}`
   }));
 
+  // Automaticamente iniciar monitoramento após conexão
+  setTimeout(async () => {
+    if (ws.readyState === WebSocket.OPEN) {
+      console.log(`🎯 Auto-iniciando monitoramento para usuário ${userId}`);
+      
+      // Autenticar usuário
+      const authResult = await authenticateUser(userId);
+      if (authResult) {
+        userConnection.jsessionId = authResult.jsessionId;
+        userConnection.isMonitoring = true;
+        
+        // Conectar ao Pragmatic Play
+        connectToPragmatic(userConnection);
+      } else {
+        sendToUser(userId, {
+          type: 'error',
+          message: 'Falha na autenticação automática'
+        });
+      }
+    }
+  }, 2000); // Aguardar 2 segundos após conexão
+
   // Lidar com mensagens do cliente
   ws.on('message', async (data) => {
     try {
@@ -385,14 +407,17 @@ app.get('/health', (req, res) => {
 // Rota para listar conexões ativas (para debug)
 app.get('/connections', (req, res) => {
   const connections = Array.from(userConnections.entries()).map(([userId, conn]) => ({
-    userId,
+    userId: userId.substring(0, 8) + '...', // Mascarar ID por privacidade
     isMonitoring: conn.isMonitoring,
     hasJSessionId: !!conn.jsessionId,
     pragmaticConnected: conn.pragmaticWs?.readyState === WebSocket.OPEN,
     lastPing: new Date(conn.lastPing).toISOString()
   }));
 
-  res.json({ connections });
+  res.json({ 
+    totalConnections: userConnections.size,
+    connections 
+  });
 });
 
 // Cleanup: Verificar conexões órfãs a cada 5 minutos

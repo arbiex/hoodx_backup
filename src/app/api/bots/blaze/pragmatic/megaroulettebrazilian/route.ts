@@ -1223,7 +1223,7 @@ async function checkForNewPatterns(userId: string) {
 
     // Chamar edge function para buscar padrões
     console.log('🔍 [PATTERN-CHECK] Buscando padrões na edge function...');
-    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
+    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, Square, RefreshCw, Zap, Key, Settings } from 'lucide-react';
+import { Play, Square, RefreshCw, Zap, Key, Settings, PlayCircle, StopCircle } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import DebugStrategyModal from '@/components/DebugStrategyModal';
 import StopOperationModal from '@/components/StopOperationModal';
@@ -1517,15 +1517,15 @@ export default function DebugPage() {
                     {waitingForPattern ? (
                       <RefreshCw className="h-4 w-4 animate-spin mr-2" />
                     ) : selectedPattern ? (
-                      '🗑️'
+                      <StopCircle className="h-4 w-4 mr-2" />
                     ) : (
-                      '🎯'
+                      <PlayCircle className="h-4 w-4 mr-2" />
                     )}
                     {waitingForPattern 
                       ? 'AGUARDANDO_PRÓXIMO_RESULTADO...' 
                       : selectedPattern 
-                        ? 'PARAR_DE_OPERAR'
-                        : 'COMEÇAR_A_OPERAR'
+                        ? 'PARAR_OPERAÇÕES'
+                        : 'INICIAR_OPERAÇÕES'
                     }
                   </Button>
 
@@ -1550,7 +1550,7 @@ export default function DebugPage() {
                         {autoBettingLoading ? (
                           <RefreshCw className="h-4 w-4 animate-spin mr-2" />
                         ) : (
-                          '🛑'
+                          <Square className="h-4 w-4 mr-2" />
                         )}
                         {autoBettingLoading ? 'PARANDO...' : 'PARAR_APOSTAS'}
                       </Button>

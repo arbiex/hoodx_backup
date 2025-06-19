@@ -466,8 +466,8 @@ export default function DebugPage() {
 
   // Função para iniciar espera por padrão E ativar apostas automáticas
   const handleSelectPattern = async () => {
-    if (selectedPattern) {
-      // Se já tem padrão, parar apostas e limpar seleção
+    if (selectedPattern || waitingForPattern) {
+      // Se já tem padrão ou está aguardando padrão, parar operação
       try {
         // Primeiro parar apostas automáticas se estiverem ativas
         if (autoBettingActive) {
@@ -503,7 +503,7 @@ export default function DebugPage() {
         const result = await response.json();
         if (result.success) {
           setSelectedPattern(null);
-          setWaitingForPattern(result.data.waitingForNewSelection || false);
+          setWaitingForPattern(false); // Parar de aguardar também
         }
       } catch (error) {
         console.error('Erro ao limpar padrão:', error);

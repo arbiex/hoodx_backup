@@ -801,14 +801,24 @@ export default function BotPage() {
       console.log('🚀 Iniciando operação completa...');
 
       // 1️⃣ Conectar ao WebSocket Railway
-              console.log('🔌 Conectando Railway WebSocket...');
+      console.log('🔌 Conectando Railway WebSocket...');
       await webSocket.connect();
 
-      // Aguardar conexão Railway estabelecer
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Aguardar conexão Railway estabelecer com timeout maior
+      console.log('⏳ Aguardando conexão Railway (até 10 segundos)...');
+      let railwayConnected = false;
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (webSocket.isConnected) {
+          railwayConnected = true;
+          console.log(`✅ Railway conectado em ${i + 1} segundos`);
+          break;
+        }
+        console.log(`⏳ Tentativa ${i + 1}/10 - Railway ainda conectando...`);
+      }
 
-      if (!webSocket.isConnected) {
-        setOperationError('Falha ao conectar ao servidor Railway');
+      if (!railwayConnected) {
+        setOperationError('Timeout na conexão com servidor Railway (10s)');
         setOperationStatus('ERRO');
         return;
       }
@@ -821,16 +831,35 @@ export default function BotPage() {
       setOperationStatus('CONECTANDO_PRAGMATIC');
       setOperationError(null);
 
-      // Aguardar um pouco mais para Pragmatic conectar
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Aguardar Pragmatic conectar com timeout inteligente
+      console.log('⏳ Aguardando conexão Pragmatic Play (até 15 segundos)...');
+      let pragmaticConnected = false;
+      for (let i = 0; i < 15; i++) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Verificar se Pragmatic conectou via estado do hook
+        if (webSocket.pragmaticConnected) {
+          pragmaticConnected = true;
+          console.log(`✅ Pragmatic conectado em ${i + 1} segundos`);
+          break;
+        }
 
-      // Verificar se Pragmatic conectou
-      const pragmaticConnectedLog = webSocket.logs.find(log => 
-        log.message.includes('Conectado ao Pragmatic Play') ||
-        log.message.includes('🎰 Conectado ao Pragmatic Play')
-      );
+        // Verificar também via logs como backup
+        const pragmaticLog = webSocket.logs.find(log => 
+          log.message.includes('Conectado ao Pragmatic Play') ||
+          log.message.includes('🎰 Conectado ao Pragmatic Play')
+        );
+        
+        if (pragmaticLog) {
+          pragmaticConnected = true;
+          console.log(`✅ Pragmatic conectado via logs em ${i + 1} segundos`);
+          break;
+        }
 
-      if (pragmaticConnectedLog) {
+        console.log(`⏳ Tentativa ${i + 1}/15 - Pragmatic ainda conectando...`);
+      }
+
+      if (pragmaticConnected) {
         setOperationStatus('OPERANDO');
         console.log('✅ Sistema completo conectado (Railway + Pragmatic)');
       } else {

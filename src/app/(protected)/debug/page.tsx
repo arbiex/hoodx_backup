@@ -471,7 +471,23 @@ export default function DebugPage() {
       try {
         console.log('🛑 Parando operação - Estado:', { selectedPattern: !!selectedPattern, waitingForPattern });
         
-        // Primeiro parar apostas automáticas se estiverem ativas
+        // 1. Parar monitoramento de padrões no backend
+        const stopMonitoringResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId: userIdRef.current,
+            action: 'stop-pattern-monitoring'
+          })
+        });
+
+        if (stopMonitoringResponse.ok) {
+          console.log('✅ Monitoramento de padrões parado no backend');
+        }
+        
+        // 2. Parar apostas automáticas se estiverem ativas
         if (autoBettingActive) {
           const stopResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
             method: 'POST',
@@ -490,7 +506,7 @@ export default function DebugPage() {
           }
         }
 
-        // Depois limpar padrão selecionado
+        // 3. Limpar padrão selecionado
         const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
           method: 'POST',
           headers: {
@@ -507,12 +523,12 @@ export default function DebugPage() {
           setSelectedPattern(null);
           setWaitingForPattern(false); // Parar de aguardar também
           
-          // IMPORTANTE: Parar o monitoramento de padrões no frontend também
+          // 4. Parar o monitoramento de padrões no frontend também
           setIsRunning(false);
           monitoringRef.current = false;
           setError(null);
           
-          console.log('✅ Operação parada - Voltando ao estado INICIAR_OPERAÇÕES');
+          console.log('✅ Operação parada completamente - Voltando ao estado INICIAR_OPERAÇÕES');
         }
       } catch (error) {
         console.error('Erro ao limpar padrão:', error);

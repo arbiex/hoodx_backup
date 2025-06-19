@@ -9,7 +9,7 @@ interface MegaRouletteConfig {
   tableId?: string;
   language?: string;
   currency?: string;
-  action?: 'bet-connect' | 'bet-place' | 'bet-state' | 'get-websocket-logs' | 'monitor-patterns' | 'get-selected-pattern' | 'clear-selected-pattern' | 'start-auto-betting' | 'stop-auto-betting' | 'get-auto-betting-status' | 'configure-auto-betting' | 'get-operation-report' | 'reset-operation-report' | 'stop-operation';
+  action?: 'bet-connect' | 'bet-place' | 'bet-state' | 'get-websocket-logs' | 'monitor-patterns' | 'stop-pattern-monitoring' | 'get-selected-pattern' | 'clear-selected-pattern' | 'start-auto-betting' | 'stop-auto-betting' | 'get-auto-betting-status' | 'configure-auto-betting' | 'get-operation-report' | 'reset-operation-report' | 'stop-operation';
   jsessionId?: string;
   gameConfig?: any;
   martingaleName?: string;
@@ -186,6 +186,14 @@ export async function POST(request: NextRequest) {
 
     if (action === 'monitor-patterns') {
       return await startPatternMonitoring(userId);
+    }
+
+    if (action === 'stop-pattern-monitoring') {
+      stopPatternMonitoring(userId);
+      return NextResponse.json({
+        success: true,
+        message: 'Monitoramento de padrões parado com sucesso'
+      });
     }
 
     if (action === 'get-selected-pattern') {
@@ -1398,6 +1406,7 @@ export async function GET(request: NextRequest) {
       'POST (action: bet-state)': 'Obter estado do jogo para apostas',
       'POST (action: get-websocket-logs)': 'Obter logs do WebSocket',
       'POST (action: monitor-patterns)': 'Iniciar monitoramento de padrões',
+      'POST (action: stop-pattern-monitoring)': 'Parar monitoramento de padrões',
       'POST (action: get-selected-pattern)': 'Obter padrão selecionado',
       'POST (action: clear-selected-pattern)': 'Limpar padrão selecionado',
       'POST (action: start-auto-betting)': 'Iniciar apostas automáticas',
@@ -1415,6 +1424,7 @@ export async function GET(request: NextRequest) {
       'bet-state': 'Requer: userId, gameConfig (opcional)',
       'get-websocket-logs': 'Requer: userId - Retorna logs e resultados',
       'monitor-patterns': 'Requer: userId - Inicia monitoramento automático de padrões',
+      'stop-pattern-monitoring': 'Requer: userId - Para monitoramento automático de padrões',
       'get-selected-pattern': 'Requer: userId - Retorna padrão selecionado automaticamente',
       'clear-selected-pattern': 'Requer: userId - Remove padrão atual e reativa seleção',
       'start-auto-betting': 'Requer: userId - Inicia apostas automáticas baseadas no padrão selecionado',

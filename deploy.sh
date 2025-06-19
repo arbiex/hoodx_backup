@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configurações (ajuste conforme necessário)
 VPS_USER="root"  # ou seu usuário
-VPS_HOST="seu-vps-ip-ou-dominio"
+VPS_HOST="162.240.225.25"
 VPS_PATH="/var/www/hoodx"  # caminho no VPS onde está o projeto
 BRANCH="main"
 

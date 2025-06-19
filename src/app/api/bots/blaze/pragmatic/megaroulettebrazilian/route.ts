@@ -393,10 +393,21 @@ async function getWebSocketLogs(userId: string) {
     const results = gameResults[userId] || [];
     const status = connectionStatus[userId] || { connected: false, lastUpdate: Date.now() };
     
-    // Se conexão falhou recentemente (mas não durante preparação de nova conexão), retornar erro para parar polling
-    if (status.error && status.error !== 'Operação parada pelo usuário' && (Date.now() - status.lastUpdate) < 30000) { // 30 segundos
+    // Só retornar erro 400 para erros críticos que realmente devem parar o polling
+    const criticalErrors = [
+      'Máximo de tentativas de reconexão atingido',
+      'Falha na autenticação',
+      'Operação parada pelo usuário'
+    ];
+    
+    const isCriticalError = status.error && criticalErrors.some(critical => 
+      status.error!.includes(critical)
+    );
+    
+    // Só parar polling para erros críticos recentes (< 60 segundos)
+    if (isCriticalError && (Date.now() - status.lastUpdate) < 60000) {
       return NextResponse.json({
-      success: false,
+        success: false,
         error: status.error,
         shouldStopPolling: true
       }, { status: 400 });

@@ -469,6 +469,8 @@ export default function DebugPage() {
     if (selectedPattern || waitingForPattern) {
       // Se já tem padrão ou está aguardando padrão, parar operação
       try {
+        console.log('🛑 Parando operação - Estado:', { selectedPattern: !!selectedPattern, waitingForPattern });
+        
         // Primeiro parar apostas automáticas se estiverem ativas
         if (autoBettingActive) {
           const stopResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
@@ -504,6 +506,13 @@ export default function DebugPage() {
         if (result.success) {
           setSelectedPattern(null);
           setWaitingForPattern(false); // Parar de aguardar também
+          
+          // IMPORTANTE: Parar o monitoramento de padrões no frontend também
+          setIsRunning(false);
+          monitoringRef.current = false;
+          setError(null);
+          
+          console.log('✅ Operação parada - Voltando ao estado INICIAR_OPERAÇÕES');
         }
       } catch (error) {
         console.error('Erro ao limpar padrão:', error);

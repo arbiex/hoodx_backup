@@ -486,7 +486,7 @@ async function connectToBettingGame(userId: string, gameConfig: any) {
 }
 
 // Função para iniciar conexão WebSocket para coleta de dados
-function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string }) {
+function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string; serverUrl?: string }) {
   try {
     // Inicializar controle de reconexão se não existir
     if (!reconnectionControl[userId]) {
@@ -514,8 +514,9 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     }
     control.lastAttempt = now;
 
-    // URL CORRETA conforme relatório
-    const wsUrl = `wss://gs9.pragmaticplaylive.net/game?JSESSIONID=${config.jsessionId}&tableId=${config.tableId}`;
+    // URL do WebSocket - usar servidor customizado se fornecido, senão usar o padrão
+    const baseServer = config.serverUrl || 'wss://gs9.pragmaticplaylive.net/game';
+    const wsUrl = `${baseServer}?JSESSIONID=${config.jsessionId}&tableId=${config.tableId}`;
     
     addWebSocketLog(userId, `Conectando ao WebSocket (tentativa ${control.attempts}/${control.maxAttempts}): ${wsUrl}`, 'info');
     
@@ -737,6 +738,40 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
         // Capturar respostas de apostas
         if (message.includes('<lpbet') || message.includes('bet') || message.includes('error') || message.includes('invalid')) {
           addWebSocketLog(userId, `🎰 Resposta de aposta: ${message}`, 'info');
+        }
+
+        // Tratar switch de servidor
+        if (message.includes('<switch') && message.includes('gameServer=')) {
+          const gameServerMatch = message.match(/gameServer="([^"]*)"/);
+          const wsAddressMatch = message.match(/wsAddress="([^"]*)"/);
+          const tableIdMatch = message.match(/tableId="([^"]*)"/);
+          
+          if (gameServerMatch && wsAddressMatch && tableIdMatch) {
+            const newServer = gameServerMatch[1];
+            const newWsAddress = wsAddressMatch[1];
+            const newTableId = tableIdMatch[1];
+            
+            addWebSocketLog(userId, `🔄 Switch de servidor detectado: ${newServer}`, 'info');
+            addWebSocketLog(userId, `📍 Novo endereço: ${newWsAddress}`, 'info');
+            
+            // Fechar conexão atual e reconectar no novo servidor
+            ws.close(1000, 'Server switch');
+            
+                         // Reconectar após 1 segundo no novo servidor
+             setTimeout(() => {
+               const newConfig = {
+                 ...config,
+                 tableId: newTableId,
+                 serverUrl: newWsAddress // Usar o novo endereço WebSocket
+               };
+               
+               addWebSocketLog(userId, `🔄 Reconectando ao novo servidor: ${newWsAddress}`, 'info');
+               
+               startWebSocketConnection(userId, newConfig);
+             }, 1000);
+            
+            return; // Não processar mais esta mensagem
+          }
         }
 
         // Log outras mensagens importantes

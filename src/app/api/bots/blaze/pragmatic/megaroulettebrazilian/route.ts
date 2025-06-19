@@ -1932,66 +1932,53 @@ async function executeAutoBet(userId: string, gameId: string, ws: any) {
     console.log('📤 [AUTO-BET] XML da aposta:', betXml);
     addWebSocketLog(userId, `📤 Enviando XML: ${betXml.replace(/\n/g, ' ').replace(/\s+/g, ' ')}`, 'info');
 
-    // SOLUÇÃO ALTERNATIVA: Usar HTTP POST para enviar aposta (contorna problema do WebSocket mask)
+    // SOLUÇÃO: Usar Buffer para contornar problema do WebSocket mask em produção
     try {
-      console.log('🌐 [AUTO-BET] Enviando aposta via HTTP POST (fallback para produção)');
-      
-      const betUrl = `https://games.pragmaticplaylive.net/api/bet`;
-      const response = await fetch(betUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/xml',
-          'Cookie': `JSESSIONID=${authResult.data!.jsessionId}`,
-          'Origin': 'https://client.pragmaticplaylive.net',
-          'Referer': 'https://client.pragmaticplaylive.net/',
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        },
-        body: betXml
-      });
-
-      if (response.ok) {
-        const responseText = await response.text();
-        console.log('✅ [AUTO-BET] Aposta enviada via HTTP:', responseText);
-        addWebSocketLog(userId, `✅ Aposta HTTP enviada: ${responseText}`, 'success');
-      } else {
-        console.error('❌ [AUTO-BET] Erro HTTP:', response.status, response.statusText);
-        addWebSocketLog(userId, `❌ Erro HTTP ${response.status}: ${response.statusText}`, 'error');
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log('📤 [AUTO-BET] Enviando aposta via WebSocket com Buffer (produção)');
         
-        // Fallback: tentar WebSocket se HTTP falhar
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          console.log('🔄 [AUTO-BET] Tentando WebSocket como fallback...');
+        // Converter XML para Buffer para evitar problema de mask
+        const betBuffer = Buffer.from(betXml, 'utf8');
+        
+        // Tentar enviar como Buffer primeiro
+        try {
+          ws.send(betBuffer);
+          console.log('✅ [AUTO-BET] Aposta enviada via WebSocket (Buffer)');
+          addWebSocketLog(userId, `✅ Aposta enviada via WebSocket (Buffer)`, 'success');
+        } catch (bufferError) {
+          console.log('🔄 [AUTO-BET] Tentando enviar como string...');
+          
+          // Fallback: tentar como string simples
           try {
-            ws.send(betXml);
-            console.log('✅ [AUTO-BET] Aposta enviada via WebSocket (fallback)');
-            addWebSocketLog(userId, `✅ Aposta WebSocket enviada (fallback)`, 'success');
-          } catch (wsError) {
-            console.error('❌ [AUTO-BET] WebSocket também falhou:', wsError);
-            addWebSocketLog(userId, `❌ WebSocket também falhou: ${wsError instanceof Error ? wsError.message : 'Erro desconhecido'}`, 'error');
+            // Usar método alternativo para envio
+            const wsAny = ws as any;
+            if (wsAny._socket && wsAny._socket.write) {
+              // Envio direto via socket
+              const frame = betXml;
+              wsAny._socket.write(frame);
+              console.log('✅ [AUTO-BET] Aposta enviada via socket direto');
+              addWebSocketLog(userId, `✅ Aposta enviada via socket direto`, 'success');
+            } else {
+              // Último recurso: string normal
+              ws.send(betXml);
+              console.log('✅ [AUTO-BET] Aposta enviada via WebSocket (string)');
+              addWebSocketLog(userId, `✅ Aposta enviada via WebSocket (string)`, 'success');
+            }
+          } catch (stringError) {
+            console.error('❌ [AUTO-BET] Todos os métodos WebSocket falharam:', stringError);
+            addWebSocketLog(userId, `❌ Falha completa no WebSocket: ${stringError instanceof Error ? stringError.message : 'Erro desconhecido'}`, 'error');
             return;
           }
-        } else {
-          return;
-        }
-      }
-    } catch (httpError) {
-      console.error('❌ [AUTO-BET] Erro na requisição HTTP:', httpError);
-      addWebSocketLog(userId, `❌ Erro HTTP: ${httpError instanceof Error ? httpError.message : 'Erro desconhecido'}`, 'error');
-      
-      // Fallback: tentar WebSocket se HTTP falhar completamente
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        console.log('🔄 [AUTO-BET] Tentando WebSocket como fallback...');
-        try {
-          ws.send(betXml);
-          console.log('✅ [AUTO-BET] Aposta enviada via WebSocket (fallback)');
-          addWebSocketLog(userId, `✅ Aposta WebSocket enviada (fallback)`, 'success');
-        } catch (wsError) {
-          console.error('❌ [AUTO-BET] WebSocket também falhou:', wsError);
-          addWebSocketLog(userId, `❌ WebSocket também falhou: ${wsError instanceof Error ? wsError.message : 'Erro desconhecido'}`, 'error');
-          return;
         }
       } else {
+        console.error('❌ [AUTO-BET] WebSocket não está ativo:', ws?.readyState);
+        addWebSocketLog(userId, `❌ WebSocket não está ativo (estado: ${ws?.readyState})`, 'error');
         return;
       }
+    } catch (error) {
+      console.error('❌ [AUTO-BET] Erro geral ao enviar aposta:', error);
+      addWebSocketLog(userId, `❌ Erro geral: ${error instanceof Error ? error.message : 'Erro desconhecido'}`, 'error');
+      return;
     }
 
     // Atualizar status

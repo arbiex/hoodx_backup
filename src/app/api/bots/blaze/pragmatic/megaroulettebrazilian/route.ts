@@ -106,8 +106,14 @@ const reconnectionControl: { [userId: string]: {
   backoffDelay: number;
 } } = {};
 
-// Armazenamento para conexões WebSocket ativas
-const activeWebSockets: { [userId: string]: any } = {};
+// Armazenamento para conexões WebSocket ativas com isolamento completo
+const activeWebSockets: { [userId: string]: {
+  ws: any;
+  sessionId: string;
+  createdAt: number;
+  lastActivity: number;
+  isolated: boolean;
+} } = {};
 
 // Controle do estado atual do jogo
 const currentGameState: { [userId: string]: {
@@ -287,7 +293,7 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
       console.log('✅ UUID encontrado para email:', actualUserId);
     }
 
-    // Chamar edge function para autenticação
+    // Chamar edge function para autenticação com headers de cache e isolamento
     const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
     
     const response = await fetch(edgeFunctionUrl, {
@@ -295,10 +301,17 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY}`,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'X-User-Id': actualUserId,
+        'X-Request-Id': `auth-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       },
       body: JSON.stringify({
         action: 'authenticate',
-        user_id: actualUserId
+        user_id: actualUserId,
+        timestamp: Date.now(),
+        request_id: `auth-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
       })
     });
 
@@ -546,8 +559,15 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
       }
     });
 
-    // Armazenar WebSocket ativo
-    activeWebSockets[userId] = ws;
+    // Armazenar WebSocket ativo com isolamento completo
+    const sessionId = `ws-${userId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    activeWebSockets[userId] = {
+      ws: ws,
+      sessionId: sessionId,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      isolated: true
+    };
 
     let gameCount = 0;
     let connectionHealthy = true;
@@ -1235,7 +1255,7 @@ async function checkForNewPatterns(userId: string) {
       return;
     }
 
-    // Chamar edge function para buscar padrões
+    // Chamar edge function para buscar padrões com isolamento completo
     console.log('🔍 [PATTERN-CHECK] Buscando padrões na edge function...');
     const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
     
@@ -1244,10 +1264,17 @@ async function checkForNewPatterns(userId: string) {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY}`,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'X-User-Id': userId,
+        'X-Request-Id': `patterns-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       },
       body: JSON.stringify({
         action: 'get_patterns',
-        user_id: userId
+        user_id: userId,
+        timestamp: Date.now(),
+        request_id: `patterns-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
       })
     });
 
@@ -1330,7 +1357,7 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
   // Fechar WebSocket ativo se existir
   if (activeWebSockets[userId]) {
     try {
-      activeWebSockets[userId].close();
+      activeWebSockets[userId].ws.close();
       delete activeWebSockets[userId];
       addWebSocketLog(userId, '🔌 WebSocket fechado', 'info');
     } catch (error) {
@@ -1718,20 +1745,20 @@ async function startAutoBetting(userId: string) {
     }
 
     // Verificar se há um jogo ativo AGORA para apostar imediatamente
-    const ws = activeWebSockets[userId];
+    const wsContainer = activeWebSockets[userId];
     const gameState = currentGameState[userId];
     
-    if (ws && ws.readyState === 1 && gameState?.gameId && gameState?.bettingOpen) {
+    if (wsContainer && wsContainer.ws.readyState === 1 && gameState?.gameId && gameState?.bettingOpen) {
       // Há um jogo ativo com apostas abertas - apostar IMEDIATAMENTE
       const timeSinceBetsOpen = Date.now() - (gameState.lastBetsOpenTime || 0);
       addWebSocketLog(userId, `🚀 Jogo ativo detectado! Apostando IMEDIATAMENTE no jogo: ${gameState.gameId} (${timeSinceBetsOpen}ms após betsopen)`, 'info');
       
       setTimeout(() => {
-        executeAutoBet(userId, gameState.gameId!, ws);
+        executeAutoBet(userId, gameState.gameId!, wsContainer.ws);
       }, 100);
     } else {
       // Não há jogo ativo ou apostas fechadas - aguardar próximo BETSOPEN
-      const status = !ws ? 'WebSocket desconectado' : 
+      const status = !wsContainer ? 'WebSocket desconectado' : 
                    !gameState?.gameId ? 'Nenhum jogo ativo' : 
                    !gameState?.bettingOpen ? 'Apostas fechadas' : 'Estado desconhecido';
       addWebSocketLog(userId, `⏳ ${status} - Aguardando próximo BETSOPEN para primeira aposta`, 'info');

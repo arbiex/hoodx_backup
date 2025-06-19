@@ -1496,8 +1496,8 @@ export default function DebugPage() {
                     {operationLoading 
                       ? 'CONECTANDO...' 
                       : isOperating 
-                        ? 'PARAR_OPERAÇÃO' 
-                        : 'OPERAR'
+                        ? 'DESCONECTAR' 
+                        : 'CONECTAR'
                     }
                   </Button>
 
@@ -1524,8 +1524,8 @@ export default function DebugPage() {
                     {waitingForPattern 
                       ? 'AGUARDANDO_PRÓXIMO_RESULTADO...' 
                       : selectedPattern 
-                        ? 'LIMPAR_PADRÃO'
-                        : 'SELECIONAR_PADRÃO'
+                        ? 'PARAR_DE_OPERAR'
+                        : 'COMEÇAR_A_OPERAR'
                     }
                   </Button>
 
@@ -1599,7 +1599,7 @@ export default function DebugPage() {
                   📊 RELATÓRIO_OPERAÇÕES
                 </CardTitle>
                 <CardDescription className="text-gray-400 font-mono text-xs">
-                  {`// Estatísticas acumulativas de todas as operações (reseta ao clicar OPERAR)`}
+                  {`// Estatísticas acumulativas de todas as operações (reseta ao clicar CONECTAR)`}
                 </CardDescription>
               </CardHeader>
               <CardContent>

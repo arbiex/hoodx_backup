@@ -25,6 +25,9 @@ if (missingRecommendedVars.length > 0) {
 }
 
 const nextConfig: NextConfig = {
+  // Configuração para Docker/Fly.io
+  output: 'standalone',
+  
   // Otimizações de performance
   experimental: {
     optimizePackageImports: ['lucide-react'],

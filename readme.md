@@ -1,0 +1,1 @@
+flyctl logs -a hoodx

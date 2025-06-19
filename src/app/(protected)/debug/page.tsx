@@ -51,6 +51,7 @@ export default function DebugPage() {
   const [operationLoading, setOperationLoading] = useState(false);
   const [operationStatus, setOperationStatus] = useState<string>('INATIVO');
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [operationSuccess, setOperationSuccess] = useState<string | null>(null);
   const [websocketLogs, setWebsocketLogs] = useState<Array<{ timestamp: number; message: string; type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' }>>([]);
   const [gameResults, setGameResults] = useState<Array<{ gameId: string; result: string; timestamp: number; number?: number; color?: string }>>([]);
 
@@ -1284,9 +1285,9 @@ export default function DebugPage() {
         console.log('✅ Operação parada com sucesso');
         
         // Mostrar alerta de sucesso
-        setOperationError('Operação encerrada com sucesso');
+        setOperationSuccess('Operação encerrada com sucesso');
         setTimeout(() => {
-          setOperationError(null);
+          setOperationSuccess(null);
         }, 3000);
         
       } else {
@@ -1495,6 +1496,13 @@ export default function DebugPage() {
                 {operationError && (
                   <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
                     <span className="text-xs font-mono text-red-400">{operationError}</span>
+                  </div>
+                )}
+
+                {/* Sucesso */}
+                {operationSuccess && (
+                  <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                    <span className="text-xs font-mono text-green-400">{operationSuccess}</span>
                   </div>
                 )}
 

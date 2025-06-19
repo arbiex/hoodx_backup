@@ -1313,57 +1313,53 @@ export default function DebugPage() {
         <div className="max-w-4xl mx-auto space-y-6">
           
           {/* Blaze Token Card */}
-          <Card className="border-cyan-500/30 backdrop-blur-sm">
-            <CardContent className="p-4">
-              <button
-                onClick={handleOpenModal}
-                className={`
-                  w-full p-4 rounded-2xl border backdrop-blur-sm transition-all duration-300 hover:scale-[1.02]
+          <button
+            onClick={handleOpenModal}
+            className={`
+              w-full p-4 rounded-2xl border backdrop-blur-sm transition-all duration-300 hover:scale-[1.02]
+              ${isConfigured 
+                ? 'bg-green-500/5 border-green-500/30 shadow-lg shadow-green-500/20' 
+                : 'bg-red-500/5 border-red-500/30 shadow-lg shadow-red-500/20'
+              }
+            `}
+            style={{ backgroundColor: isConfigured ? '#131619' : '#1a1416' }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`
+                  p-2 rounded-lg
                   ${isConfigured 
-                    ? 'bg-green-500/5 border-green-500/30 shadow-lg shadow-green-500/20' 
-                    : 'bg-red-500/5 border-red-500/30 shadow-lg shadow-red-500/20'
+                    ? 'bg-green-500/20 text-green-400' 
+                    : 'bg-red-500/20 text-red-400'
                   }
-                `}
-                style={{ backgroundColor: isConfigured ? '#131619' : '#1a1416' }}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`
-                      p-2 rounded-lg
-                      ${isConfigured 
-                        ? 'bg-green-500/20 text-green-400' 
-                        : 'bg-red-500/20 text-red-400'
-                      }
-                    `}>
-                      <Key className="h-5 w-5" />
-                    </div>
-                    <div className="text-left">
-                      <h3 className={`text-sm font-semibold font-mono ${
-                        isConfigured ? 'text-green-400' : 'text-red-400'
-                      }`}>
-                        🔑 ACESSO_BLAZE
-                      </h3>
-                      <p className="text-xs text-gray-400 font-mono">
-                        {`// Credenciais de autenticação para sistema Blaze`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`px-3 py-1 rounded-full text-xs font-mono font-semibold ${
-                      isConfigured 
-                        ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
-                        : 'bg-red-500/20 text-red-400 border border-red-500/30'
-                    }`}>
-                      {isConfigured ? 'CONFIGURADO' : 'NÃO_CONFIGURADO'}
-                    </span>
-                    <Settings className={`h-4 w-4 ${
-                      isConfigured ? 'text-green-400' : 'text-red-400'
-                    }`} />
-                  </div>
+                `}>
+                  <Key className="h-5 w-5" />
                 </div>
-              </button>
-            </CardContent>
-          </Card>
+                <div className="text-left">
+                  <h3 className={`text-sm font-semibold font-mono ${
+                    isConfigured ? 'text-green-400' : 'text-red-400'
+                  }`}>
+                    🔑 ACESSO_BLAZE
+                  </h3>
+                  <p className="text-xs text-gray-400 font-mono">
+                    {`// Credenciais de autenticação para sistema Blaze`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-3 py-1 rounded-full text-xs font-mono font-semibold ${
+                  isConfigured 
+                    ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                    : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                }`}>
+                  {isConfigured ? 'CONFIGURADO' : 'NÃO_CONFIGURADO'}
+                </span>
+                <Settings className={`h-4 w-4 ${
+                  isConfigured ? 'text-green-400' : 'text-red-400'
+                }`} />
+              </div>
+            </div>
+          </button>
 
           {/* Card Operação */}
           <Card className="border-blue-500/30 backdrop-blur-sm">

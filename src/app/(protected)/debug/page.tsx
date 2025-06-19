@@ -1533,29 +1533,12 @@ export default function DebugPage() {
                   {selectedPattern && !autoBettingActive && (
                     <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
                       <div className="text-xs font-mono text-blue-400 text-center">
-                        🤖 Apostas automáticas serão iniciadas automaticamente quando um padrão for selecionado
+                        🤖 Apostas automáticas ativas - Use "PARAR_OPERAÇÕES" para parar detecção de padrões e apostas
                       </div>
                     </div>
                   )}
 
-                  {/* Botão de Parar Apostas Automáticas (Iniciar é automático) */}
-                  {selectedPattern && autoBettingActive && (
-                    <div className="flex justify-center">
-                      <Button 
-                        onClick={handleStopAutoBetting}
-                        disabled={!autoBettingActive || autoBettingLoading}
-                        className="font-mono bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30"
-                        variant="outline"
-                      >
-                        {autoBettingLoading ? (
-                          <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <Square className="h-4 w-4 mr-2" />
-                        )}
-                        {autoBettingLoading ? 'PARANDO...' : 'PARAR_APOSTAS'}
-                      </Button>
-                    </div>
-                  )}
+
 
                   {/* Status das Apostas Automáticas */}
                   {autoBettingStatus && autoBettingStatus.active && (

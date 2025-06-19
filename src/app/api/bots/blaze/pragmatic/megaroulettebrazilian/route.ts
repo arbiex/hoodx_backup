@@ -276,7 +276,7 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
     }
 
     // Chamar edge function para autenticação
-    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
+    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
@@ -1177,7 +1177,7 @@ async function checkForNewPatterns(userId: string) {
 
     // Chamar edge function para buscar padrões
     console.log('🔍 [PATTERN-CHECK] Buscando padrões na edge function...');
-    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
+    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
@@ -1394,7 +1394,7 @@ export async function GET(request: NextRequest) {
         'Validação de valores e limites',
         'Débito automático de créditos',
         'WebSocket para apostas em tempo real',
-        'Autenticação via edge function blaze-mg-pragmatic',
+        'Autenticação via edge function blaze_history_megaroulette',
         'Geração otimizada de ppToken e jsessionId',
         'Coleta automática de logs e resultados',
         'Monitoramento automático de padrões via edge function',
@@ -1406,7 +1406,7 @@ export async function GET(request: NextRequest) {
       ]
     },
     edge_function: {
-      name: 'blaze-mg-pragmatic',
+      name: 'blaze_history_megaroulette',
       actions: ['authenticate', 'get_patterns'],
       description: 'Usa edge function para autenticação, tokens e monitoramento de padrões'
     }

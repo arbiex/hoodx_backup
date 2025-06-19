@@ -276,7 +276,7 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
     }
 
     // Chamar edge function para autenticação
-    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
+    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',

@@ -1562,7 +1562,7 @@ export default function DebugPage() {
                   {selectedPattern && !autoBettingActive && (
                     <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
                       <div className="text-xs font-mono text-blue-400 text-center">
-                        🤖 Apostas automáticas ativas - Use "PARAR_OPERAÇÕES" para parar detecção de padrões e apostas
+                        🤖 Apostas automáticas ativas - Use &quot;PARAR_OPERAÇÕES&quot; para parar detecção de padrões e apostas
                       </div>
                     </div>
                   )}

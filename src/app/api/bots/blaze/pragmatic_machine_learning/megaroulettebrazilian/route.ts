@@ -486,15 +486,15 @@ async function connectToBettingGame(userId: string, gameConfig: any) {
       tableId: gameConfig?.tableId || 'mrbras531mrbr532'
     };
 
-    // Iniciar WebSocket em background para coletar dados
-    startWebSocketConnection(userId, config);
-
-    addWebSocketLog(userId, 'WebSocket iniciado para coleta de dados', 'success');
+    // NÃO iniciar WebSocket local - usar apenas Railway
+    // startWebSocketConnection(userId, config); // REMOVIDO - usar apenas Railway
+    
+    addWebSocketLog(userId, 'Credenciais obtidas - usando conexão Railway', 'success');
       
       return NextResponse.json({
         success: true,
         data: {
-        message: 'Conectado ao jogo para apostas',
+        message: 'Credenciais obtidas para Railway',
         config,
         readyForBetting: true
       }

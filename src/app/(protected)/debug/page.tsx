@@ -4,9 +4,11 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, Square, RefreshCw, Zap } from 'lucide-react';
+import { Play, Square, RefreshCw, Zap, Key, Settings } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import DebugStrategyModal from '@/components/DebugStrategyModal';
+import Modal, { useModal } from '@/components/ui/modal';
+import InlineAlert from '@/components/ui/inline-alert';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -74,6 +76,22 @@ export default function DebugPage() {
   const [strategyModalOpen, setStrategyModalOpen] = useState(false);
   const [strategyLoading, setStrategyLoading] = useState(false);
   
+  // Estados para token da Blaze
+  const blazeConfigModal = useModal();
+  const [blazeToken, setBlazeToken] = useState('');
+  const [isConfigured, setIsConfigured] = useState(false);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [userTokens, setUserTokens] = useState<Array<{
+    casino_name: string;
+    casino_code: string;
+    token: string;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+  }>>([]);
+  const [alertMessage, setAlertMessage] = useState<{ type: 'success' | 'error' | 'warning' | 'info', message: string } | null>(null);
+  
   // Estados para relatório de operações
   const [operationReport, setOperationReport] = useState<{
     summary: {
@@ -107,6 +125,7 @@ export default function DebugPage() {
 
   useEffect(() => {
     checkUser();
+    checkBlazeConfiguration();
     // Buscar relatório inicial
     setTimeout(() => {
       fetchOperationReport();
@@ -137,6 +156,271 @@ export default function DebugPage() {
     if (user?.email) {
       setUserEmail(user.email);
       userIdRef.current = user.id;
+    }
+  };
+
+  const checkBlazeConfiguration = async () => {
+    try {
+      setIsLoadingStatus(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('user_tokens')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('casino_code', 'BLAZE');
+
+      if (error) {
+        console.error('Error checking Blaze configuration:', error);
+        return;
+      }
+
+      setUserTokens(data || []);
+      // Considerar configurado apenas se tem token ativo e não vazio
+      setIsConfigured(data && data.length > 0 && data.some(token => 
+        token.is_active && token.token && token.token.trim() !== ''
+      ));
+    } catch (error) {
+      console.error('Error checking Blaze configuration:', error);
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  };
+
+  const handleOpenModal = () => {
+    const blazeTokenData = userTokens.find(token => token.casino_code === 'BLAZE');
+    const currentToken = blazeTokenData?.token || '';
+    setBlazeToken(currentToken);
+    setAlertMessage(null);
+    blazeConfigModal.openModal();
+  };
+
+  const handleConfigureBlaze = async () => {
+    try {
+      setConfigLoading(true);
+      const tokenValue = blazeToken.trim();
+      
+      console.log('Configurando token:', { tokenValue: tokenValue || 'EMPTY', length: tokenValue.length });
+      
+      // Tentar usar a função RPC primeiro
+      try {
+        const { data, error } = await supabase.rpc('configure_casino_token', {
+          p_casino_name: 'Blaze',
+          p_casino_code: 'BLAZE',
+          p_token: tokenValue || '',
+          p_is_active: tokenValue ? true : false
+        });
+
+        console.log('Resultado RPC:', { data, error });
+
+        // Se a função RPC não existir ou der erro relacionado à constraint, usar abordagem direta
+        if (error && (
+          error.message?.includes('function') && error.message?.includes('does not exist') ||
+          error.message?.includes('unique_active_token') ||
+          error.message?.includes('duplicate key')
+        )) {
+          console.log('RPC falhou, usando abordagem direta...');
+          await handleDirectTokenConfig(tokenValue);
+          return;
+        }
+
+        if (error) {
+          console.error('Error configuring token via RPC:', error);
+          setAlertMessage({
+            type: 'error',
+            message: `Erro no banco de dados: ${error.message || 'Erro desconhecido'}`
+          });
+          return;
+        }
+
+        if (data?.success) {
+          setBlazeToken('');
+          blazeConfigModal.closeModal();
+          setAlertMessage(null);
+          await checkBlazeConfiguration();
+          console.log('Token configurado com sucesso via RPC');
+        } else {
+          console.error('RPC returned error:', data);
+          if (data?.error_type === 'duplicate_token') {
+            setAlertMessage({
+              type: 'error',
+              message: 'Este token já está sendo usado por outro usuário. Verifique se você está usando o token correto da sua conta.'
+            });
+          } else {
+            setAlertMessage({
+              type: 'error',
+              message: data?.error || 'Erro ao configurar token'
+            });
+          }
+        }
+      } catch (rpcError) {
+        console.log('Erro na RPC, usando método direto:', rpcError);
+        await handleDirectTokenConfig(tokenValue);
+      }
+      
+    } catch (error) {
+      console.error('Error configuring token:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Erro interno desconhecido';
+      setAlertMessage({
+        type: 'error',
+        message: `Erro interno: ${errorMessage}`
+      });
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  const handleDirectTokenConfig = async (tokenValue: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setAlertMessage({
+          type: 'error',
+          message: 'Usuário não autenticado'
+        });
+        return;
+      }
+
+      // Para tokens vazios, simplesmente salvar como vazio (agora permitido pela constraint)
+      if (!tokenValue) {
+        console.log('Token vazio - salvando como inativo');
+        
+        // Verificar se já existe um token para este usuário
+        const { data: existingToken } = await supabase
+          .from('user_tokens')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('casino_code', 'BLAZE')
+          .single();
+
+        if (existingToken) {
+          // Atualizar para inativo com token vazio
+          const { error: updateError } = await supabase
+            .from('user_tokens')
+            .update({
+              token: '',
+              is_active: false,
+              updated_at: new Date().toISOString()
+            })
+            .eq('user_id', user.id)
+            .eq('casino_code', 'BLAZE');
+
+          if (updateError) {
+            console.error('Error updating empty token:', updateError);
+            setAlertMessage({
+              type: 'error',
+              message: `Erro ao desativar token: ${updateError.message}`
+            });
+            return;
+          }
+        } else {
+          // Criar novo registro inativo com token vazio
+          const { error: insertError } = await supabase
+            .from('user_tokens')
+            .insert({
+              user_id: user.id,
+              casino_code: 'BLAZE',
+              token: '',
+              is_active: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+
+          if (insertError) {
+            console.error('Error inserting empty token:', insertError);
+            setAlertMessage({
+              type: 'error',
+              message: `Erro ao criar registro inativo: ${insertError.message}`
+            });
+            return;
+          }
+        }
+      } else {
+        // Para tokens não vazios, verificar se o token já existe para outro usuário
+        console.log('Token não vazio - verificando unicidade...');
+        
+        const { data: duplicateCheck } = await supabase
+          .from('user_tokens')
+          .select('user_id')
+          .eq('casino_code', 'BLAZE')
+          .eq('token', tokenValue)
+          .neq('user_id', user.id);
+
+        if (duplicateCheck && duplicateCheck.length > 0) {
+          setAlertMessage({
+            type: 'error',
+            message: 'Este token já está sendo usado por outro usuário. Verifique se você está usando o token correto da sua conta.'
+          });
+          return;
+        }
+
+        // Verificar se já existe um token para este usuário
+        const { data: existingToken } = await supabase
+          .from('user_tokens')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('casino_code', 'BLAZE')
+          .single();
+
+        if (existingToken) {
+          // Atualizar token existente
+          const { error: updateError } = await supabase
+            .from('user_tokens')
+            .update({
+              token: tokenValue,
+              is_active: true,
+              updated_at: new Date().toISOString()
+            })
+            .eq('user_id', user.id)
+            .eq('casino_code', 'BLAZE');
+
+          if (updateError) {
+            console.error('Error updating token:', updateError);
+            setAlertMessage({
+              type: 'error',
+              message: `Erro ao atualizar token: ${updateError.message}`
+            });
+            return;
+          }
+        } else {
+          // Criar novo token
+          const { error: insertError } = await supabase
+            .from('user_tokens')
+            .insert({
+              user_id: user.id,
+              casino_code: 'BLAZE',
+              token: tokenValue,
+              is_active: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+
+          if (insertError) {
+            console.error('Error inserting token:', insertError);
+            setAlertMessage({
+              type: 'error',
+              message: `Erro ao salvar token: ${insertError.message}`
+            });
+            return;
+          }
+        }
+      }
+
+      // Sucesso
+      setBlazeToken('');
+      blazeConfigModal.closeModal();
+      setAlertMessage(null);
+      await checkBlazeConfiguration();
+      console.log('Token configurado com sucesso (método direto)');
+      
+    } catch (error) {
+      console.error('Error in direct token config:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Erro interno desconhecido';
+      setAlertMessage({
+        type: 'error',
+        message: `Erro interno: ${errorMessage}`
+      });
     }
   };
 
@@ -941,17 +1225,58 @@ export default function DebugPage() {
       <div className="relative z-10 p-8">
         <div className="max-w-4xl mx-auto space-y-6">
           
-          {/* Header */}
-          <div className="text-center space-y-2">
-            <h1 className="text-2xl font-bold text-green-400 font-mono">
-              🎯 DEBUG_MEGA_ROULETTE
-            </h1>
-            {userEmail && (
-              <p className="text-gray-400 font-mono text-sm">
-                {`// Usuário: ${userEmail}`}
-              </p>
-            )}
-          </div>
+          {/* Blaze Token Card */}
+          <Card className="border-cyan-500/30 backdrop-blur-sm">
+            <CardContent className="p-4">
+              <button
+                onClick={handleOpenModal}
+                className={`
+                  w-full p-4 rounded-2xl border backdrop-blur-sm transition-all duration-300 hover:scale-[1.02]
+                  ${isConfigured 
+                    ? 'bg-green-500/5 border-green-500/30 shadow-lg shadow-green-500/20' 
+                    : 'bg-red-500/5 border-red-500/30 shadow-lg shadow-red-500/20'
+                  }
+                `}
+                style={{ backgroundColor: isConfigured ? '#131619' : '#1a1416' }}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`
+                      p-2 rounded-lg
+                      ${isConfigured 
+                        ? 'bg-green-500/20 text-green-400' 
+                        : 'bg-red-500/20 text-red-400'
+                      }
+                    `}>
+                      <Key className="h-5 w-5" />
+                    </div>
+                    <div className="text-left">
+                      <h3 className={`text-sm font-semibold font-mono ${
+                        isConfigured ? 'text-green-400' : 'text-red-400'
+                      }`}>
+                        🤖 BOT_MEGA_ROULETTE
+                      </h3>
+                      <p className="text-xs text-gray-400 font-mono">
+                        {`// Credenciais de autenticação para sistema Blaze`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-3 py-1 rounded-full text-xs font-mono font-semibold ${
+                      isConfigured 
+                        ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                        : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                    }`}>
+                      {isConfigured ? 'CONFIGURADO' : 'NÃO_CONFIGURADO'}
+                    </span>
+                    <Settings className={`h-4 w-4 ${
+                      isConfigured ? 'text-green-400' : 'text-red-400'
+                    }`} />
+                  </div>
+                </div>
+              </button>
+            </CardContent>
+          </Card>
 
           {/* Card Operação */}
           <Card className="border-blue-500/30 backdrop-blur-sm">
@@ -1490,6 +1815,79 @@ export default function DebugPage() {
 
         </div>
       </div>
+
+      {/* Modal de Configuração do Token Blaze */}
+      <Modal
+        isOpen={blazeConfigModal.isOpen}
+        onClose={() => {
+          setBlazeToken('');
+          setAlertMessage(null);
+          blazeConfigModal.closeModal();
+        }}
+        title={isConfigured ? "EDITAR_TOKEN_BLAZE" : "CONFIG_BLAZE"}
+        description={isConfigured ? "Atualize seu token de autenticação Blaze" : "Configure seu token de autenticação Blaze"}
+        type="info"
+        actions={{
+          primary: {
+            label: isConfigured ? 'ATUALIZAR_TOKEN' : 'SALVAR_TOKEN',
+            onClick: handleConfigureBlaze,
+            loading: configLoading,
+            disabled: false
+          },
+          secondary: {
+            label: 'CANCELAR',
+            onClick: () => {
+              setBlazeToken('');
+              setAlertMessage(null);
+              blazeConfigModal.closeModal();
+            }
+          }
+        }}
+      >
+        <div className="space-y-4">
+          {alertMessage && (
+            <InlineAlert
+              type={alertMessage.type}
+              message={alertMessage.message}
+              onClose={() => setAlertMessage(null)}
+            />
+          )}
+          
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-gray-300 font-mono">
+              TOKEN_ACESSO
+            </label>
+            <input
+              type="text"
+              value={blazeToken}
+              onChange={(e) => setBlazeToken(e.target.value)}
+              placeholder="Cole seu token Blaze aqui (deixe vazio para ficar offline)..."
+              className="w-full p-3 bg-gray-800/50 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+            />
+            <p className="text-xs text-gray-400 font-mono">
+              {`// Token será criptografado e armazenado com segurança. Deixe vazio para desconectar.`}
+            </p>
+          </div>
+
+          <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <Settings className="h-4 w-4 text-blue-400" />
+              <span className="text-sm font-semibold text-blue-400 font-mono">COMO_OBTER_TOKEN</span>
+            </div>
+            <div className="text-xs text-gray-300 font-mono space-y-1">
+              <p>1. Faça login na sua conta Blaze</p>
+              <p>2. Abra as Ferramentas do Desenvolvedor:</p>
+              <p className="pl-4">• Windows: Pressione F12 ou Ctrl+Shift+I</p>
+              <p className="pl-4">• Mac: Pressione Cmd+Option+I ou F12</p>
+              <p className="pl-4">• Ou clique com botão direito → &quot;Inspecionar Elemento&quot;</p>
+              <p>3. Vá para Application → Local Storage</p>
+              <p>4. Selecione &quot;https://blaze.bet.br&quot;</p>
+              <p>5. Encontre &quot;ACCESS_TOKEN&quot; e copie o valor</p>
+              <p>6. Cole no campo acima</p>
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       {/* Modal de Seleção de Estratégia */}
       <DebugStrategyModal

@@ -65,6 +65,56 @@ export function useMegaRouletteWebSocket({
     setLogs(prev => [newLog, ...prev.slice(0, 49)]); // Manter últimos 50 logs
   }, []);
 
+  // Função para obter credenciais do Pragmatic Play
+  const obtainPragmaticCredentials = useCallback(async () => {
+    if (!userId) {
+      addLog('❌ UserId não disponível para obter credenciais', 'error');
+      return;
+    }
+
+    try {
+      addLog('🔑 Obtendo credenciais do Pragmatic Play...', 'info');
+      
+      const response = await fetch('/api/bots/blaze/pragmatic_machine_learning/megaroulettebrazilian', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: userId,
+          action: 'bet-connect',
+          gameConfig: {
+            tableId: 'mrbras531mrbr532' // Table ID padrão para Brazilian Mega Roulette
+          }
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.data?.config?.jsessionId) {
+        const { jsessionId, tableId } = result.data.config;
+        addLog(`✅ Credenciais obtidas: ${jsessionId.substring(0, 16)}...`, 'success');
+        
+        // Enviar credenciais para o servidor Railway
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'pragmatic_connect',
+            jsessionId: jsessionId,
+            tableId: tableId || 'mrbras531mrbr532'
+          }));
+          addLog('📤 Credenciais enviadas para o servidor Railway', 'info');
+        } else {
+          addLog('❌ WebSocket não está conectado para enviar credenciais', 'error');
+        }
+      } else {
+        addLog(`❌ Erro ao obter credenciais: ${result.error || 'Resposta inválida'}`, 'error');
+        console.log('🔍 Debug - Resposta completa:', result);
+      }
+    } catch (error: any) {
+      addLog(`❌ Erro ao obter credenciais: ${error.message}`, 'error');
+    }
+  }, [userId, addLog]);
+
   // Função para conectar ao nosso servidor WebSocket
   const connectWebSocket = useCallback(async () => {
     if (isConnectingRef.current || wsRef.current?.readyState === WebSocket.OPEN) {
@@ -90,9 +140,10 @@ export function useMegaRouletteWebSocket({
       }
       
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-      const supabaseKey = session.access_token; // Usar access token do usuário
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+      const accessToken = session.access_token;
       
-      const wsUrl = `${RAILWAY_WEBSOCKET_URL}?userId=${userId}&supabaseUrl=${encodeURIComponent(supabaseUrl)}&supabaseKey=${encodeURIComponent(supabaseKey)}`;
+      const wsUrl = `${RAILWAY_WEBSOCKET_URL}?userId=${userId}&supabaseUrl=${encodeURIComponent(supabaseUrl)}&supabaseKey=${encodeURIComponent(supabaseAnonKey)}&accessToken=${encodeURIComponent(accessToken)}`;
       addLog(`🔌 Conectando ao servidor Railway (tentativa ${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`, 'info');
 
       const ws = new WebSocket(wsUrl);
@@ -126,6 +177,12 @@ export function useMegaRouletteWebSocket({
               
             case 'auth_success':
               addLog(`🔐 Autenticação realizada com sucesso`, 'success');
+              // Tentar obter credenciais do Pragmatic Play
+              addLog(`🔄 Iniciando obtenção de credenciais em 1 segundo...`, 'info');
+              setTimeout(() => {
+                addLog(`🔑 Executando obtainPragmaticCredentials...`, 'info');
+                obtainPragmaticCredentials();
+              }, 1000);
               break;
               
             case 'pragmatic_connected':
@@ -134,13 +191,73 @@ export function useMegaRouletteWebSocket({
               break;
               
             case 'pragmatic_disconnected':
-              addLog('🔌 Desconectado do Pragmatic Play', 'info');
+              addLog(`🔌 Desconectado do Pragmatic Play - Code: ${data.code}, Reason: ${data.reason}`, 'info');
               setPragmaticConnected(false);
+              
+              // Se a desconexão não foi intencional (code !== 1000), tentar obter credenciais frescas
+              if (data.code && data.code !== 1000) {
+                addLog('🔄 Tentando obter credenciais frescas para reconexão...', 'info');
+                setTimeout(() => {
+                  obtainPragmaticCredentials();
+                }, 3000);
+              }
+              break;
+              
+            case 'request_fresh_credentials':
+              addLog('🔄 Railway solicitou credenciais frescas', 'info');
+              setTimeout(() => {
+                obtainPragmaticCredentials();
+              }, 1000);
               break;
               
             case 'pragmatic_error':
-              addLog(`❌ Erro Pragmatic: ${data.message}`, 'error');
-              setPragmaticConnected(false);
+              // Filtrar erros de parsing XML (são esperados)
+              if (!data.message.includes('Unexpected token')) {
+                addLog(`❌ Erro Pragmatic: ${data.message}`, 'error');
+              }
+              break;
+              
+            case 'game_started':
+              addLog(`🎮 Novo jogo iniciado: ${data.gameId}`, 'game');
+              break;
+              
+            case 'game_timer':
+              if (data.timeLeft <= 10) {
+                addLog(`⏰ Tempo restante: ${data.timeLeft}s`, 'bets-closed');
+              }
+              break;
+              
+            case 'game_history':
+              addLog(`📊 Histórico recebido: ${data.results.length} resultados`, 'success');
+              // Adicionar resultados do histórico ao início
+              data.results.forEach((result: any) => {
+                setGameResults(prev => {
+                  const exists = prev.some(r => r.number === result.number && r.gameId === result.gameId);
+                  if (!exists) {
+                    return [result, ...prev.slice(0, 49)];
+                  }
+                  return prev;
+                });
+              });
+              break;
+              
+            case 'pragmatic_xml':
+              // Processar mensagens XML específicas sem mostrar todas
+              if (data.message.includes('<timer')) {
+                const timerMatch = data.message.match(/>(\d+)</);
+                if (timerMatch) {
+                  const timeLeft = parseInt(timerMatch[1]);
+                  if (timeLeft <= 5 && timeLeft > 0) {
+                    addLog(`⏰ Apostas encerrando em ${timeLeft}s`, 'bets-closed');
+                  }
+                }
+              } else if (data.message.includes('<game id=')) {
+                const gameIdMatch = data.message.match(/id="([^"]+)"/);
+                if (gameIdMatch) {
+                  addLog(`🎮 Jogo ${gameIdMatch[1]} iniciado`, 'game');
+                }
+              }
+              // Não logar todas as mensagens XML para evitar spam
               break;
               
             case 'pragmatic_message':
@@ -266,12 +383,9 @@ export function useMegaRouletteWebSocket({
     return false;
   }, [addLog]);
 
-  // Auto-conectar quando userId mudar
+  // NÃO conectar automaticamente - apenas quando solicitado
   useEffect(() => {
-    if (userId) {
-      connectWebSocket();
-    }
-    
+    // Cleanup ao desmontar componente
     return () => {
       disconnect();
     };

@@ -1341,7 +1341,7 @@ export default function DebugPage() {
                       <h3 className={`text-sm font-semibold font-mono ${
                         isConfigured ? 'text-green-400' : 'text-red-400'
                       }`}>
-                        🤖 BOT_MEGA_ROULETTE
+                        🔑 ACESSO_BLAZE
                       </h3>
                       <p className="text-xs text-gray-400 font-mono">
                         {`// Credenciais de autenticação para sistema Blaze`}

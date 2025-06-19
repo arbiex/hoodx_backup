@@ -248,7 +248,7 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE!
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
     );
 
       const { data: usersList, error: usersError } = await supabase.auth.admin.listUsers();
@@ -276,13 +276,13 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
     }
 
     // Chamar edge function para autenticação
-    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
+    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE}`,
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY}`,
       },
       body: JSON.stringify({
         action: 'authenticate',
@@ -1177,13 +1177,13 @@ async function checkForNewPatterns(userId: string) {
 
     // Chamar edge function para buscar padrões
     console.log('🔍 [PATTERN-CHECK] Buscando padrões na edge function...');
-    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
+    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE}`,
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY}`,
       },
       body: JSON.stringify({
         action: 'get_patterns',
@@ -1394,7 +1394,7 @@ export async function GET(request: NextRequest) {
         'Validação de valores e limites',
         'Débito automático de créditos',
         'WebSocket para apostas em tempo real',
-        'Autenticação via edge function blaze_history_megaroulette',
+        'Autenticação via edge function blaze-mg-pragmatic',
         'Geração otimizada de ppToken e jsessionId',
         'Coleta automática de logs e resultados',
         'Monitoramento automático de padrões via edge function',
@@ -1406,7 +1406,7 @@ export async function GET(request: NextRequest) {
       ]
     },
     edge_function: {
-      name: 'blaze_history_megaroulette',
+      name: 'blaze-mg-pragmatic',
       actions: ['authenticate', 'get_patterns'],
       description: 'Usa edge function para autenticação, tokens e monitoramento de padrões'
     }
@@ -1740,7 +1740,7 @@ async function configureAutoBetting(userId: string, martingaleName?: string) {
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE!
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
     );
 
     const { data: strategies, error } = await supabase.rpc('get_martingale_strategies');

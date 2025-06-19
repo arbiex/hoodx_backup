@@ -428,7 +428,7 @@ export default function DebugPage() {
     if (!userIdRef.current) return;
     
     try {
-      const { data: patternsData, error: patternsError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: patternsData, error: patternsError } = await supabase.functions.invoke('blaze-mg-pragmatic', {
         body: { 
           action: 'get_patterns', 
           user_id: userIdRef.current
@@ -575,7 +575,7 @@ export default function DebugPage() {
       try {
         console.log('🔄 Verificando mudanças...');
         
-        const { data: monitorData, error: monitorError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+        const { data: monitorData, error: monitorError } = await supabase.functions.invoke('blaze-mg-pragmatic', {
           body: { 
             action: 'monitor_changes', 
             user_id: userIdRef.current
@@ -641,7 +641,7 @@ export default function DebugPage() {
       userIdRef.current = user.id;
 
       // Primeiro iniciar sessão na Edge Function
-      const { data: sessionData, error: sessionError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: sessionData, error: sessionError } = await supabase.functions.invoke('blaze-mg-pragmatic', {
         body: { action: 'start_session', user_id: user.id }
       });
 
@@ -651,7 +651,7 @@ export default function DebugPage() {
       }
 
       // Autenticar
-      const { data: authData, error: authError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: authData, error: authError } = await supabase.functions.invoke('blaze-mg-pragmatic', {
         body: { action: 'authenticate', user_id: user.id }
       });
 
@@ -661,7 +661,7 @@ export default function DebugPage() {
       }
 
       // Buscar histórico inicial
-      const { data: historyData, error: historyError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: historyData, error: historyError } = await supabase.functions.invoke('blaze-mg-pragmatic', {
         body: { action: 'get_history', user_id: user.id }
       });
 
@@ -1128,7 +1128,7 @@ export default function DebugPage() {
       setOperationStatus('CONECTANDO...');
 
       // 1️⃣ PRIMEIRO: Iniciar sessão e autenticação do histórico
-      const { data: sessionData, error: sessionError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: sessionData, error: sessionError } = await supabase.functions.invoke('blaze-mg-pragmatic', {
         body: { action: 'start_session', user_id: user.id }
       });
 
@@ -1139,7 +1139,7 @@ export default function DebugPage() {
       }
 
       // Autenticar
-      const { data: authData, error: authError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: authData, error: authError } = await supabase.functions.invoke('blaze-mg-pragmatic', {
         body: { action: 'authenticate', user_id: user.id }
       });
 
@@ -1150,7 +1150,7 @@ export default function DebugPage() {
       }
 
       // Buscar histórico inicial
-      const { data: historyData, error: historyError } = await supabase.functions.invoke('blaze_history_megaroulette', {
+      const { data: historyData, error: historyError } = await supabase.functions.invoke('blaze-mg-pragmatic', {
         body: { action: 'get_history', user_id: user.id }
       });
 

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Play, Square, RefreshCw, Zap, Key, Settings } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import DebugStrategyModal from '@/components/DebugStrategyModal';
+import StopOperationModal from '@/components/StopOperationModal';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
 
@@ -75,6 +76,8 @@ export default function DebugPage() {
   // Estados para modal de estratégia
   const [strategyModalOpen, setStrategyModalOpen] = useState(false);
   const [strategyLoading, setStrategyLoading] = useState(false);
+  const [stopModalOpen, setStopModalOpen] = useState(false);
+  const [stopLoading, setStopLoading] = useState(false);
   
   // Estados para token da Blaze
   const blazeConfigModal = useModal();
@@ -1098,24 +1101,8 @@ export default function DebugPage() {
   // Função para conectar ao WebSocket de apostas E iniciar monitoramento
   const handleOperate = async () => {
     if (isOperating) {
-      // Parar operação E monitoramento
-      setIsOperating(false);
-      operationRef.current = false;
-      setOperationStatus('INATIVO');
-      setOperationError(null);
-      
-      // Parar também o monitoramento
-      setIsRunning(false);
-      monitoringRef.current = false;
-      setError(null);
-      
-      // Limpar estados relacionados
-      setSelectedPattern(null);
-      setWaitingForPattern(false);
-      setAutoBettingActive(false);
-      setAutoBettingStatus(null);
-      setLastProcessedPatternId(null);
-      
+      // Abrir modal de confirmação para parar
+      setStopModalOpen(true);
       return;
     }
 
@@ -1223,6 +1210,71 @@ export default function DebugPage() {
       setOperationStatus('ERRO');
     } finally {
       setOperationLoading(false);
+    }
+  };
+
+  // Função para confirmar parada da operação
+  const handleStopConfirm = async () => {
+    if (!userIdRef.current) return;
+
+    setStopLoading(true);
+    try {
+      console.log('🛑 Parando operação...');
+
+      // Chamar API para parar operação completamente
+      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: userIdRef.current,
+          action: 'stop-operation'
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Atualizar estados do frontend
+        setIsOperating(false);
+        operationRef.current = false;
+        setOperationStatus('PARADO');
+        setOperationError(null);
+        
+        // Parar monitoramento do frontend
+        setIsRunning(false);
+        monitoringRef.current = false;
+        setError(null);
+        
+        // Limpar estados relacionados
+        setSelectedPattern(null);
+        setWaitingForPattern(false);
+        setAutoBettingActive(false);
+        setAutoBettingStatus(null);
+        setLastProcessedPatternId(null);
+        setWebsocketLogs([]);
+        setGameResults([]);
+        
+        console.log('✅ Operação parada com sucesso');
+        
+        // Mostrar alerta de sucesso
+        setOperationError('Operação encerrada com sucesso');
+        setTimeout(() => {
+          setOperationError(null);
+        }, 3000);
+        
+      } else {
+        console.error('❌ Erro ao parar operação:', result.error);
+        setOperationError(`Erro ao parar operação: ${result.error}`);
+      }
+
+    } catch (error) {
+      console.error('❌ Erro ao parar operação:', error);
+      setOperationError('Erro inesperado ao parar operação');
+    } finally {
+      setStopLoading(false);
+      setStopModalOpen(false);
     }
   };
 
@@ -1904,6 +1956,14 @@ export default function DebugPage() {
         onClose={() => setStrategyModalOpen(false)}
         onConfirm={handleStrategyConfirm}
         loading={strategyLoading}
+      />
+
+      {/* Modal de Confirmação para Parar Operação */}
+      <StopOperationModal
+        isOpen={stopModalOpen}
+        onClose={() => setStopModalOpen(false)}
+        onConfirm={handleStopConfirm}
+        loading={stopLoading}
       />
     </div>
   );

@@ -9,7 +9,7 @@ interface MegaRouletteConfig {
   tableId?: string;
   language?: string;
   currency?: string;
-  action?: 'bet-connect' | 'bet-place' | 'bet-state' | 'get-websocket-logs' | 'monitor-patterns' | 'get-selected-pattern' | 'clear-selected-pattern' | 'start-auto-betting' | 'stop-auto-betting' | 'get-auto-betting-status' | 'configure-auto-betting' | 'get-operation-report' | 'reset-operation-report';
+  action?: 'bet-connect' | 'bet-place' | 'bet-state' | 'get-websocket-logs' | 'monitor-patterns' | 'get-selected-pattern' | 'clear-selected-pattern' | 'start-auto-betting' | 'stop-auto-betting' | 'get-auto-betting-status' | 'configure-auto-betting' | 'get-operation-report' | 'reset-operation-report' | 'stop-operation';
   jsessionId?: string;
   gameConfig?: any;
   martingaleName?: string;
@@ -218,6 +218,10 @@ export async function POST(request: NextRequest) {
 
     if (action === 'reset-operation-report') {
       return await resetOperationReport(userId);
+    }
+
+    if (action === 'stop-operation') {
+      return await stopOperation(userId);
     }
 
       return NextResponse.json({
@@ -1402,6 +1406,7 @@ export async function GET(request: NextRequest) {
       'POST (action: configure-auto-betting)': 'Configurar estratégia de martingale',
       'POST (action: get-operation-report)': 'Obter relatório acumulativo de operações',
       'POST (action: reset-operation-report)': 'Resetar relatório de operações',
+      'POST (action: stop-operation)': 'Parar operação completamente',
       'GET': 'Verificar status da API'
     },
     actions: {
@@ -1417,7 +1422,8 @@ export async function GET(request: NextRequest) {
       'get-auto-betting-status': 'Requer: userId - Retorna status atual das apostas automáticas',
       'configure-auto-betting': 'Requer: userId, martingaleName - Configura estratégia de martingale',
       'get-operation-report': 'Requer: userId - Retorna relatório acumulativo de todas as operações',
-      'reset-operation-report': 'Requer: userId - Reseta relatório acumulativo (usado no botão Operar)'
+      'reset-operation-report': 'Requer: userId - Reseta relatório acumulativo (usado no botão Operar)',
+      'stop-operation': 'Requer: userId - Para completamente WebSocket, padrões, apostas e limpa estado'
     },
     integrations: {
       'APIs consolidadas': ['bet', 'edge-function-auth', 'websocket-monitoring', 'pattern-selection'],
@@ -2098,6 +2104,65 @@ function addOperationToReport(userId: string, operationData: {
 }
 
 // Função para processar resultado da aposta automática
+// Função para parar operação completamente
+async function stopOperation(userId: string) {
+  try {
+    console.log('🛑 [STOP-OPERATION] Parando operação completa para usuário:', userId);
+    
+    // 1. Parar apostas automáticas se ativas
+    if (autoBetting[userId]?.active) {
+      console.log('🛑 [STOP-OPERATION] Parando apostas automáticas...');
+      await stopAutoBetting(userId);
+    }
+    
+    // 2. Parar monitoramento de padrões
+    if (patternMonitoring[userId]?.active) {
+      console.log('🛑 [STOP-OPERATION] Parando monitoramento de padrões...');
+      stopPatternMonitoring(userId);
+    }
+    
+    // 3. Limpar padrão selecionado
+    selectedPatterns[userId] = null;
+    console.log('🛑 [STOP-OPERATION] Padrão selecionado limpo');
+    
+    // 4. Fechar todas as conexões WebSocket
+    console.log('🛑 [STOP-OPERATION] Fechando conexões WebSocket...');
+    stopAllConnections(userId, true); // true para marcar como "parado pelo usuário"
+    
+    // 5. Limpar logs e resultados
+    websocketLogs[userId] = [];
+    gameResults[userId] = [];
+    console.log('🛑 [STOP-OPERATION] Logs e resultados limpos');
+    
+    // 6. Limpar controles
+    delete currentGameState[userId];
+    delete autoBettingConfigs[userId];
+    console.log('🛑 [STOP-OPERATION] Estados limpos');
+    
+    addWebSocketLog(userId, '🛑 Operação parada pelo usuário - todas as conexões encerradas', 'info');
+    
+    return NextResponse.json({
+      success: true,
+      data: {
+        message: 'Operação parada com sucesso',
+        stopped: {
+          websocket: true,
+          patterns: true,
+          autoBetting: true,
+          logs: true
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ [STOP-OPERATION] Erro:', error);
+    return NextResponse.json({
+      success: false,
+      error: `Erro ao parar operação: ${error instanceof Error ? error.message : 'Erro desconhecido'}`
+    }, { status: 500 });
+  }
+}
+
 function processAutoBetResult(userId: string, resultNumber: number, resultColor: string) {
   try {
     const betting = autoBetting[userId];

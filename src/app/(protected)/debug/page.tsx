@@ -1239,7 +1239,7 @@ export default function DebugPage() {
         // Atualizar estados do frontend
         setIsOperating(false);
         operationRef.current = false;
-        setOperationStatus('PARADO');
+        setOperationStatus('DESCONECTADO');
         setOperationError(null);
         
         // Parar monitoramento do frontend

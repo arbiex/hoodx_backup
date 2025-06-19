@@ -248,7 +248,7 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE!
     );
 
       const { data: usersList, error: usersError } = await supabase.auth.admin.listUsers();
@@ -276,13 +276,13 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
     }
 
     // Chamar edge function para autenticação
-    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
+    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY}`,
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE}`,
       },
       body: JSON.stringify({
         action: 'authenticate',
@@ -393,21 +393,10 @@ async function getWebSocketLogs(userId: string) {
     const results = gameResults[userId] || [];
     const status = connectionStatus[userId] || { connected: false, lastUpdate: Date.now() };
     
-    // Só retornar erro 400 para erros críticos que realmente devem parar o polling
-    const criticalErrors = [
-      'Máximo de tentativas de reconexão atingido',
-      'Falha na autenticação',
-      'Operação parada pelo usuário'
-    ];
-    
-    const isCriticalError = status.error && criticalErrors.some(critical => 
-      status.error!.includes(critical)
-    );
-    
-    // Só parar polling para erros críticos recentes (< 60 segundos)
-    if (isCriticalError && (Date.now() - status.lastUpdate) < 60000) {
+    // Se conexão falhou recentemente (mas não durante preparação de nova conexão), retornar erro para parar polling
+    if (status.error && status.error !== 'Operação parada pelo usuário' && (Date.now() - status.lastUpdate) < 30000) { // 30 segundos
       return NextResponse.json({
-        success: false,
+      success: false,
         error: status.error,
         shouldStopPolling: true
       }, { status: 400 });
@@ -436,7 +425,7 @@ async function getWebSocketLogs(userId: string) {
 function updateConnectionStatus(userId: string, connected: boolean, error?: string) {
   connectionStatus[userId] = {
     connected,
-    error: connected ? undefined : error, // Limpar erro quando conectado
+    error: error || undefined,
     lastUpdate: Date.now()
   };
 }
@@ -497,7 +486,7 @@ async function connectToBettingGame(userId: string, gameConfig: any) {
 }
 
 // Função para iniciar conexão WebSocket para coleta de dados
-function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string; serverUrl?: string }) {
+function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string }) {
   try {
     // Inicializar controle de reconexão se não existir
     if (!reconnectionControl[userId]) {
@@ -525,9 +514,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     }
     control.lastAttempt = now;
 
-    // URL do WebSocket - usar servidor customizado se fornecido, senão usar o padrão
-    const baseServer = config.serverUrl || 'wss://gs9.pragmaticplaylive.net/game';
-    const wsUrl = `${baseServer}?JSESSIONID=${config.jsessionId}&tableId=${config.tableId}`;
+    // URL CORRETA conforme relatório
+    const wsUrl = `wss://gs9.pragmaticplaylive.net/game?JSESSIONID=${config.jsessionId}&tableId=${config.tableId}`;
     
     addWebSocketLog(userId, `Conectando ao WebSocket (tentativa ${control.attempts}/${control.maxAttempts}): ${wsUrl}`, 'info');
     
@@ -551,7 +539,7 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     
     ws.on('open', () => {
       addWebSocketLog(userId, 'WebSocket conectado com sucesso', 'success');
-      updateConnectionStatus(userId, true); // ✅ Marcar como conectado e limpar erro
+      updateConnectionStatus(userId, true); // ✅ Marcar como conectado
       
       // Resetar contador de tentativas após conexão bem-sucedida
       if (reconnectionControl[userId]) {
@@ -749,40 +737,6 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
         // Capturar respostas de apostas
         if (message.includes('<lpbet') || message.includes('bet') || message.includes('error') || message.includes('invalid')) {
           addWebSocketLog(userId, `🎰 Resposta de aposta: ${message}`, 'info');
-        }
-
-        // Tratar switch de servidor
-        if (message.includes('<switch') && message.includes('gameServer=')) {
-          const gameServerMatch = message.match(/gameServer="([^"]*)"/);
-          const wsAddressMatch = message.match(/wsAddress="([^"]*)"/);
-          const tableIdMatch = message.match(/tableId="([^"]*)"/);
-          
-          if (gameServerMatch && wsAddressMatch && tableIdMatch) {
-            const newServer = gameServerMatch[1];
-            const newWsAddress = wsAddressMatch[1];
-            const newTableId = tableIdMatch[1];
-            
-            addWebSocketLog(userId, `🔄 Switch de servidor detectado: ${newServer}`, 'info');
-            addWebSocketLog(userId, `📍 Novo endereço: ${newWsAddress}`, 'info');
-            
-            // Fechar conexão atual e reconectar no novo servidor
-            ws.close(1000, 'Server switch');
-            
-                         // Reconectar após 1 segundo no novo servidor
-             setTimeout(() => {
-               const newConfig = {
-                 ...config,
-                 tableId: newTableId,
-                 serverUrl: newWsAddress // Usar o novo endereço WebSocket
-               };
-               
-               addWebSocketLog(userId, `🔄 Reconectando ao novo servidor: ${newWsAddress}`, 'info');
-               
-               startWebSocketConnection(userId, newConfig);
-             }, 1000);
-            
-            return; // Não processar mais esta mensagem
-          }
         }
 
         // Log outras mensagens importantes
@@ -1223,13 +1177,13 @@ async function checkForNewPatterns(userId: string) {
 
     // Chamar edge function para buscar padrões
     console.log('🔍 [PATTERN-CHECK] Buscando padrões na edge function...');
-    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-mg-pragmatic`;
+    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze_history_megaroulette`;
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY}`,
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE}`,
       },
       body: JSON.stringify({
         action: 'get_patterns',
@@ -1786,7 +1740,7 @@ async function configureAutoBetting(userId: string, martingaleName?: string) {
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE!
     );
 
     const { data: strategies, error } = await supabase.rpc('get_martingale_strategies');
@@ -1932,54 +1886,8 @@ async function executeAutoBet(userId: string, gameId: string, ws: any) {
     console.log('📤 [AUTO-BET] XML da aposta:', betXml);
     addWebSocketLog(userId, `📤 Enviando XML: ${betXml.replace(/\n/g, ' ').replace(/\s+/g, ' ')}`, 'info');
 
-    // SOLUÇÃO: Usar Buffer para contornar problema do WebSocket mask em produção
-    try {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        console.log('📤 [AUTO-BET] Enviando aposta via WebSocket com Buffer (produção)');
-        
-        // Converter XML para Buffer para evitar problema de mask
-        const betBuffer = Buffer.from(betXml, 'utf8');
-        
-        // Tentar enviar como Buffer primeiro
-        try {
-          ws.send(betBuffer);
-          console.log('✅ [AUTO-BET] Aposta enviada via WebSocket (Buffer)');
-          addWebSocketLog(userId, `✅ Aposta enviada via WebSocket (Buffer)`, 'success');
-        } catch (bufferError) {
-          console.log('🔄 [AUTO-BET] Tentando enviar como string...');
-          
-          // Fallback: tentar como string simples
-          try {
-            // Usar método alternativo para envio
-            const wsAny = ws as any;
-            if (wsAny._socket && wsAny._socket.write) {
-              // Envio direto via socket
-              const frame = betXml;
-              wsAny._socket.write(frame);
-              console.log('✅ [AUTO-BET] Aposta enviada via socket direto');
-              addWebSocketLog(userId, `✅ Aposta enviada via socket direto`, 'success');
-            } else {
-              // Último recurso: string normal
-              ws.send(betXml);
-              console.log('✅ [AUTO-BET] Aposta enviada via WebSocket (string)');
-              addWebSocketLog(userId, `✅ Aposta enviada via WebSocket (string)`, 'success');
-            }
-          } catch (stringError) {
-            console.error('❌ [AUTO-BET] Todos os métodos WebSocket falharam:', stringError);
-            addWebSocketLog(userId, `❌ Falha completa no WebSocket: ${stringError instanceof Error ? stringError.message : 'Erro desconhecido'}`, 'error');
-            return;
-          }
-        }
-      } else {
-        console.error('❌ [AUTO-BET] WebSocket não está ativo:', ws?.readyState);
-        addWebSocketLog(userId, `❌ WebSocket não está ativo (estado: ${ws?.readyState})`, 'error');
-        return;
-      }
-    } catch (error) {
-      console.error('❌ [AUTO-BET] Erro geral ao enviar aposta:', error);
-      addWebSocketLog(userId, `❌ Erro geral: ${error instanceof Error ? error.message : 'Erro desconhecido'}`, 'error');
-      return;
-    }
+    // Enviar aposta via WebSocket
+    ws.send(betXml);
 
     // Atualizar status
     autoBetting[userId].currentBetIndex++;
@@ -1989,6 +1897,8 @@ async function executeAutoBet(userId: string, gameId: string, ws: any) {
 
     addWebSocketLog(userId, `🎯 AUTO-BET ${betting.currentBetIndex}/${betting.totalBets}: ${currentLetter} (bc=${betCode}) R$ ${amount} → Game ${gameId}`, 'success');
     addWebSocketLog(userId, `🔧 uId: ${pragmaticUserId}, ck: ${timestamp}`, 'info');
+
+    console.log('✅ [AUTO-BET] Aposta enviada via WebSocket');
 
   } catch (error) {
     console.error('❌ [AUTO-BET] Erro ao executar aposta automática:', error);

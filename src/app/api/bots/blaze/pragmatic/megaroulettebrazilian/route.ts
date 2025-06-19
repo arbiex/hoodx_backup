@@ -1932,8 +1932,22 @@ async function executeAutoBet(userId: string, gameId: string, ws: any) {
     console.log('📤 [AUTO-BET] XML da aposta:', betXml);
     addWebSocketLog(userId, `📤 Enviando XML: ${betXml.replace(/\n/g, ' ').replace(/\s+/g, ' ')}`, 'info');
 
-    // Enviar aposta via WebSocket
-    ws.send(betXml);
+    // Verificar se WebSocket está ativo antes de enviar
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Enviar aposta via WebSocket com tratamento de erro
+      try {
+        ws.send(betXml);
+        console.log('✅ [AUTO-BET] Aposta enviada via WebSocket');
+      } catch (sendError) {
+        console.error('❌ [AUTO-BET] Erro ao enviar via WebSocket:', sendError);
+        addWebSocketLog(userId, `❌ Erro ao enviar aposta: ${sendError instanceof Error ? sendError.message : 'Erro desconhecido'}`, 'error');
+        return;
+      }
+    } else {
+      console.error('❌ [AUTO-BET] WebSocket não está ativo:', ws?.readyState);
+      addWebSocketLog(userId, `❌ WebSocket não está ativo (estado: ${ws?.readyState})`, 'error');
+      return;
+    }
 
     // Atualizar status
     autoBetting[userId].currentBetIndex++;
@@ -1943,8 +1957,6 @@ async function executeAutoBet(userId: string, gameId: string, ws: any) {
 
     addWebSocketLog(userId, `🎯 AUTO-BET ${betting.currentBetIndex}/${betting.totalBets}: ${currentLetter} (bc=${betCode}) R$ ${amount} → Game ${gameId}`, 'success');
     addWebSocketLog(userId, `🔧 uId: ${pragmaticUserId}, ck: ${timestamp}`, 'info');
-
-    console.log('✅ [AUTO-BET] Aposta enviada via WebSocket');
 
   } catch (error) {
     console.error('❌ [AUTO-BET] Erro ao executar aposta automática:', error);

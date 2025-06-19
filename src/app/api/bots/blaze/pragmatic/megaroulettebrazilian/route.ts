@@ -248,7 +248,7 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE!
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
     );
 
       const { data: usersList, error: usersError } = await supabase.auth.admin.listUsers();
@@ -282,7 +282,7 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE}`,
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY}`,
       },
       body: JSON.stringify({
         action: 'authenticate',
@@ -393,8 +393,12 @@ async function getWebSocketLogs(userId: string) {
     const results = gameResults[userId] || [];
     const status = connectionStatus[userId] || { connected: false, lastUpdate: Date.now() };
     
-    // Se conexão falhou recentemente (mas não durante preparação de nova conexão), retornar erro para parar polling
-    if (status.error && status.error !== 'Operação parada pelo usuário' && (Date.now() - status.lastUpdate) < 30000) { // 30 segundos
+    // Se conexão falhou recentemente com erro real (mas não durante preparação de nova conexão), retornar erro para parar polling
+    if (status.error && 
+        status.error !== 'Operação parada pelo usuário' && 
+        !status.error.includes('Código: 1000') && // Não tratar fechamento normal como erro
+        !status.error.includes('Código: 1001') && // Não tratar fechamento por endpoint como erro
+        (Date.now() - status.lastUpdate) < 30000) { // 30 segundos
       return NextResponse.json({
       success: false,
         error: status.error,
@@ -486,7 +490,7 @@ async function connectToBettingGame(userId: string, gameConfig: any) {
 }
 
 // Função para iniciar conexão WebSocket para coleta de dados
-function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string }) {
+function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string }, customServerUrl?: string) {
   try {
     // Inicializar controle de reconexão se não existir
     if (!reconnectionControl[userId]) {
@@ -514,8 +518,9 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     }
     control.lastAttempt = now;
 
-    // URL CORRETA conforme relatório
-    const wsUrl = `wss://gs9.pragmaticplaylive.net/game?JSESSIONID=${config.jsessionId}&tableId=${config.tableId}`;
+    // URL CORRETA conforme relatório (ou servidor customizado para switch)
+    const baseUrl = customServerUrl || 'wss://gs9.pragmaticplaylive.net/game';
+    const wsUrl = `${baseUrl}?JSESSIONID=${config.jsessionId}&tableId=${config.tableId}`;
     
     addWebSocketLog(userId, `Conectando ao WebSocket (tentativa ${control.attempts}/${control.maxAttempts}): ${wsUrl}`, 'info');
     
@@ -739,6 +744,30 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           addWebSocketLog(userId, `🎰 Resposta de aposta: ${message}`, 'info');
         }
 
+        // Detectar switch de servidor
+        if (message.includes('<switch') && message.includes('gameServer=')) {
+          const gameServerMatch = message.match(/gameServer="([^"]*)"/);
+          const wsAddressMatch = message.match(/wsAddress="([^"]*)"/);
+          
+          if (gameServerMatch && wsAddressMatch) {
+            const newServer = gameServerMatch[1];
+            const newWsAddress = wsAddressMatch[1];
+            
+            addWebSocketLog(userId, `🔄 Switch de servidor detectado: ${newServer}`, 'info');
+            addWebSocketLog(userId, `🔄 Reconectando ao novo servidor: ${newWsAddress}`, 'info');
+            
+            // Fechar conexão atual
+            ws.close();
+            
+            // Reconectar ao novo servidor
+            setTimeout(() => {
+              startWebSocketConnection(userId, config, newWsAddress);
+            }, 1000);
+            
+            return; // Sair da função para evitar processar outras mensagens
+          }
+        }
+
         // Log outras mensagens importantes
         if (message.length < 200 && !message.includes('pong') && !message.includes('ping')) {
           addWebSocketLog(userId, `📋 Mensagem: ${message}`, 'info');
@@ -778,8 +807,12 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
         delete activeWebSockets[userId];
       }
       
-      // Marcar como desconectado
-      updateConnectionStatus(userId, false, closeMsg);
+      // Marcar como desconectado - só marcar como erro se não for fechamento normal
+      if (code === 1000 || code === 1001) {
+        updateConnectionStatus(userId, false); // Fechamento normal, sem erro
+      } else {
+        updateConnectionStatus(userId, false, closeMsg); // Fechamento com erro
+      }
       
       // Reconectar apenas em casos específicos de erro de rede
       const control = reconnectionControl[userId];
@@ -1183,7 +1216,7 @@ async function checkForNewPatterns(userId: string) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE}`,
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY}`,
       },
       body: JSON.stringify({
         action: 'get_patterns',
@@ -1740,7 +1773,7 @@ async function configureAutoBetting(userId: string, martingaleName?: string) {
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE!
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
     );
 
     const { data: strategies, error } = await supabase.rpc('get_martingale_strategies');

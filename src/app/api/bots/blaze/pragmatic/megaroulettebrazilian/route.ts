@@ -436,7 +436,7 @@ async function getWebSocketLogs(userId: string) {
 function updateConnectionStatus(userId: string, connected: boolean, error?: string) {
   connectionStatus[userId] = {
     connected,
-    error: error || undefined,
+    error: connected ? undefined : error, // Limpar erro quando conectado
     lastUpdate: Date.now()
   };
 }
@@ -551,7 +551,7 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     
     ws.on('open', () => {
       addWebSocketLog(userId, 'WebSocket conectado com sucesso', 'success');
-      updateConnectionStatus(userId, true); // ✅ Marcar como conectado
+      updateConnectionStatus(userId, true); // ✅ Marcar como conectado e limpar erro
       
       // Resetar contador de tentativas após conexão bem-sucedida
       if (reconnectionControl[userId]) {

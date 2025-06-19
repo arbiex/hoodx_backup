@@ -714,9 +714,18 @@ export default function DebugPage() {
         
         // Atualizar status baseado na conexão
         const connectionStatus = result.data.connectionStatus;
-        if (connectionStatus && !connectionStatus.connected && connectionStatus.error) {
-          setOperationError(`Conexão falhou: ${connectionStatus.error}`);
-          setOperationStatus('ERRO');
+        if (connectionStatus) {
+          if (connectionStatus.connected) {
+            // Conexão ativa - limpar qualquer erro anterior
+            if (operationError && operationError.includes('Conexão falhou')) {
+              setOperationError(null);
+              setOperationStatus('OPERANDO');
+            }
+          } else if (connectionStatus.error) {
+            // Conexão inativa com erro
+            setOperationError(`Conexão falhou: ${connectionStatus.error}`);
+            setOperationStatus('ERRO');
+          }
         }
       } else {
         // Se API retornou shouldStopPolling, parar operação

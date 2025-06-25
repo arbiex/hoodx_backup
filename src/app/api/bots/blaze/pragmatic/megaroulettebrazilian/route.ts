@@ -9,7 +9,7 @@ interface MegaRouletteConfig {
   tableId?: string;
   language?: string;
   currency?: string;
-  action?: 'bet-connect' | 'bet-place' | 'bet-state' | 'get-websocket-logs' | 'monitor-patterns' | 'stop-pattern-monitoring' | 'get-selected-pattern' | 'clear-selected-pattern' | 'start-auto-betting' | 'stop-auto-betting' | 'get-auto-betting-status' | 'configure-auto-betting' | 'get-operation-report' | 'reset-operation-report' | 'stop-operation';
+  action?: 'bet-connect' | 'bet-place' | 'bet-state' | 'get-websocket-logs' | 'monitor-patterns' | 'stop-pattern-monitoring' | 'clear-selected-pattern' | 'start-auto-betting' | 'stop-auto-betting' | 'get-auto-betting-status' | 'configure-auto-betting' | 'get-operation-report' | 'reset-operation-report' | 'stop-operation';
   jsessionId?: string;
   gameConfig?: any;
   martingaleName?: string;
@@ -202,9 +202,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (action === 'get-selected-pattern') {
-      return await getSelectedPattern(userId);
-    }
+
 
     if (action === 'clear-selected-pattern') {
       return await clearSelectedPattern(userId);
@@ -1381,31 +1379,7 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
   }
 }
 
-// Função para obter padrão selecionado
-async function getSelectedPattern(userId: string) {
-  try {
-    const pattern = selectedPatterns[userId];
-    const monitoring = patternMonitoring[userId];
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        selectedPattern: pattern,
-        monitoringStatus: {
-          active: monitoring?.active || false,
-          waitingForSelection: monitoring?.waitingForSelection || false
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ [GET-PATTERN] Erro:', error);
-    return NextResponse.json({
-      success: false,
-      error: 'Erro ao obter padrão selecionado'
-    }, { status: 500 });
-  }
-}
 
 // Função para limpar padrão selecionado
 async function clearSelectedPattern(userId: string) {
@@ -1449,7 +1423,7 @@ export async function GET(request: NextRequest) {
       'POST (action: get-websocket-logs)': 'Obter logs do WebSocket',
       'POST (action: monitor-patterns)': 'Iniciar monitoramento de padrões',
       'POST (action: stop-pattern-monitoring)': 'Parar monitoramento de padrões',
-      'POST (action: get-selected-pattern)': 'Obter padrão selecionado',
+
       'POST (action: clear-selected-pattern)': 'Limpar padrão selecionado',
       'POST (action: start-auto-betting)': 'Iniciar apostas automáticas',
       'POST (action: stop-auto-betting)': 'Parar apostas automáticas',
@@ -1467,7 +1441,7 @@ export async function GET(request: NextRequest) {
       'get-websocket-logs': 'Requer: userId - Retorna logs e resultados',
       'monitor-patterns': 'Requer: userId - Inicia monitoramento automático de padrões',
       'stop-pattern-monitoring': 'Requer: userId - Para monitoramento automático de padrões',
-      'get-selected-pattern': 'Requer: userId - Retorna padrão selecionado automaticamente',
+
       'clear-selected-pattern': 'Requer: userId - Remove padrão atual e reativa seleção',
       'start-auto-betting': 'Requer: userId - Inicia apostas automáticas baseadas no padrão selecionado',
       'stop-auto-betting': 'Requer: userId - Para apostas automáticas e adiciona ao relatório',

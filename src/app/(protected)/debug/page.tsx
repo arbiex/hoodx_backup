@@ -775,118 +775,7 @@ export default function DebugPage() {
     }
   };
 
-  // Função para buscar padrão selecionado da API
-  const fetchSelectedPattern = async () => {
-    if (!userIdRef.current) return;
 
-    try {
-      const response = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-          action: 'get-selected-pattern'
-        })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        const { selectedPattern: newPattern, monitoringStatus } = result.data;
-        
-        if (newPattern) {
-          // Verificar se é um novo padrão (não estava selecionado antes)
-          const isNewPattern = !selectedPattern || selectedPattern.id !== newPattern.id;
-          
-          setSelectedPattern(newPattern);
-          setWaitingForPattern(false);
-          
-          console.log('🔍 Padrão detectado:', {
-            isNewPattern,
-            autoBettingActive,
-            hasMartingale: !!newPattern.martingale_pattern,
-            patternId: newPattern.id,
-            selectedAt: newPattern.selectedAt
-          });
-          
-          // 🎯 VERIFICAR SE APOSTAS JÁ ESTÃO ATIVAS (backend pode ter iniciado automaticamente)
-          if (isNewPattern && newPattern.martingale_pattern && newPattern.id !== lastProcessedPatternId) {
-            console.log('🤖 Padrão selecionado! Verificando status das apostas...', newPattern);
-            setLastProcessedPatternId(newPattern.id);
-            
-            // Primeiro verificar se apostas já estão ativas
-            try {
-              const statusResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  userId: userIdRef.current,
-                  action: 'get-auto-betting-status'
-                })
-              });
-
-              const statusResult = await statusResponse.json();
-              
-              if (statusResult.success && statusResult.data.active) {
-                // Apostas já estão ativas (backend iniciou automaticamente)
-                console.log('✅ Apostas automáticas já estão ativas (iniciadas pelo backend)');
-                setAutoBettingActive(true);
-                setAutoBettingStatus(statusResult.data);
-              } else if (!autoBettingActive && newPattern.martingale_pattern.length > 0) {
-                // Apostas não estão ativas, tentar iniciar
-                console.log('🚀 Iniciando apostas automáticas...');
-                
-                const startBettingResponse = await fetch('/api/bots/blaze/pragmatic/megaroulettebrazilian', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    userId: userIdRef.current,
-                    action: 'start-auto-betting'
-                  })
-                });
-
-                const bettingResult = await startBettingResponse.json();
-                if (bettingResult.success) {
-                  setAutoBettingActive(true);
-                  console.log('✅ Apostas automáticas iniciadas pelo frontend!', bettingResult.data);
-                } else {
-                  // Se erro for "já estão ativas", apenas atualizar status
-                  if (bettingResult.error?.includes('já estão ativas')) {
-                    console.log('ℹ️ Apostas já estavam ativas - atualizando status');
-                    setAutoBettingActive(true);
-                  } else {
-                    console.error('❌ Erro ao iniciar apostas automáticas:', bettingResult.error);
-                  }
-                }
-              } else {
-                console.log('⚠️ Padrão não possui martingale válido ou apostas já ativas');
-              }
-            } catch (error) {
-              console.error('❌ Erro ao verificar/iniciar apostas automáticas:', error);
-            }
-          }
-        } else {
-          // Padrão foi limpo
-          if (selectedPattern) {
-            console.log('🧹 Padrão limpo - aguardando novo padrão...');
-          }
-          setSelectedPattern(null);
-          setLastProcessedPatternId(null); // Limpar ID do último padrão processado
-        }
-
-        setWaitingForPattern(monitoringStatus.waitingForSelection || false);
-      }
-
-    } catch (error) {
-      console.error('Erro ao buscar padrão selecionado:', error);
-    }
-  };
 
   // Função para iniciar apostas automáticas
   const handleStartAutoBetting = async () => {
@@ -1088,23 +977,7 @@ export default function DebugPage() {
     };
   }, [isOperating]);
 
-  // Monitoramento de padrões selecionados (sempre quando operando - para detectar loop automático)
-  useEffect(() => {
-    let patternsInterval: NodeJS.Timeout | null = null;
 
-    if (isOperating && operationRef.current) {
-      // Buscar padrões selecionados a cada 3 segundos (sempre quando operando)
-      patternsInterval = setInterval(() => {
-        fetchSelectedPattern();
-      }, 3000);
-    }
-
-    return () => {
-      if (patternsInterval) {
-        clearInterval(patternsInterval);
-      }
-    };
-  }, [isOperating]); // Removido waitingForPattern e selectedPattern das dependências
 
   // Monitoramento do status das apostas automáticas
   useEffect(() => {

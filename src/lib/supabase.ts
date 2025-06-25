@@ -1,33 +1,22 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Configuração do cliente Supabase com verificações de ambiente
-const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://pcwekkqhcipvghvqvvtu.supabase.co').trim()
-const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA').trim()
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-// Debug logs para verificar as variáveis
-if (typeof window !== 'undefined') {
-  console.log('Supabase URL:', supabaseUrl)
-  console.log('Supabase URL length:', supabaseUrl.length)
-  console.log('Supabase URL encoded:', encodeURIComponent(supabaseUrl))
-  console.log('Supabase Key exists:', !!supabaseAnonKey)
-  console.log('Environment URL:', process.env.NEXT_PUBLIC_SUPABASE_URL)
-  console.log('Environment Key exists:', !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-}
-
-// Verificar se as variáveis de ambiente estão definidas
+// Verificação de segurança: as variáveis devem estar definidas
 if (!supabaseUrl) {
-  throw new Error('Missing env.NEXT_PUBLIC_SUPABASE_URL')
+  throw new Error('NEXT_PUBLIC_SUPABASE_URL é obrigatória')
 }
 
 if (!supabaseAnonKey) {
-  throw new Error('Missing env.NEXT_PUBLIC_SUPABASE_ANON_KEY')
+  throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY é obrigatória')
 }
 
-// Verificar se a URL é válida
-try {
-  new URL(supabaseUrl)
-} catch (error) {
-  throw new Error(`Invalid NEXT_PUBLIC_SUPABASE_URL: ${supabaseUrl}`)
+// Debug logs para verificar as variáveis (apenas no desenvolvimento)
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+  console.log('Supabase URL:', supabaseUrl)
+  console.log('Supabase Key exists:', !!supabaseAnonKey)
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {

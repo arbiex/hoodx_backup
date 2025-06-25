@@ -92,8 +92,24 @@ const nextConfig: NextConfig = {
   webpack: (config) => {
     config.watchOptions = {
       ...config.watchOptions,
-      ignored: ['**/old-archives/**', '**/node_modules']
+      ignored: ['**/old-archives/**', '**/node_modules', '**/blaze-megaroulettebr/**', '**/algoritmo.py']
     };
+    
+    // Configurar resolve para ignorar arquivos Deno
+    config.resolve.alias = {
+      ...config.resolve.alias,
+    };
+    
+    // Ignorar completamente esses diretórios no build
+    config.module.rules.push({
+      test: /\.(ts|js)$/,
+      include: [
+        /blaze-megaroulettebr/,
+        /algoritmo\.py/
+      ],
+      use: 'ignore-loader'
+    });
+    
     return config;
   },
 };

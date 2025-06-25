@@ -431,9 +431,9 @@ export default function BlazeMegaRouletteBR() {
     if (userIdRef.current && isOperating) {
       fetchOperationReport();
       const interval = setInterval(fetchOperationReport, 10000); // A cada 10 segundos
-    return () => clearInterval(interval);
+      return () => clearInterval(interval);
     }
-  }, [userIdRef.current, isOperating]);
+  }, [isOperating]);
 
   useEffect(() => {
     return () => {
@@ -839,8 +839,8 @@ export default function BlazeMegaRouletteBR() {
           setAlertMessage(null);
           blazeConfigModal.closeModal();
         }}
-        title={isConfigured ? "EDITAR_TOKEN_BLAZE" : "CONFIG_BLAZE"}
-        description={isConfigured ? "Atualize seu token de autenticação Blaze" : "Configure seu token de autenticação Blaze"}
+        title={isConfigured ? 'EDITAR_TOKEN_BLAZE' : 'CONFIG_BLAZE'}
+        description={isConfigured ? 'Atualize seu token de autenticação Blaze' : 'Configure seu token de autenticação Blaze'}
         type="info"
         actions={{
           primary: {

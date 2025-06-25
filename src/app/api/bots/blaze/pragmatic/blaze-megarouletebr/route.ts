@@ -1009,6 +1009,104 @@ const COLOR_NAMES: { [key: string]: string } = {
   'B': 'PRETO',
 };
 
+// Função robusta para enviar mensagens via WebSocket
+async function sendWebSocketMessage(ws: any, message: string, userId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Verificar se WebSocket está conectado
+    if (!ws || ws.readyState !== 1) {
+      return {
+        success: false,
+        error: 'WebSocket não está conectado'
+      };
+    }
+
+    // Método 1: Tentar envio direto (funciona em desenvolvimento)
+    try {
+      ws.send(message);
+      console.log('✅ [WEBSOCKET] Mensagem enviada via método direto');
+      return { success: true };
+    } catch (directError: any) {
+      console.log('⚠️ [WEBSOCKET] Método direto falhou:', directError.message);
+      
+      // Método 2: Tentar com Buffer (para compatibilidade com diferentes implementações)
+      try {
+        const buffer = Buffer.from(message, 'utf8');
+        ws.send(buffer);
+        console.log('✅ [WEBSOCKET] Mensagem enviada via Buffer');
+        return { success: true };
+      } catch (bufferError: any) {
+        console.log('⚠️ [WEBSOCKET] Método Buffer falhou:', bufferError.message);
+        
+        // Método 3: Tentar forçar como string
+        try {
+          const stringMessage = String(message);
+          ws.send(stringMessage, { binary: false });
+          console.log('✅ [WEBSOCKET] Mensagem enviada como string forçada');
+          return { success: true };
+        } catch (stringError: any) {
+          console.log('⚠️ [WEBSOCKET] Método string forçada falhou:', stringError.message);
+          
+          // Método 4: Tentar usando _socket diretamente (último recurso)
+          try {
+            if (ws._socket && ws._socket.write) {
+              const frame = createWebSocketFrame(message);
+              ws._socket.write(frame);
+              console.log('✅ [WEBSOCKET] Mensagem enviada via _socket.write');
+              return { success: true };
+            } else {
+              throw new Error('_socket.write não disponível');
+            }
+          } catch (socketError: any) {
+            console.error('❌ [WEBSOCKET] Todos os métodos falharam:', socketError.message);
+            addWebSocketLog(userId, `❌ Erro crítico no WebSocket: ${socketError.message}`, 'error');
+            
+            return {
+              success: false,
+              error: `Erro ao enviar mensagem WebSocket: ${socketError.message}`
+            };
+          }
+        }
+      }
+    }
+  } catch (error: any) {
+    console.error('❌ [WEBSOCKET] Erro geral:', error);
+    return {
+      success: false,
+      error: `Erro geral no WebSocket: ${error.message || 'Erro desconhecido'}`
+    };
+  }
+}
+
+// Função para criar frame WebSocket manualmente (último recurso)
+function createWebSocketFrame(message: string): Buffer {
+  const payload = Buffer.from(message, 'utf8');
+  const payloadLength = payload.length;
+  
+  let frame: Buffer;
+  
+  if (payloadLength < 126) {
+    frame = Buffer.allocUnsafe(2 + payloadLength);
+    frame[0] = 0x81; // FIN=1, opcode=1 (text)
+    frame[1] = payloadLength;
+    payload.copy(frame, 2);
+  } else if (payloadLength < 65536) {
+    frame = Buffer.allocUnsafe(4 + payloadLength);
+    frame[0] = 0x81; // FIN=1, opcode=1 (text)
+    frame[1] = 126;
+    frame.writeUInt16BE(payloadLength, 2);
+    payload.copy(frame, 4);
+  } else {
+    frame = Buffer.allocUnsafe(10 + payloadLength);
+    frame[0] = 0x81; // FIN=1, opcode=1 (text)
+    frame[1] = 127;
+    frame.writeUInt32BE(0, 2);
+    frame.writeUInt32BE(payloadLength, 6);
+    payload.copy(frame, 10);
+  }
+  
+  return frame;
+}
+
 // NOVO: Executar aposta simples
 async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   const operation = operationState[userId];
@@ -1040,7 +1138,12 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     console.log('📤 [AUTO-BET] XML da aposta:', betXml);
     addWebSocketLog(userId, `📤 Enviando XML: ${betXml.replace(/\n/g, ' ').replace(/\s+/g, ' ')}`, 'info');
           
-            ws.send(betXml);
+    // Enviar aposta via WebSocket com tratamento robusto
+    const sendResult = await sendWebSocketMessage(ws, betXml, userId);
+    if (!sendResult.success) {
+      addWebSocketLog(userId, `❌ Falha ao enviar aposta: ${sendResult.error}`, 'error');
+      return;
+    }
     operation.waitingForResult = true;
     operation.lastGameId = gameId;
     

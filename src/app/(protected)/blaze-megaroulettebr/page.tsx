@@ -892,8 +892,8 @@ export default function BlazeMegaRouletteBR() {
               <p>1. Faça login na sua conta Blaze</p>
               <p>2. Abra as Ferramentas do Desenvolvedor (F12)</p>
               <p>3. Vá para Application → Local Storage</p>
-              <p>4. Selecione "https://blaze.bet.br"</p>
-              <p>5. Encontre "ACCESS_TOKEN" e copie o valor</p>
+              <p>4. Selecione &quot;https://blaze.bet.br&quot;</p>
+              <p>5. Encontre &quot;ACCESS_TOKEN&quot; e copie o valor</p>
               <p>6. Cole no campo acima</p>
             </div>
           </div>

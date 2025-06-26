@@ -1,16 +1,22 @@
 app = "hoodx"
 primary_region = "gru"
 
+[build]
+  [build.args]
+    NEXT_PUBLIC_SUPABASE_URL = "https://pcwekkqhcipvghvqvvtu.supabase.co"
+    NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA"
+    NEXT_PUBLIC_APP_URL = "https://hoodx.fly.dev"
+
 [http_service]
 auto_start_machines = true
 auto_stop_machines = true
 force_https = true
 internal_port = 3_000
-min_machines_running = 0
-processes = [ "app" ]
+min_machines_running = 1
 
 [[vm]]
 cpu_kind = "shared"
 cpus = 2
 memory = "1gb"
 memory_mb = 2_048
+processes = ["app"]

@@ -85,6 +85,14 @@ const bettingWindowState: { [userId: string]: {
   lastUpdate: number;        // Timestamp da última atualização
 } } = {};
 
+// 🎭 NOVO: Estatísticas de humanização
+const humanizationStats: { [userId: string]: {
+  totalBets: number;         // Total de apostas feitas
+  humanizedBets: number;     // Apostas que receberam ruído
+  totalNoise: number;        // Soma total do ruído aplicado
+  lastNoiseApplied: number;  // Último ruído aplicado
+} } = {};
+
 // Função para calcular sequência de martingale baseada no tip
 function calculateMartingaleSequence(tipValue: number): number[] {
   const sequence: number[] = [];
@@ -102,6 +110,66 @@ function calculateMartingaleSequence(tipValue: number): number[] {
   return sequence;
 }
 
+// 🎭 NOVO: Funções para humanização das apostas
+function shouldApplyNoise(): boolean {
+  // 5% a 15% de chance de aplicar ruído
+  const noiseChance = Math.random() * 100; // 0-100
+  const minChance = 5;  // 5%
+  const maxChance = 15; // 15%
+  const threshold = Math.random() * (maxChance - minChance) + minChance; // Entre 5% e 15%
+  
+  return noiseChance <= threshold;
+}
+
+function applyHumanNoise(originalAmount: number): { amount: number; noise: number } {
+  // Ruído de ±0.50 (múltiplo de 0.50)
+  const noiseDirection = Math.random() < 0.5 ? -1 : 1; // +1 ou -1
+  const noise = 0.50 * noiseDirection;
+  const newAmount = Math.max(0.50, originalAmount + noise); // Mínimo R$ 0,50
+  
+  return {
+    amount: parseFloat(newAmount.toFixed(2)),
+    noise: noise
+  };
+}
+
+function updateMartingaleWithNoise(userId: string, appliedNoise: number) {
+  const operation = operationState[userId];
+  if (!operation) return;
+  
+  // Propagar o ruído para os próximos níveis
+  for (let i = operation.currentLevel + 1; i < operation.strategy.sequences.length; i++) {
+    operation.strategy.sequences[i] += appliedNoise;
+    operation.strategy.sequences[i] = Math.max(0.50, parseFloat(operation.strategy.sequences[i].toFixed(2)));
+  }
+  
+  // Log da propagação
+  if (appliedNoise !== 0) {
+    addWebSocketLog(userId, `🎭 Ruído de R$ ${appliedNoise.toFixed(2)} propagado para próximos níveis`, 'info');
+  }
+}
+
+function updateHumanizationStats(userId: string, wasHumanized: boolean, appliedNoise: number = 0) {
+  // Inicializar estatísticas se não existir
+  if (!humanizationStats[userId]) {
+    humanizationStats[userId] = {
+      totalBets: 0,
+      humanizedBets: 0,
+      totalNoise: 0,
+      lastNoiseApplied: 0
+    };
+  }
+  
+  const stats = humanizationStats[userId];
+  stats.totalBets++;
+  
+  if (wasHumanized) {
+    stats.humanizedBets++;
+    stats.totalNoise += appliedNoise;
+    stats.lastNoiseApplied = appliedNoise;
+  }
+}
+
 // Estratégias Martingale disponíveis (valor padrão)
 const MARTINGALE_STRATEGIES = {
   "moderate": {
@@ -113,6 +181,14 @@ const MARTINGALE_STRATEGIES = {
 // Função principal POST
 export async function POST(request: NextRequest) {
   try {
+    // ✅ NOVO: Capturar IP real do usuário
+    const clientIP = 
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      request.headers.get('x-real-ip') ||
+      request.headers.get('cf-connecting-ip') ||
+      request.headers.get('x-client-ip') ||
+      'unknown';
+
     let requestBody;
     try {
       requestBody = await request.json();
@@ -133,7 +209,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    console.log(`🎯 [${action.toUpperCase()}] Usuário: ${userId.slice(0, 8)}...`);
+    console.log(`🎯 [${action.toUpperCase()}] Usuário: ${userId.slice(0, 8)}... IP: ${clientIP}`);
 
     // DEBUG: Mostrar estado atual dos objetos globais para este usuário
     console.log(`🔍 [DEBUG-${action.toUpperCase()}] Estado atual para usuário ${userId.slice(0, 8)}:`, {
@@ -142,13 +218,14 @@ export async function POST(request: NextRequest) {
       operationActive: operationState[userId]?.active || false,
       hasSessionControl: !!sessionControl[userId],
       hasRenewalTimer: !!renewalTimers[userId],
+      clientIP: clientIP,
       timestamp: new Date().toISOString()
     });
 
     // Ações disponíveis
     switch (action) {
       case 'bet-connect':
-        return await connectToBettingGame(userId, tipValue);
+        return await connectToBettingGame(userId, tipValue, clientIP);
       
       case 'start-operation':
         return await startSimpleOperation(userId);
@@ -552,7 +629,7 @@ function setupAutoRenewal(userId: string) {
 }
     
 // NOVO: Conectar ao WebSocket
-async function connectToBettingGame(userId: string, tipValue?: number) {
+async function connectToBettingGame(userId: string, tipValue?: number, clientIP?: string) {
   try {
     addWebSocketLog(userId, '🔗 Iniciando conexão...', 'info');
     
@@ -619,7 +696,7 @@ async function connectToBettingGame(userId: string, tipValue?: number) {
       tableId: 'mrbras531mrbr532'
     };
 
-    startWebSocketConnection(userId, config);
+    startWebSocketConnection(userId, config, undefined, clientIP);
 
     addWebSocketLog(userId, 'WebSocket iniciado para coleta de dados', 'success');
       
@@ -741,7 +818,7 @@ async function stopSimpleOperation(userId: string) {
 }
 
 // NOVO: Iniciar conexão WebSocket simplificada
-function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string }, customServerUrl?: string) {
+function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string }, customServerUrl?: string, userIP?: string) {
   try {
     // Inicializar controle de reconexão se não existir
     if (!reconnectionControl[userId]) {
@@ -774,6 +851,9 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     const wsUrl = `${baseUrl}?JSESSIONID=${config.jsessionId}&tableId=${config.tableId}`;
     
     addWebSocketLog(userId, `🔗 Conectando ao WebSocket (tentativa ${control.attempts}/${control.maxAttempts}): ${wsUrl}`, 'info');
+    if (userIP) {
+      addWebSocketLog(userId, `🌐 IP do usuário detectado: ${userIP}`, 'info');
+    }
     
     const ws = new WebSocket(wsUrl, {
       headers: {
@@ -781,7 +861,15 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
         'Origin': 'https://client.pragmaticplaylive.net',
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
         'Sec-WebSocket-Version': '13',
-        'Sec-WebSocket-Protocol': 'chat'
+        'Sec-WebSocket-Protocol': 'chat',
+        // ✅ NOVO: Headers para repassar IP real do usuário
+        ...(userIP && {
+          'X-Forwarded-For': userIP,
+          'X-Real-IP': userIP,
+          'X-Client-IP': userIP,
+          'CF-Connecting-IP': userIP, // Cloudflare format
+          'True-Client-IP': userIP    // Akamai format
+        })
       }
     });
 
@@ -880,7 +968,7 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             
             // Reconectar ao novo servidor após delay
             setTimeout(() => {
-              startWebSocketConnection(userId, config, newWsAddress);
+              startWebSocketConnection(userId, config, newWsAddress, userIP);
             }, 1000);
             
             return; // Sair da função para evitar processar outras mensagens
@@ -1145,30 +1233,53 @@ function createWebSocketFrame(message: string): Buffer {
   return frame;
 }
 
-// NOVO: Executar aposta simples
+// NOVO: Executar aposta simples com humanização
 async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   const operation = operationState[userId];
   if (!operation || !operation.active) return;
   
   const expectedColor = operation.currentPattern[operation.currentLevel];
-  const betAmount = operation.strategy.sequences[operation.currentLevel]; // ✅ Usar valor baseado no NÍVEL do padrão
+  let betAmount = operation.strategy.sequences[operation.currentLevel]; // Valor original do martingale
   const betCode = COLOR_TO_BET_CODE[expectedColor];
   const colorName = COLOR_NAMES[expectedColor];
   
   if (!betCode || !colorName) {
     addWebSocketLog(userId, `❌ Cor inválida para aposta: ${expectedColor}`, 'error');
-            return;
-          }
+    return;
+  }
+
+  // 🎭 HUMANIZAÇÃO: Aplicar ruído aleatório
+  let finalBetAmount = betAmount;
+  let appliedNoise = 0;
+  let isHumanized = false;
+  
+  if (shouldApplyNoise()) {
+    const noiseResult = applyHumanNoise(betAmount);
+    finalBetAmount = noiseResult.amount;
+    appliedNoise = noiseResult.noise;
+    isHumanized = true;
+    
+    // Atualizar o valor na sequência atual
+    operation.strategy.sequences[operation.currentLevel] = finalBetAmount;
+    
+    // Propagar ruído para próximos níveis
+    updateMartingaleWithNoise(userId, appliedNoise);
+    
+    addWebSocketLog(userId, `🎭 HUMANIZAÇÃO: R$ ${betAmount.toFixed(2)} → R$ ${finalBetAmount.toFixed(2)} (${appliedNoise > 0 ? '+' : ''}${appliedNoise.toFixed(2)})`, 'info');
+  }
+
+  // Atualizar estatísticas de humanização
+  updateHumanizationStats(userId, isHumanized, appliedNoise);
 
   try {
     // Gerar timestamp para identificação única
-          const timestamp = Date.now().toString();
+    const timestamp = Date.now().toString();
     const pragmaticUserId = `ppc${timestamp}`;
     
     // Criar mensagem de aposta conforme formato da API de referência
     const betXml = `<command channel="table-mrbras531mrbr532">
   <lpbet gm="roulette_desktop" gId="${gameId}" uId="${pragmaticUserId}" ck="${timestamp}">
-    <bet amt="${betAmount}" bc="${betCode}" ck="${timestamp}" />
+    <bet amt="${finalBetAmount}" bc="${betCode}" ck="${timestamp}" />
   </lpbet>
 </command>`;
 
@@ -1185,13 +1296,15 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     operation.waitingForResult = true;
     operation.lastGameId = gameId;
     
-    addWebSocketLog(userId, `🎯 APOSTA NÍVEL ${operation.currentLevel + 1}: ${colorName} (${expectedColor}) R$ ${betAmount.toFixed(2)} → Game ${gameId}`, 'success');
-    addWebSocketLog(userId, `🔧 Nível: ${operation.currentLevel + 1}/5 | Valor por nível | Padrão: ${operation.currentPattern.join('')} | Código: ${betCode}`, 'info');
+    // Log da aposta com indicação de humanização
+    const humanTag = isHumanized ? ' 🎭' : '';
+    addWebSocketLog(userId, `🎯 APOSTA NÍVEL ${operation.currentLevel + 1}: ${colorName} (${expectedColor}) R$ ${finalBetAmount.toFixed(2)}${humanTag} → Game ${gameId}`, 'success');
+    addWebSocketLog(userId, `🔧 Nível: ${operation.currentLevel + 1}/5 | Valor ${isHumanized ? 'humanizado' : 'padrão'} | Padrão: ${operation.currentPattern.join('')} | Código: ${betCode}`, 'info');
     
     // TODO: Debitar créditos quando necessário
-    // await debitUserCredits(userId, betAmount);
+    // await debitUserCredits(userId, finalBetAmount);
 
-    } catch (error) {
+  } catch (error) {
     addWebSocketLog(userId, `❌ Erro ao enviar aposta: ${error instanceof Error ? error.message : 'Erro desconhecido'}`, 'error');
   }
 }
@@ -1342,6 +1455,15 @@ async function getWebSocketLogs(userId: string) {
           renewalAttempts: sessionControl[userId].renewalAttempts,
           timeSinceLastRenewal: Date.now() - sessionControl[userId].lastRenewal,
           nextRenewalIn: renewalTimers[userId] ? 'Ativo' : 'Inativo'
+        } : null,
+        // 🎭 NOVO: Estatísticas de humanização
+        humanizationStats: humanizationStats[userId] ? {
+          totalBets: humanizationStats[userId].totalBets,
+          humanizedBets: humanizationStats[userId].humanizedBets,
+          humanizationRate: humanizationStats[userId].totalBets > 0 ? 
+            parseFloat(((humanizationStats[userId].humanizedBets / humanizationStats[userId].totalBets) * 100).toFixed(1)) : 0,
+          totalNoise: parseFloat(humanizationStats[userId].totalNoise.toFixed(2)),
+          lastNoiseApplied: parseFloat(humanizationStats[userId].lastNoiseApplied.toFixed(2))
         } : null
       }
     });

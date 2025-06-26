@@ -4,11 +4,11 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, Square, RefreshCw, Zap, Key, Settings, PlayCircle, StopCircle } from 'lucide-react';
+import { Play, Square, RefreshCw, Zap, Key, Settings } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
-import InlineAlert from '@/components/ui/inline-alert';
-import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
+  import InlineAlert from '@/components/ui/inline-alert';
+  import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -110,6 +110,13 @@ export default function BlazeMegaRouletteBR() {
   const monitoringRef = useRef<boolean>(false);
   const operationRef = useRef<boolean>(false);
   const userIdRef = useRef<string>('');
+
+  const [userNetworkInfo, setUserNetworkInfo] = useState({
+    ip: 'Detectando...',
+    vpnDetected: false,
+    vpnStatus: 'Verificando...',
+    location: 'Detectando...'
+  });
 
   useEffect(() => {
     checkUser();
@@ -220,10 +227,19 @@ export default function BlazeMegaRouletteBR() {
 
       userIdRef.current = user.id;
       
+      // ✅ NOVO: Capturar dados completos do usuário
+      const userInfo = getUserInfo();
+      
       console.log('🚀 [DEBUG] Iniciando operação para usuário:', {
         userId: user.id.slice(0, 8) + '...',
         email: user.email,
         tipValue,
+        userInfo: {
+          ip: userNetworkInfo.ip,
+          platform: userInfo.platform,
+          browser: userInfo.browser,
+          userAgent: userInfo.userAgent.substring(0, 50) + '...'
+        },
         timestamp: new Date().toISOString()
       });
       
@@ -237,7 +253,14 @@ export default function BlazeMegaRouletteBR() {
         body: JSON.stringify({
           userId: user.id,
           action: 'bet-connect',
-          tipValue // Passar o valor do tip para a API
+          tipValue, // Passar o valor do tip para a API
+          // ✅ NOVO: Enviar dados do usuário para repasse à Pragmatic
+          userInfo: {
+            ...userInfo,
+            ip: userNetworkInfo.ip,
+            vpnDetected: userNetworkInfo.vpnDetected,
+            location: userNetworkInfo.location
+          }
         })
       });
 
@@ -348,65 +371,7 @@ export default function BlazeMegaRouletteBR() {
     setStrategyModalOpen(true);
   };
 
-  // Iniciar operação de apostas
-  const handleStartOperation = async () => {
-    try {
-      setLoading(true);
 
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-          action: 'start-operation'
-        })
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error);
-      }
-
-      setOperationSuccess('Operação de apostas iniciada!');
-      setTimeout(() => setOperationSuccess(null), 3000);
-
-    } catch (error: any) {
-      setOperationError(error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Parar operação de apostas
-  const handleStopOperation = async () => {
-    try {
-      setLoading(true);
-
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-          action: 'stop-operation'
-        })
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error);
-      }
-
-      setOperationSuccess('Operação de apostas parada!');
-      setTimeout(() => setOperationSuccess(null), 3000);
-
-    } catch (error: any) {
-      setOperationError(error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Iniciar monitoramento dos logs
   const startMonitoring = async () => {
@@ -521,6 +486,136 @@ export default function BlazeMegaRouletteBR() {
   // IMPORTANTE: Pattern para apostas deve seguir ordem visual (mais recente → mais antigo)
   const currentPattern = lastFiveResults.slice().reverse().map(r => r.color).join('');
 
+  // Adicionar função para capturar informações do usuário
+  function getUserInfo() {
+    const ua = navigator.userAgent;
+    
+    // Detectar sistema operacional
+    let platform = 'Unknown';
+    if (ua.includes('Windows')) platform = 'Windows';
+    else if (ua.includes('Macintosh') || ua.includes('Mac OS')) platform = 'macOS';
+    else if (ua.includes('Linux')) platform = 'Linux';
+    else if (ua.includes('Android')) platform = 'Android';
+    else if (ua.includes('iPhone') || ua.includes('iPad')) platform = 'iOS';
+
+    // Detectar navegador
+    let browser = 'Unknown';
+    if (ua.includes('Chrome') && !ua.includes('Edg')) browser = 'Chrome';
+    else if (ua.includes('Firefox')) browser = 'Firefox';
+    else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
+    else if (ua.includes('Edg')) browser = 'Edge';
+    else if (ua.includes('Opera')) browser = 'Opera';
+
+    // Detectar se é mobile
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+
+    // Detectar timezone
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    // Detectar idioma
+    const language = navigator.language || 'pt-BR';
+
+    // Screen info
+    const screenInfo = {
+      width: screen.width,
+      height: screen.height,
+      colorDepth: screen.colorDepth
+    };
+
+    return {
+      userAgent: ua,
+      platform,
+      browser,
+      isMobile,
+      timezone,
+      language,
+      screenInfo,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  // ✅ NOVO: Detectar informações de rede do usuário
+  useEffect(() => {
+    async function detectNetworkInfo() {
+      try {
+        // Detectar IP usando múltiplas APIs
+        const ipApis = [
+          'https://api.ipify.org?format=json',
+          'https://ipapi.co/json/',
+          'https://api.myip.com'
+        ];
+
+        let detectedIP = 'Não detectado';
+        let location = 'Não detectado';
+        let vpnDetected = false;
+
+        for (const api of ipApis) {
+          try {
+            const response = await fetch(api);
+            const data = await response.json();
+            
+            if (data.ip) {
+              detectedIP = data.ip;
+              
+              // Se a API retorna informações de localização
+              if (data.city && data.country) {
+                location = `${data.city}, ${data.country}`;
+              }
+              
+              // Verificação básica de VPN (algumas APIs fornecem isso)
+              if (data.proxy === true || data.vpn === true || data.hosting === true) {
+                vpnDetected = true;
+              }
+              
+              break; // Parar no primeiro sucesso
+            }
+          } catch (error) {
+            console.log(`Tentativa de API falhou: ${api}`);
+            continue;
+          }
+        }
+
+        // Verificação adicional de VPN baseada em padrões de IP
+        const vpnPatterns = [
+          /^10\./, /^172\.(1[6-9]|2[0-9]|3[0-1])\./, /^192\.168\./,
+          /^169\.254\./, /^127\./, /^::1/, /^fc00:/, /^fe80:/
+        ];
+        
+        const isPrivateIP = vpnPatterns.some(pattern => pattern.test(detectedIP));
+        
+        setUserNetworkInfo({
+          ip: detectedIP,
+          vpnDetected: vpnDetected || isPrivateIP,
+          vpnStatus: vpnDetected ? 'DETECTADA' : (isPrivateIP ? 'POSSÍVEL' : 'NÃO DETECTADA'),
+          location
+        });
+
+        // Atualizar elementos na tela
+        const ipElement = document.getElementById('user-ip');
+        const vpnElement = document.getElementById('vpn-status');
+        
+        if (ipElement) ipElement.textContent = detectedIP;
+        if (vpnElement) {
+          vpnElement.textContent = vpnDetected ? 'DETECTADA' : (isPrivateIP ? 'POSSÍVEL' : 'NÃO DETECTADA');
+          vpnElement.className = `font-mono text-sm ${
+            vpnDetected ? 'text-red-400' : (isPrivateIP ? 'text-yellow-400' : 'text-green-400')
+          }`;
+        }
+
+      } catch (error) {
+        console.error('Erro ao detectar informações de rede:', error);
+        setUserNetworkInfo({
+          ip: 'Erro na detecção',
+          vpnDetected: false,
+          vpnStatus: 'Erro na verificação',
+          location: 'Erro na detecção'
+        });
+      }
+    }
+
+    detectNetworkInfo();
+  }, []);
+
   return (
     <div className="min-h-screen bg-black text-green-400 relative overflow-hidden">
       {/* Matrix Rain Background */}
@@ -529,97 +624,9 @@ export default function BlazeMegaRouletteBR() {
       <div className="relative z-10 p-8">
         <div className="max-w-4xl mx-auto space-y-6">
           
-          {/* DEBUG INFO CARD */}
-          <Card className="bg-gray-900/50 border-yellow-500/30 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="text-yellow-400 flex items-center gap-2">
-                <Settings className="w-5 h-5" />
-                Debug - Informações do Usuário
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                <div className="bg-gray-800/50 p-3 rounded-lg">
-                  <div className="text-blue-400 font-medium">Email:</div>
-                  <div className="text-gray-300">{userEmail || 'Não logado'}</div>
-                </div>
-                <div className="bg-gray-800/50 p-3 rounded-lg">
-                  <div className="text-blue-400 font-medium">User ID:</div>
-                  <div className="text-gray-300 font-mono text-xs">{userIdRef.current ? userIdRef.current.slice(0, 8) + '...' : 'Não disponível'}</div>
-                </div>
-                <div className="bg-gray-800/50 p-3 rounded-lg">
-                  <div className="text-blue-400 font-medium">Status:</div>
-                  <div className={`font-medium ${isOperating ? 'text-green-400' : 'text-red-400'}`}>
-                    {isOperating ? 'OPERANDO' : 'PARADO'}
-                  </div>
-                </div>
-              </div>
-              <div className="text-xs text-gray-400 mt-4 p-2 bg-gray-800/30 rounded">
-                ℹ️ <strong>Isolamento:</strong> Cada usuário possui sua própria instância isolada. 
-                Se você vê múltiplos bots conectando simultaneamente, verifique se não há múltiplas abas abertas do mesmo usuário.
-              </div>
-              
-              {/* Botão de Diagnóstico do Servidor */}
-              <div className="mt-4">
-                <Button
-                  onClick={async () => {
-                    try {
-                      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          userId: userIdRef.current,
-                          action: 'server-diagnostic'
-                        })
-                      });
-                      const result = await response.json();
-                      if (result.success) {
-                        alert(`🩺 DIAGNÓSTICO DO SERVIDOR:\n\n` +
-                          `✅ Total WebSockets Ativos: ${result.data.server.totalActiveWebSockets}\n` +
-                          `⚡ Total Operações Ativas: ${result.data.server.totalActiveOperations}\n` +
-                          `🔐 Total Sessões Ativas: ${result.data.server.totalSessions}\n\n` +
-                          `🔒 ISOLAMENTO: ${result.data.isolation.message}\n\n` +
-                                                      `Usuários com WebSocket:\n${result.data.users.activeWebSockets.map((u: any) => u.userId).join('\n') || 'Nenhum'}\n\n` +
-                            `Usuários Operando:\n${result.data.users.activeOperations.map((u: any) => u.userId).join('\n') || 'Nenhum'}`
-                        );
-                      }
-                    } catch (error) {
-                      alert('Erro ao obter diagnóstico');
-                    }
-                  }}
-                  variant="outline"
-                  size="sm"
-                  className="bg-blue-600 hover:bg-blue-700 text-white border-blue-500"
-                >
-                  🩺 Diagnóstico do Servidor
-                </Button>
-              </div>
 
-              {/* Teste de Isolamento */}
-              <div className="mt-4 p-3 bg-yellow-900/30 border border-yellow-600/50 rounded-lg">
-                <h4 className="text-yellow-400 font-medium mb-2">🧪 Teste de Isolamento</h4>
-                <p className="text-xs text-gray-300 mb-3">
-                  Se você suspeita que há problema de isolamento, siga estes passos:
-                </p>
-                <ol className="text-xs text-gray-300 space-y-1 list-decimal list-inside">
-                  <li>1. Clique em &quot;Diagnóstico do Servidor&quot; para ver quantos usuários estão ativos</li>
-                  <li>2. Conecte seu bot e observe se o número de usuários aumenta em 1</li>
-                  <li>3. Desconecte seu bot e observe se o número diminui em 1</li>
-                  <li>4. Se o número mudar drasticamente (ex: de 0 para 10), há problema global</li>
-                </ol>
-              </div>
-            </CardContent>
-          </Card>
           
-          {/* Título */}
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold mb-2 font-mono">
-              🎰 BLAZE MEGAROULETTE BR - SISTEMA SIMPLIFICADO
-            </h1>
-            <p className="text-gray-400 font-mono">
-              // Operação baseada nos últimos 5 resultados
-            </p>
-          </div>
+
 
           {/* Erro Global */}
           {error && (
@@ -842,7 +849,7 @@ export default function BlazeMegaRouletteBR() {
 
                 {/* Botões de Controle */}
                 <div className="space-y-2">
-                  {/* Botão Principal - Conectar/Desconectar */}
+                  {/* Botão Principal - Começar/Parar Apostas */}
                   <Button 
                     onClick={handleOperate}
                     disabled={operationLoading || !isConfigured}
@@ -863,42 +870,12 @@ export default function BlazeMegaRouletteBR() {
                     {operationLoading 
                       ? 'CONECTANDO...' 
                       : isOperating 
-                        ? 'DESCONECTAR' 
-                        : 'CONECTAR'
+                        ? 'PARAR DE APOSTAR' 
+                        : 'COMEÇAR A APOSTAR'
                     }
                   </Button>
 
-                  {/* Botões de Operação de Apostas */}
-                  {isOperating && (
-                    <div className="flex gap-2">
-                  <Button 
-                        onClick={handleStartOperation}
-                        disabled={!canStartOperation || loading || operationActive}
-                        className="flex-1 font-mono bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30"
-                    variant="outline"
-                  >
-                      <PlayCircle className="h-4 w-4 mr-2" />
-                        {canStartOperation 
-                          ? `INICIAR (${currentPattern})` 
-                          : !hasCompletePattern 
-                            ? `AGUARDANDO (${lastFiveResults.length}/5)`
-                            : !bettingWindow.isOpen
-                              ? 'APOSTAS_FECHADAS'
-                              : 'AGUARDANDO...'
-                    }
-                  </Button>
 
-                      <Button 
-                        onClick={handleStopOperation}
-                        disabled={loading || !operationActive}
-                        className="flex-1 font-mono bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30"
-                        variant="outline"
-                      >
-                        <StopCircle className="h-4 w-4 mr-2" />
-                        PARAR_APOSTAS
-                      </Button>
-                    </div>
-                  )}
                 </div>
 
               </div>
@@ -981,6 +958,84 @@ export default function BlazeMegaRouletteBR() {
               </CardContent>
             </Card>
           )}
+
+          {/* Nova seção: Dados Enviados para Pragmatic */}
+          <div className="bg-gradient-to-br from-gray-900/50 to-black/50 backdrop-blur-sm rounded-xl border border-gray-700/30 p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-500/20 rounded-lg">
+                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-blue-400">DADOS_ENVIADOS_PRAGMATIC</h3>
+            </div>
+            
+            <div className="text-sm text-gray-400 mb-4">
+              // Informações do seu dispositivo repassadas para os servidores da Pragmatic
+            </div>
+
+            <div className="space-y-3">
+              {/* IP do Usuário */}
+              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
+                <span className="text-gray-300">IP_ORIGEM:</span>
+                <span className="text-green-400 font-mono text-sm" id="user-ip">{userNetworkInfo.ip}</span>
+              </div>
+
+              {/* Plataforma */}
+              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
+                <span className="text-gray-300">PLATAFORMA:</span>
+                <span className="text-blue-400 font-mono text-sm" id="user-platform">{typeof window !== 'undefined' ? getUserInfo().platform : 'Loading...'}</span>
+              </div>
+
+              {/* Navegador */}
+              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
+                <span className="text-gray-300">NAVEGADOR:</span>
+                <span className="text-purple-400 font-mono text-sm" id="user-browser">{typeof window !== 'undefined' ? getUserInfo().browser : 'Loading...'}</span>
+              </div>
+
+              {/* Dispositivo */}
+              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
+                <span className="text-gray-300">DISPOSITIVO:</span>
+                <span className="text-yellow-400 font-mono text-sm" id="user-device">
+                  {typeof window !== 'undefined' ? (getUserInfo().isMobile ? 'MOBILE' : 'DESKTOP') : 'Loading...'}
+                </span>
+              </div>
+
+              {/* Timezone */}
+              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
+                <span className="text-gray-300">TIMEZONE:</span>
+                <span className="text-cyan-400 font-mono text-sm" id="user-timezone">
+                  {typeof window !== 'undefined' ? getUserInfo().timezone : 'Loading...'}
+                </span>
+              </div>
+
+              {/* User Agent */}
+              <div className="p-3 bg-gray-800/30 rounded-lg">
+                <div className="text-gray-300 mb-2">USER_AGENT:</div>
+                <div className="text-orange-400 font-mono text-xs break-all bg-gray-900/50 p-2 rounded border-l-2 border-orange-400/30" id="user-agent">
+                  {typeof window !== 'undefined' ? getUserInfo().userAgent : 'Loading...'}
+                </div>
+              </div>
+
+              {/* Status VPN */}
+              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
+                <span className="text-gray-300">VPN_DETECTADA:</span>
+                <span className="text-red-400 font-mono text-sm" id="vpn-status">{userNetworkInfo.vpnStatus}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+              <div className="flex items-center gap-2 text-amber-400 text-sm">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <span className="font-medium">TRANSPARÊNCIA:</span>
+              </div>
+              <div className="text-amber-300/80 text-sm mt-1">
+                Estes são os dados exatos enviados aos servidores da Pragmatic. Seu IP real é repassado para evitar bloqueios.
+              </div>
+            </div>
+          </div>
 
         </div>
       </div>

@@ -8,6 +8,7 @@ import { Play, Square, RefreshCw, Zap, Key, Settings, PlayCircle, StopCircle } f
 import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
+import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -94,6 +95,11 @@ export default function BlazeMegaRouletteBR() {
     };
   } | null>(null);
 
+  // Estados para modal de estratégia
+  const [strategyModalOpen, setStrategyModalOpen] = useState(false);
+  const [strategyLoading, setStrategyLoading] = useState(false);
+  const [selectedTipValue, setSelectedTipValue] = useState<number | null>(null);
+
   // NOVO: Estado da janela de apostas
   const [bettingWindow, setBettingWindow] = useState<{
     isOpen: boolean;
@@ -115,6 +121,13 @@ export default function BlazeMegaRouletteBR() {
     if (user?.email) {
       setUserEmail(user.email);
       userIdRef.current = user.id;
+      
+      // DEBUG: Log detalhado do usuário
+      console.log('🔐 [DEBUG] Usuário atual:', {
+        email: user.email,
+        id: user.id.slice(0, 8) + '...',
+        timestamp: new Date().toISOString()
+      });
     }
   };
 
@@ -193,12 +206,107 @@ export default function BlazeMegaRouletteBR() {
     }
   };
 
+  // Função para iniciar operação com tip específico
+  const startOperation = async (tipValue: number) => {
+    setOperationLoading(true);
+    setOperationError(null);
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setOperationError('Usuário não autenticado');
+        return;
+      }
+
+      userIdRef.current = user.id;
+      
+      console.log('🚀 [DEBUG] Iniciando operação para usuário:', {
+        userId: user.id.slice(0, 8) + '...',
+        email: user.email,
+        tipValue,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log('🎮 Conectando ao WebSocket para operação...');
+      setOperationStatus('CONECTANDO...');
+
+      // Conectar ao WebSocket
+      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          action: 'bet-connect',
+          tipValue // Passar o valor do tip para a API
+        })
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        setOperationError(`Erro na conexão WebSocket: ${result.error}`);
+        setOperationStatus('ERRO');
+        return;
+      }
+
+      console.log('✅ [DEBUG] Conectado ao WebSocket com sucesso para:', user.id.slice(0, 8) + '...');
+      
+      setIsOperating(true);
+      operationRef.current = true;
+      setOperationStatus('OPERANDO');
+      setOperationError(null);
+
+      // Iniciar monitoramento
+      monitoringRef.current = true;
+      startMonitoring();
+
+    } catch (error) {
+      console.error('❌ Erro ao conectar:', error);
+      setOperationError('Erro inesperado na conexão');
+      setOperationStatus('ERRO');
+    } finally {
+      setOperationLoading(false);
+    }
+  };
+
+  // Função para confirmar estratégia e iniciar operação
+  const handleStrategyConfirm = async (tipValue: number) => {
+    try {
+      setStrategyLoading(true);
+      setSelectedTipValue(tipValue);
+      
+      console.log('🎯 [STRATEGY] Estratégia confirmada:', {
+        tipValue,
+        userId: userIdRef.current.slice(0, 8) + '...',
+        timestamp: new Date().toISOString()
+      });
+      
+      // Fechar modal de estratégia
+      setStrategyModalOpen(false);
+      
+      // Iniciar operação real
+      await startOperation(tipValue);
+      
+    } catch (error) {
+      console.error('❌ Erro ao confirmar estratégia:', error);
+      setOperationError('Erro ao confirmar estratégia');
+    } finally {
+      setStrategyLoading(false);
+    }
+  };
+
   // Conectar ao WebSocket e iniciar operação
   const handleOperate = async () => {
     if (isOperating) {
       // Parar operação
       try {
         setOperationLoading(true);
+        
+        console.log('🛑 [DEBUG] Parando operação para usuário:', {
+          userId: userIdRef.current.slice(0, 8) + '...',
+          email: userEmail,
+          timestamp: new Date().toISOString()
+        });
         
         const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
                   method: 'POST',
@@ -222,6 +330,7 @@ export default function BlazeMegaRouletteBR() {
           monitoringRef.current = false;
           setError(null);
           
+          console.log('✅ [DEBUG] Operação parada com sucesso para:', userIdRef.current.slice(0, 8) + '...');
           setOperationSuccess('Operação encerrada com sucesso');
           setTimeout(() => setOperationSuccess(null), 3000);
           } else {
@@ -235,57 +344,8 @@ export default function BlazeMegaRouletteBR() {
       return;
     }
 
-    // Iniciar operação
-    setOperationLoading(true);
-    setOperationError(null);
-    
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setOperationError('Usuário não autenticado');
-        return;
-      }
-
-      userIdRef.current = user.id;
-      console.log('🎮 Conectando ao WebSocket para operação...');
-      setOperationStatus('CONECTANDO...');
-
-      // Conectar ao WebSocket
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          action: 'bet-connect'
-        })
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        setOperationError(`Erro na conexão WebSocket: ${result.error}`);
-        setOperationStatus('ERRO');
-        return;
-      }
-
-      console.log('✅ Conectado ao WebSocket com sucesso');
-      
-      setIsOperating(true);
-      operationRef.current = true;
-              setOperationStatus('OPERANDO');
-      setOperationError(null);
-
-      // Iniciar monitoramento
-      monitoringRef.current = true;
-      startMonitoring();
-
-    } catch (error) {
-      console.error('❌ Erro ao conectar:', error);
-      setOperationError('Erro inesperado na conexão');
-      setOperationStatus('ERRO');
-    } finally {
-      setOperationLoading(false);
-    }
+    // Abrir modal de seleção de estratégia
+    setStrategyModalOpen(true);
   };
 
   // Iniciar operação de apostas
@@ -350,6 +410,8 @@ export default function BlazeMegaRouletteBR() {
 
   // Iniciar monitoramento dos logs
   const startMonitoring = async () => {
+    console.log(`🔄 [DEBUG-MONITOR] Iniciando monitoramento para usuário: ${userIdRef.current?.slice(0, 8)}...`);
+    
     while (monitoringRef.current) {
     try {
       const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
@@ -364,6 +426,14 @@ export default function BlazeMegaRouletteBR() {
       const result = await response.json();
 
         if (result.success && result.data) {
+          // DEBUG: Log dos dados recebidos (apenas primeira vez ou mudanças)
+          const currentLogsCount = result.data.logs?.length || 0;
+          const previousLogsCount = websocketLogs.length;
+          
+          if (currentLogsCount !== previousLogsCount) {
+            console.log(`📊 [DEBUG-MONITOR] Logs atualizados para ${userIdRef.current?.slice(0, 8)}: ${currentLogsCount} logs`);
+          }
+          
           setWebsocketLogs(result.data.logs || []);
           setLastFiveResults(result.data.lastFiveResults || []);
           setConnectionStatus(result.data.connectionStatus || { connected: false, lastUpdate: Date.now() });
@@ -374,11 +444,13 @@ export default function BlazeMegaRouletteBR() {
         }
 
     } catch (error) {
-        console.error('Erro no monitoramento:', error);
+        console.error(`❌ [DEBUG-MONITOR] Erro no monitoramento para ${userIdRef.current?.slice(0, 8)}:`, error);
       }
 
       await new Promise(resolve => setTimeout(resolve, 2000)); // 2 segundos
     }
+    
+    console.log(`🔄 [DEBUG-MONITOR] Monitoramento parado para usuário: ${userIdRef.current?.slice(0, 8)}...`);
   };
 
   // Buscar relatório
@@ -456,6 +528,88 @@ export default function BlazeMegaRouletteBR() {
       
       <div className="relative z-10 p-8">
         <div className="max-w-4xl mx-auto space-y-6">
+          
+          {/* DEBUG INFO CARD */}
+          <Card className="bg-gray-900/50 border-yellow-500/30 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="text-yellow-400 flex items-center gap-2">
+                <Settings className="w-5 h-5" />
+                Debug - Informações do Usuário
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div className="bg-gray-800/50 p-3 rounded-lg">
+                  <div className="text-blue-400 font-medium">Email:</div>
+                  <div className="text-gray-300">{userEmail || 'Não logado'}</div>
+                </div>
+                <div className="bg-gray-800/50 p-3 rounded-lg">
+                  <div className="text-blue-400 font-medium">User ID:</div>
+                  <div className="text-gray-300 font-mono text-xs">{userIdRef.current ? userIdRef.current.slice(0, 8) + '...' : 'Não disponível'}</div>
+                </div>
+                <div className="bg-gray-800/50 p-3 rounded-lg">
+                  <div className="text-blue-400 font-medium">Status:</div>
+                  <div className={`font-medium ${isOperating ? 'text-green-400' : 'text-red-400'}`}>
+                    {isOperating ? 'OPERANDO' : 'PARADO'}
+                  </div>
+                </div>
+              </div>
+              <div className="text-xs text-gray-400 mt-4 p-2 bg-gray-800/30 rounded">
+                ℹ️ <strong>Isolamento:</strong> Cada usuário possui sua própria instância isolada. 
+                Se você vê múltiplos bots conectando simultaneamente, verifique se não há múltiplas abas abertas do mesmo usuário.
+              </div>
+              
+              {/* Botão de Diagnóstico do Servidor */}
+              <div className="mt-4">
+                <Button
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          userId: userIdRef.current,
+                          action: 'server-diagnostic'
+                        })
+                      });
+                      const result = await response.json();
+                      if (result.success) {
+                        alert(`🩺 DIAGNÓSTICO DO SERVIDOR:\n\n` +
+                          `✅ Total WebSockets Ativos: ${result.data.server.totalActiveWebSockets}\n` +
+                          `⚡ Total Operações Ativas: ${result.data.server.totalActiveOperations}\n` +
+                          `🔐 Total Sessões Ativas: ${result.data.server.totalSessions}\n\n` +
+                          `🔒 ISOLAMENTO: ${result.data.isolation.message}\n\n` +
+                                                      `Usuários com WebSocket:\n${result.data.users.activeWebSockets.map((u: any) => u.userId).join('\n') || 'Nenhum'}\n\n` +
+                            `Usuários Operando:\n${result.data.users.activeOperations.map((u: any) => u.userId).join('\n') || 'Nenhum'}`
+                        );
+                      }
+                    } catch (error) {
+                      alert('Erro ao obter diagnóstico');
+                    }
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white border-blue-500"
+                >
+                  🩺 Diagnóstico do Servidor
+                </Button>
+              </div>
+
+              {/* Teste de Isolamento */}
+              <div className="mt-4 p-3 bg-yellow-900/30 border border-yellow-600/50 rounded-lg">
+                <h4 className="text-yellow-400 font-medium mb-2">🧪 Teste de Isolamento</h4>
+                <p className="text-xs text-gray-300 mb-3">
+                  Se você suspeita que há problema de isolamento, siga estes passos:
+                </p>
+                <ol className="text-xs text-gray-300 space-y-1 list-decimal list-inside">
+                  <li>1. Clique em &quot;Diagnóstico do Servidor&quot; para ver quantos usuários estão ativos</li>
+                  <li>2. Conecte seu bot e observe se o número de usuários aumenta em 1</li>
+                  <li>3. Desconecte seu bot e observe se o número diminui em 1</li>
+                  <li>4. Se o número mudar drasticamente (ex: de 0 para 10), há problema global</li>
+                </ol>
+              </div>
+            </CardContent>
+          </Card>
           
           {/* Título */}
           <div className="text-center mb-8">
@@ -899,6 +1053,14 @@ export default function BlazeMegaRouletteBR() {
           </div>
         </div>
       </Modal>
+
+      {/* Modal de Seleção de Estratégia */}
+      <BlazeMegaRouletteStrategyModal
+        isOpen={strategyModalOpen}
+        onClose={() => setStrategyModalOpen(false)}
+        onConfirm={handleStrategyConfirm}
+        loading={strategyLoading}
+      />
     </div>
   );
 } 

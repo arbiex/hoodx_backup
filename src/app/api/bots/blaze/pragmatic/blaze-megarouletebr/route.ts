@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 // Interface simplificada para configuração
 interface MegaRouletteConfig {
   userId: string;
-  action?: 'bet-connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status';
+  action?: 'bet-connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic';
 }
 
 // Interface para resultado de autenticação
@@ -85,7 +85,24 @@ const bettingWindowState: { [userId: string]: {
   lastUpdate: number;        // Timestamp da última atualização
 } } = {};
 
-// Estratégias Martingale disponíveis
+// Função para calcular sequência de martingale baseada no tip
+function calculateMartingaleSequence(tipValue: number): number[] {
+  const sequence: number[] = [];
+  
+  // Nível 1: 1 tip
+  sequence.push(tipValue);
+  
+  // Níveis 2-5: (anterior × 2) + (2 × tip)
+  for (let level = 2; level <= 5; level++) {
+    const previousValue = sequence[level - 2];
+    const newValue = (previousValue * 2) + (2 * tipValue);
+    sequence.push(newValue);
+  }
+  
+  return sequence;
+}
+
+// Estratégias Martingale disponíveis (valor padrão)
 const MARTINGALE_STRATEGIES = {
   "moderate": {
     sequences: [0.50, 2.00, 5.00, 11.00, 23.00], // Progressão Martingale personalizada
@@ -107,7 +124,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const { userId, action = 'bet-connect' } = requestBody;
+    const { userId, action = 'bet-connect', tipValue } = requestBody;
 
     if (!userId) {
       return NextResponse.json({
@@ -118,10 +135,20 @@ export async function POST(request: NextRequest) {
 
     console.log(`🎯 [${action.toUpperCase()}] Usuário: ${userId.slice(0, 8)}...`);
 
+    // DEBUG: Mostrar estado atual dos objetos globais para este usuário
+    console.log(`🔍 [DEBUG-${action.toUpperCase()}] Estado atual para usuário ${userId.slice(0, 8)}:`, {
+      hasWebSocket: !!activeWebSockets[userId],
+      hasOperationState: !!operationState[userId],
+      operationActive: operationState[userId]?.active || false,
+      hasSessionControl: !!sessionControl[userId],
+      hasRenewalTimer: !!renewalTimers[userId],
+      timestamp: new Date().toISOString()
+    });
+
     // Ações disponíveis
     switch (action) {
       case 'bet-connect':
-        return await connectToBettingGame(userId);
+        return await connectToBettingGame(userId, tipValue);
       
       case 'start-operation':
         return await startSimpleOperation(userId);
@@ -140,6 +167,9 @@ export async function POST(request: NextRequest) {
       
       case 'get-connection-status':
       return await getConnectionStatus(userId);
+      
+      case 'server-diagnostic':
+        return await getServerDiagnostic();
       
       default:
       return NextResponse.json({
@@ -522,7 +552,7 @@ function setupAutoRenewal(userId: string) {
 }
     
 // NOVO: Conectar ao WebSocket
-async function connectToBettingGame(userId: string) {
+async function connectToBettingGame(userId: string, tipValue?: number) {
   try {
     addWebSocketLog(userId, '🔗 Iniciando conexão...', 'info');
     
@@ -555,6 +585,11 @@ async function connectToBettingGame(userId: string) {
       maxRenewalAttempts: 3
     };
 
+    // Calcular estratégia baseada no tip selecionado
+    const calculatedSequence = tipValue ? calculateMartingaleSequence(tipValue) : MARTINGALE_STRATEGIES.moderate.sequences;
+    
+    addWebSocketLog(userId, `🎯 Tip selecionado: ${tipValue || 'padrão'} - Sequência: [${calculatedSequence.map(v => v.toFixed(2)).join(', ')}]`, 'info');
+
     // Inicializar estados
     lastFiveResults[userId] = [];
     resultCollectionEnabled[userId] = false; // Só habilita após primeiro "apostas fechadas"
@@ -564,7 +599,10 @@ async function connectToBettingGame(userId: string) {
       currentLevel: 0,
       martingaleLevel: 0,
       waitingForResult: false,
-      strategy: MARTINGALE_STRATEGIES.moderate,
+      strategy: {
+        sequences: calculatedSequence,
+        maxMartingale: 5
+      },
       stats: {
         totalBets: 0,
         wins: 0,
@@ -1207,6 +1245,8 @@ function resetReconnectionControl(userId: string) {
 }
 
 function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
+  console.log(`🛑 [DEBUG-STOP] Parando conexões para usuário ${userId.slice(0, 8)}...`);
+  
   // Fechar WebSocket se existir
   if (activeWebSockets[userId]?.ws) {
     try {
@@ -1218,11 +1258,15 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
       console.error('❌ Erro ao fechar WebSocket:', error);
     }
       delete activeWebSockets[userId];
-    }
+      console.log(`✅ [DEBUG-STOP] WebSocket removido para ${userId.slice(0, 8)}`);
+    } else {
+    console.log(`ℹ️ [DEBUG-STOP] Nenhum WebSocket ativo para ${userId.slice(0, 8)}`);
+  }
     
   // Limpar controle de reconexão
   if (reconnectionControl[userId]) {
     delete reconnectionControl[userId];
+    console.log(`✅ [DEBUG-STOP] Controle de reconexão removido para ${userId.slice(0, 8)}`);
   }
   
   // ✅ NOVO: Limpar timer de renovação automática
@@ -1230,25 +1274,31 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
     clearTimeout(renewalTimers[userId]);
     delete renewalTimers[userId];
     addWebSocketLog(userId, '⏰ Timer de renovação automática cancelado', 'info');
+    console.log(`✅ [DEBUG-STOP] Timer de renovação removido para ${userId.slice(0, 8)}`);
   }
   
   // ✅ NOVO: Limpar controle de sessão
   if (sessionControl[userId]) {
     delete sessionControl[userId];
+    console.log(`✅ [DEBUG-STOP] Controle de sessão removido para ${userId.slice(0, 8)}`);
   }
   
   // NOVO: Resetar flag de coleta de resultados
   resultCollectionEnabled[userId] = false;
+  console.log(`✅ [DEBUG-STOP] Coleta de resultados desabilitada para ${userId.slice(0, 8)}`);
   
   // NOVO: Resetar estado da janela de apostas
   if (bettingWindowState[userId]) {
     delete bettingWindowState[userId];
+    console.log(`✅ [DEBUG-STOP] Estado da janela de apostas removido para ${userId.slice(0, 8)}`);
   }
   
   // Atualizar status de conexão
   if (setErrorStatus) {
     updateConnectionStatus(userId, false, 'Operação parada pelo usuário');
   }
+  
+  console.log(`🏁 [DEBUG-STOP] Limpeza completa para usuário ${userId.slice(0, 8)} finalizada`);
 }
 
 // Obter logs do WebSocket
@@ -1393,6 +1443,62 @@ async function getConnectionStatus(userId: string) {
     return NextResponse.json({
       success: false,
       error: 'Erro ao verificar status da conexão'
+    });
+  }
+}
+
+// Função para diagnóstico do servidor - mostra todos os usuários ativos
+async function getServerDiagnostic() {
+  try {
+    const activeUsers = Object.keys(activeWebSockets);
+    const operatingUsers = Object.keys(operationState).filter(id => operationState[id]?.active);
+    const usersWithSessions = Object.keys(sessionControl);
+    const usersWithTimers = Object.keys(renewalTimers);
+    
+    console.log('🩺 [SERVER-DIAGNOSTIC] Gerando diagnóstico do servidor...');
+    
+    return NextResponse.json({
+      success: true,
+      data: {
+        timestamp: new Date().toISOString(),
+        server: {
+          totalActiveWebSockets: activeUsers.length,
+          totalActiveOperations: operatingUsers.length,
+          totalSessions: usersWithSessions.length,
+          totalRenewalTimers: usersWithTimers.length
+        },
+        users: {
+          activeWebSockets: activeUsers.map(id => ({
+            userId: id.slice(0, 8) + '...',
+            createdAt: activeWebSockets[id]?.createdAt,
+            lastActivity: activeWebSockets[id]?.lastActivity
+          })),
+          activeOperations: operatingUsers.map(id => ({
+            userId: id.slice(0, 8) + '...',
+            active: operationState[id]?.active,
+            currentLevel: operationState[id]?.currentLevel,
+            stats: operationState[id]?.stats
+          })),
+          activeSessions: usersWithSessions.map(id => ({
+            userId: id.slice(0, 8) + '...',
+            createdAt: sessionControl[id]?.createdAt,
+            lastRenewal: sessionControl[id]?.lastRenewal
+          }))
+        },
+        isolation: {
+          message: 'Cada usuário possui instância completamente isolada',
+          proof: {
+            webSocketsIsolated: 'activeWebSockets[userId] é único por usuário',
+            operationsIsolated: 'operationState[userId] é único por usuário',
+            sessionsIsolated: 'sessionControl[userId] é único por usuário'
+          }
+        }
+      }
+    });
+  } catch (error) {
+    return NextResponse.json({
+      success: false,
+      error: 'Erro ao gerar diagnóstico'
     });
   }
 }

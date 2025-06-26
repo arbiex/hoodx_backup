@@ -93,6 +93,26 @@ const humanizationStats: { [userId: string]: {
   lastNoiseApplied: number;  // Último ruído aplicado
 } } = {};
 
+// 🕶️ NOVO: Sistema de disfarce avançado
+const disguiseControl: { [userId: string]: {
+  // Controle de ganhos consecutivos
+  completedSequences: number;      // Sequências de 5 vitórias completadas
+  targetSequences: number;         // Meta de sequências antes de pausar (2-5)
+  isOnBreakFromWins: boolean;      // Se está em pausa por ganhos consecutivos
+  
+  // Controle de rodadas de espera
+  waitingBreakTimer: NodeJS.Timeout | null;  // Timer da pausa automática
+  nextBreakDuration: number;       // Duração da próxima pausa (20-60min)
+  isOnScheduledBreak: boolean;     // Se está em pausa programada
+  lastBreakTime: number;           // Timestamp da última pausa
+  
+  // Configurações
+  minBreakMinutes: number;         // Mínimo de minutos de pausa (20)
+  maxBreakMinutes: number;         // Máximo de minutos de pausa (60)
+  minSequencesTarget: number;      // Mínimo de sequências antes de pausar (2)
+  maxSequencesTarget: number;      // Máximo de sequências antes de pausar (5)
+} } = {};
+
 // Função para calcular sequência de martingale baseada no tip
 function calculateMartingaleSequence(tipValue: number): number[] {
   const sequence: number[] = [];
@@ -168,6 +188,160 @@ function updateHumanizationStats(userId: string, wasHumanized: boolean, appliedN
     stats.totalNoise += appliedNoise;
     stats.lastNoiseApplied = appliedNoise;
   }
+}
+
+// 🕶️ NOVO: Funções do sistema de disfarce
+function initializeDisguiseControl(userId: string) {
+  if (!disguiseControl[userId]) {
+    disguiseControl[userId] = {
+      completedSequences: 0,
+      targetSequences: generateRandomSequenceTarget(),
+      isOnBreakFromWins: false,
+      waitingBreakTimer: null,
+      nextBreakDuration: generateRandomBreakDuration(),
+      isOnScheduledBreak: false,
+      lastBreakTime: 0,
+      minBreakMinutes: 20,
+      maxBreakMinutes: 60,
+      minSequencesTarget: 2,
+      maxSequencesTarget: 5
+    };
+    
+    addWebSocketLog(userId, `🕶️ Sistema de disfarce ativado - Meta: ${disguiseControl[userId].targetSequences} sequências`, 'info');
+  }
+}
+
+function generateRandomSequenceTarget(): number {
+  // Entre 2 e 5 sequências
+  return Math.floor(Math.random() * 4) + 2; // 2, 3, 4 ou 5
+}
+
+function generateRandomBreakDuration(): number {
+  // Entre 20 e 60 minutos (em milissegundos)
+  const minMs = 20 * 60 * 1000; // 20 minutos
+  const maxMs = 60 * 60 * 1000; // 60 minutos
+  return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+}
+
+function checkForWinBreak(userId: string): boolean {
+  const disguise = disguiseControl[userId];
+  if (!disguise || disguise.isOnBreakFromWins || disguise.isOnScheduledBreak) return false;
+  
+  disguise.completedSequences++;
+  addWebSocketLog(userId, `🏆 Sequência completada! Total: ${disguise.completedSequences}/${disguise.targetSequences}`, 'success');
+  
+  if (disguise.completedSequences >= disguise.targetSequences) {
+    // Atingiu meta - iniciar pausa por ganhos consecutivos
+    startWinBreak(userId);
+    return true;
+  }
+  
+  return false;
+}
+
+function startWinBreak(userId: string) {
+  const disguise = disguiseControl[userId];
+  if (!disguise) return;
+  
+  disguise.isOnBreakFromWins = true;
+  disguise.lastBreakTime = Date.now();
+  
+  // Parar operação atual
+  if (operationState[userId]) {
+    operationState[userId].active = false;
+  }
+  
+  // Desconectar WebSocket
+  stopAllConnections(userId, false);
+  
+  const breakMinutes = Math.floor(disguise.nextBreakDuration / (60 * 1000));
+  addWebSocketLog(userId, `🕶️ PAUSA POR GANHOS CONSECUTIVOS - ${disguise.completedSequences} sequências completadas`, 'info');
+  addWebSocketLog(userId, `⏰ Pausa de ${breakMinutes} minutos iniciada - Reconexão automática`, 'info');
+  
+  // Programar reconexão automática
+  disguise.waitingBreakTimer = setTimeout(() => {
+    resumeFromBreak(userId);
+  }, disguise.nextBreakDuration);
+}
+
+function startScheduledBreak(userId: string) {
+  const disguise = disguiseControl[userId];
+  if (!disguise) return;
+  
+  disguise.isOnScheduledBreak = true;
+  disguise.lastBreakTime = Date.now();
+  
+  // Parar operação atual
+  if (operationState[userId]) {
+    operationState[userId].active = false;
+  }
+  
+  // Desconectar WebSocket
+  stopAllConnections(userId, false);
+  
+  const breakMinutes = Math.floor(disguise.nextBreakDuration / (60 * 1000));
+  addWebSocketLog(userId, `🕶️ PAUSA PROGRAMADA AUTOMÁTICA`, 'info');
+  addWebSocketLog(userId, `⏰ Pausa de ${breakMinutes} minutos iniciada - Reconexão automática`, 'info');
+  
+  // Programar reconexão automática
+  disguise.waitingBreakTimer = setTimeout(() => {
+    resumeFromBreak(userId);
+  }, disguise.nextBreakDuration);
+}
+
+async function resumeFromBreak(userId: string) {
+  const disguise = disguiseControl[userId];
+  if (!disguise) return;
+  
+  // Limpar estado de pausa
+  disguise.isOnBreakFromWins = false;
+  disguise.isOnScheduledBreak = false;
+  disguise.waitingBreakTimer = null;
+  
+  // Gerar novos valores aleatórios
+  disguise.completedSequences = 0;
+  disguise.targetSequences = generateRandomSequenceTarget();
+  disguise.nextBreakDuration = generateRandomBreakDuration();
+  
+  addWebSocketLog(userId, `🔄 RETOMANDO OPERAÇÃO APÓS PAUSA`, 'success');
+  addWebSocketLog(userId, `🕶️ Nova meta: ${disguise.targetSequences} sequências - Próxima pausa: ${Math.floor(disguise.nextBreakDuration / (60 * 1000))} min`, 'info');
+  
+  // Reconectar automaticamente (simular clique no botão conectar)
+  // Usar tipValue padrão ou último usado
+  const lastTipValue = operationState[userId]?.strategy?.sequences?.[0] || 1.0;
+  await connectToBettingGame(userId, lastTipValue);
+  
+  // 🕶️ NOVO: Reagendar próxima pausa automática
+  scheduleNextAutomaticBreak(userId);
+}
+
+function scheduleNextAutomaticBreak(userId: string) {
+  const disguise = disguiseControl[userId];
+  if (!disguise) return;
+  
+  // Cancelar timer anterior se existir
+  if (disguise.waitingBreakTimer) {
+    clearTimeout(disguise.waitingBreakTimer);
+  }
+  
+  // Gerar tempo aleatório para próxima pausa (entre 30 minutos e 2 horas)
+  const minTimeMs = 30 * 60 * 1000; // 30 minutos
+  const maxTimeMs = 120 * 60 * 1000; // 2 horas
+  const randomTimeMs = Math.floor(Math.random() * (maxTimeMs - minTimeMs + 1)) + minTimeMs;
+  
+  const breakInMinutes = Math.floor(randomTimeMs / (60 * 1000));
+  addWebSocketLog(userId, `⏰ Próxima pausa automática programada em ${breakInMinutes} minutos`, 'info');
+  
+  // Programar pausa automática
+  disguise.waitingBreakTimer = setTimeout(() => {
+    // Verificar se ainda está operando antes de pausar
+    if (operationState[userId]?.active && !disguise.isOnBreakFromWins && !disguise.isOnScheduledBreak) {
+      startScheduledBreak(userId);
+    } else {
+      // Se não está operando, reagendar para mais tarde
+      scheduleNextAutomaticBreak(userId);
+    }
+  }, randomTimeMs);
 }
 
 // Estratégias Martingale disponíveis (valor padrão)
@@ -477,6 +651,13 @@ function processOperationResult(userId: string, resultColor: string) {
       if (operation.currentLevel >= 5) {
         // Completou toda sequência!
         addWebSocketLog(userId, `🎉 SEQUÊNCIA COMPLETA! Padrão ${operation.currentPattern.join('')} finalizado com sucesso!`, 'success');
+        
+        // 🕶️ NOVO: Verificar se deve aplicar disfarce por ganhos consecutivos
+        const shouldBreak = checkForWinBreak(userId);
+        if (shouldBreak) {
+          return; // Para aqui se entrou em pausa por ganhos consecutivos
+        }
+        
         resetOperationForNewPattern(userId);
         return; // Para aqui, não continua apostando
     } else {
@@ -667,6 +848,12 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
     
     addWebSocketLog(userId, `🎯 Tip selecionado: ${tipValue || 'padrão'} - Sequência: [${calculatedSequence.map(v => v.toFixed(2)).join(', ')}]`, 'info');
 
+    // 🕶️ NOVO: Inicializar sistema de disfarce
+    initializeDisguiseControl(userId);
+    
+    // 🕶️ NOVO: Programar primeira pausa automática (tempo aleatório)
+    scheduleNextAutomaticBreak(userId);
+    
     // Inicializar estados
     lastFiveResults[userId] = [];
     resultCollectionEnabled[userId] = false; // Só habilita após primeiro "apostas fechadas"
@@ -1239,7 +1426,7 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   if (!operation || !operation.active) return;
   
   const expectedColor = operation.currentPattern[operation.currentLevel];
-  let betAmount = operation.strategy.sequences[operation.currentLevel]; // Valor original do martingale
+  const betAmount = operation.strategy.sequences[operation.currentLevel]; // Valor original do martingale
   const betCode = COLOR_TO_BET_CODE[expectedColor];
   const colorName = COLOR_NAMES[expectedColor];
   
@@ -1406,6 +1593,17 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
     console.log(`✅ [DEBUG-STOP] Estado da janela de apostas removido para ${userId.slice(0, 8)}`);
   }
   
+  // 🕶️ NOVO: Limpar sistema de disfarce
+  if (disguiseControl[userId]) {
+    // Cancelar timer de pausa se existir
+    if (disguiseControl[userId].waitingBreakTimer) {
+      clearTimeout(disguiseControl[userId].waitingBreakTimer);
+    }
+    delete disguiseControl[userId];
+    addWebSocketLog(userId, '🕶️ Sistema de disfarce desativado', 'info');
+    console.log(`✅ [DEBUG-STOP] Sistema de disfarce removido para ${userId.slice(0, 8)}`);
+  }
+  
   // Atualizar status de conexão
   if (setErrorStatus) {
     updateConnectionStatus(userId, false, 'Operação parada pelo usuário');
@@ -1464,6 +1662,17 @@ async function getWebSocketLogs(userId: string) {
             parseFloat(((humanizationStats[userId].humanizedBets / humanizationStats[userId].totalBets) * 100).toFixed(1)) : 0,
           totalNoise: parseFloat(humanizationStats[userId].totalNoise.toFixed(2)),
           lastNoiseApplied: parseFloat(humanizationStats[userId].lastNoiseApplied.toFixed(2))
+        } : null,
+        // 🕶️ NOVO: Estatísticas do sistema de disfarce
+        disguiseStats: disguiseControl[userId] ? {
+          completedSequences: disguiseControl[userId].completedSequences,
+          targetSequences: disguiseControl[userId].targetSequences,
+          isOnBreakFromWins: disguiseControl[userId].isOnBreakFromWins,
+          isOnScheduledBreak: disguiseControl[userId].isOnScheduledBreak,
+          nextBreakDuration: Math.floor(disguiseControl[userId].nextBreakDuration / (60 * 1000)), // em minutos
+          timeSinceLastBreak: disguiseControl[userId].lastBreakTime > 0 ? 
+            Math.floor((Date.now() - disguiseControl[userId].lastBreakTime) / (60 * 1000)) : 0, // em minutos
+          hasActiveTimer: !!disguiseControl[userId].waitingBreakTimer
         } : null
       }
     });

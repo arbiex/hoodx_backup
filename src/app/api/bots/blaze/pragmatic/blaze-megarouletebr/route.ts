@@ -93,29 +93,21 @@ const humanizationStats: { [userId: string]: {
   lastNoiseApplied: number;  // Último ruído aplicado
 } } = {};
 
-// 🕶️ NOVO: Sistema de disfarce avançado
+// 🕶️ Sistema de disfarce por ganhos consecutivos
 const disguiseControl: { [userId: string]: {
   // Controle de ganhos consecutivos
   completedSequences: number;      // Sequências de 5 vitórias completadas
   targetSequences: number;         // Meta de sequências antes de pausar (2-5)
   isOnBreakFromWins: boolean;      // Se está em pausa por ganhos consecutivos
   
-  // Controle de rodadas de espera
-  waitingBreakTimer: NodeJS.Timeout | null;  // Timer da pausa automática
+  // Controle de pausas
+  waitingBreakTimer: NodeJS.Timeout | null;  // Timer da pausa
   nextBreakDuration: number;       // Duração da próxima pausa (20-60min)
-  isOnScheduledBreak: boolean;     // Se está em pausa programada
   lastBreakTime: number;           // Timestamp da última pausa
   
-  // Configurações
-  minBreakMinutes: number;         // Mínimo de minutos de pausa (20)
-  maxBreakMinutes: number;         // Máximo de minutos de pausa (60)
-  minSequencesTarget: number;      // Mínimo de sequências antes de pausar (2)
-  maxSequencesTarget: number;      // Máximo de sequências antes de pausar (5)
-  
-  // ⏰ NOVO: Campos para timer visual
+  // ⏰ Campos para timer visual
   breakStartTime: number;          // Timestamp do início da pausa
   breakEndTime: number;            // Timestamp do fim da pausa
-  nextAutomaticBreakTime: number;  // Timestamp da próxima pausa automática
 } } = {};
 
 // Função para calcular sequência de martingale baseada no tip
@@ -204,16 +196,10 @@ function initializeDisguiseControl(userId: string) {
       isOnBreakFromWins: false,
       waitingBreakTimer: null,
       nextBreakDuration: generateRandomBreakDuration(),
-      isOnScheduledBreak: false,
       lastBreakTime: 0,
-      minBreakMinutes: 20,
-      maxBreakMinutes: 60,
-      minSequencesTarget: 2,
-      maxSequencesTarget: 5,
-      // ⏰ NOVO: Campos para timer visual
+      // ⏰ Campos para timer visual
       breakStartTime: 0,
-      breakEndTime: 0,
-      nextAutomaticBreakTime: 0
+      breakEndTime: 0
     };
     
     addWebSocketLog(userId, `🕶️ Sistema de disfarce ativado - Meta: ${disguiseControl[userId].targetSequences} sequências`, 'info');
@@ -234,7 +220,7 @@ function generateRandomBreakDuration(): number {
 
 function checkForWinBreak(userId: string): boolean {
   const disguise = disguiseControl[userId];
-  if (!disguise || disguise.isOnBreakFromWins || disguise.isOnScheduledBreak) return false;
+  if (!disguise || disguise.isOnBreakFromWins) return false;
   
   // 💰 NOVO: Verificar se está com lucro antes de permitir pausa
   const operation = operationState[userId];
@@ -285,34 +271,7 @@ function startWinBreak(userId: string) {
   }, disguise.nextBreakDuration);
 }
 
-function startScheduledBreak(userId: string) {
-  const disguise = disguiseControl[userId];
-  if (!disguise) return;
-  
-  disguise.isOnScheduledBreak = true;
-  disguise.lastBreakTime = Date.now();
-  
-  // ⏰ NOVO: Definir timestamps para timer visual
-  disguise.breakStartTime = Date.now();
-  disguise.breakEndTime = Date.now() + disguise.nextBreakDuration;
-  
-  // Parar operação atual
-  if (operationState[userId]) {
-    operationState[userId].active = false;
-  }
-  
-  // Desconectar WebSocket
-  stopAllConnections(userId, false);
-  
-  const breakMinutes = Math.floor(disguise.nextBreakDuration / (60 * 1000));
-  addWebSocketLog(userId, `🕶️ PAUSA PROGRAMADA AUTOMÁTICA`, 'info');
-  addWebSocketLog(userId, `⏰ Pausa de ${breakMinutes} minutos iniciada - Reconexão automática`, 'info');
-  
-  // Programar reconexão automática
-  disguise.waitingBreakTimer = setTimeout(() => {
-    resumeFromBreak(userId);
-  }, disguise.nextBreakDuration);
-}
+
 
 async function resumeFromBreak(userId: string) {
   const disguise = disguiseControl[userId];
@@ -320,10 +279,9 @@ async function resumeFromBreak(userId: string) {
   
   // Limpar estado de pausa
   disguise.isOnBreakFromWins = false;
-  disguise.isOnScheduledBreak = false;
   disguise.waitingBreakTimer = null;
   
-  // ⏰ NOVO: Limpar timestamps de pausa
+  // ⏰ Limpar timestamps de pausa
   disguise.breakStartTime = 0;
   disguise.breakEndTime = 0;
   
@@ -333,7 +291,7 @@ async function resumeFromBreak(userId: string) {
   disguise.nextBreakDuration = generateRandomBreakDuration();
   
   addWebSocketLog(userId, `🔄 RETOMANDO OPERAÇÃO APÓS PAUSA`, 'success');
-  addWebSocketLog(userId, `🕶️ Nova meta: ${disguise.targetSequences} sequências - Próxima pausa: ${Math.floor(disguise.nextBreakDuration / (60 * 1000))} min`, 'info');
+  addWebSocketLog(userId, `🕶️ Nova meta: ${disguise.targetSequences} sequências`, 'info');
   
   try {
     // Reconectar automaticamente (simular clique no botão conectar)
@@ -367,54 +325,9 @@ async function resumeFromBreak(userId: string) {
     // Tentar novamente em 30 segundos
     setTimeout(() => resumeFromBreak(userId), 30000);
   }
-  
-  // 🕶️ NOVO: Reagendar próxima pausa automática
-  scheduleNextAutomaticBreak(userId);
 }
 
-function scheduleNextAutomaticBreak(userId: string) {
-  const disguise = disguiseControl[userId];
-  if (!disguise) return;
-  
-  // Cancelar timer anterior se existir
-  if (disguise.waitingBreakTimer) {
-    clearTimeout(disguise.waitingBreakTimer);
-  }
-  
-  // Gerar tempo aleatório para próxima pausa (entre 30 minutos e 2 horas)
-  const minTimeMs = 30 * 60 * 1000; // 30 minutos
-  const maxTimeMs = 120 * 60 * 1000; // 2 horas
-  const randomTimeMs = Math.floor(Math.random() * (maxTimeMs - minTimeMs + 1)) + minTimeMs;
-  
-  const breakInMinutes = Math.floor(randomTimeMs / (60 * 1000));
-  
-  // ⏰ NOVO: Definir timestamp da próxima pausa automática
-  disguise.nextAutomaticBreakTime = Date.now() + randomTimeMs;
-  
-  addWebSocketLog(userId, `⏰ Próxima pausa automática programada em ${breakInMinutes} minutos`, 'info');
-  
-  // Programar pausa automática
-  disguise.waitingBreakTimer = setTimeout(() => {
-    // 💰 NOVO: Verificar se está com lucro antes de pausar automaticamente
-    const operation = operationState[userId];
-    const isOperating = operation?.active;
-    const hasProfit = operation && operation.stats.profit > 0;
-    
-    if (isOperating && !disguise.isOnBreakFromWins && !disguise.isOnScheduledBreak) {
-      if (hasProfit) {
-        addWebSocketLog(userId, `💰 Bot com lucro (R$ ${operation.stats.profit.toFixed(2)}) - Pausa automática autorizada`, 'success');
-        startScheduledBreak(userId);
-      } else {
-        addWebSocketLog(userId, `🚫 Pausa automática bloqueada - Bot no prejuízo (R$ ${operation.stats.profit.toFixed(2)})`, 'info');
-        // Reagendar para mais tarde (mesmo tempo)
-        scheduleNextAutomaticBreak(userId);
-      }
-    } else {
-      // Se não está operando, reagendar para mais tarde
-      scheduleNextAutomaticBreak(userId);
-    }
-  }, randomTimeMs);
-}
+
 
 // Estratégias Martingale disponíveis (valor padrão)
 const MARTINGALE_STRATEGIES = {
@@ -920,11 +833,8 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
     
     addWebSocketLog(userId, `🎯 Tip selecionado: ${tipValue || 'padrão'} - Sequência: [${calculatedSequence.map(v => v.toFixed(2)).join(', ')}]`, 'info');
 
-    // 🕶️ NOVO: Inicializar sistema de disfarce
+    // 🕶️ Inicializar sistema de disfarce
     initializeDisguiseControl(userId);
-    
-    // 🕶️ NOVO: Programar primeira pausa automática (tempo aleatório)
-    scheduleNextAutomaticBreak(userId);
     
     // Inicializar estados
     lastFiveResults[userId] = [];
@@ -1743,7 +1653,7 @@ async function getWebSocketLogs(userId: string) {
           totalNoise: parseFloat(humanizationStats[userId].totalNoise.toFixed(2)),
           lastNoiseApplied: parseFloat(humanizationStats[userId].lastNoiseApplied.toFixed(2))
         } : null,
-        // 🕶️ NOVO: Estatísticas do sistema de disfarce com timer visual
+        // 🕶️ Sistema de disfarce por ganhos consecutivos
         disguiseStats: disguiseControl[userId] ? (() => {
           const disguise = disguiseControl[userId];
           const now = Date.now();
@@ -1753,8 +1663,8 @@ async function getWebSocketLogs(userId: string) {
           let timeRemaining = 0;
           let progressPercent = 0;
           
-          if (disguise.isOnBreakFromWins || disguise.isOnScheduledBreak) {
-            currentStatus = disguise.isOnBreakFromWins ? 'Hibernando (Ganhos)' : 'Hibernando (Programada)';
+          if (disguise.isOnBreakFromWins) {
+            currentStatus = 'Hibernando (Ganhos)';
             if (disguise.breakEndTime > 0) {
               timeRemaining = Math.max(0, disguise.breakEndTime - now);
               const totalDuration = disguise.breakEndTime - disguise.breakStartTime;
@@ -1764,20 +1674,14 @@ async function getWebSocketLogs(userId: string) {
             currentStatus = 'Aguardando';
           }
           
-          // Calcular tempo para próxima pausa automática
-          let timeToNextBreak = 0;
-          if (disguise.nextAutomaticBreakTime > 0 && disguise.nextAutomaticBreakTime > now) {
-            timeToNextBreak = disguise.nextAutomaticBreakTime - now;
-          }
-          
           return {
             // Status atual
             currentStatus,
             
             // Timer da pausa atual (se ativa)
             currentBreak: {
-              isActive: disguise.isOnBreakFromWins || disguise.isOnScheduledBreak,
-              type: disguise.isOnBreakFromWins ? 'wins' : 'scheduled',
+              isActive: disguise.isOnBreakFromWins,
+              type: 'wins',
               timeRemainingMs: timeRemaining,
               timeRemainingMinutes: Math.ceil(timeRemaining / (60 * 1000)),
               progressPercent: Math.round(progressPercent),
@@ -1790,13 +1694,6 @@ async function getWebSocketLogs(userId: string) {
               completed: disguise.completedSequences,
               target: disguise.targetSequences,
               progressPercent: Math.round((disguise.completedSequences / disguise.targetSequences) * 100)
-            },
-            
-            // Próxima pausa automática
-            nextAutomaticBreak: {
-              timeRemainingMs: timeToNextBreak,
-              timeRemainingMinutes: Math.ceil(timeToNextBreak / (60 * 1000)),
-              scheduledTime: disguise.nextAutomaticBreakTime
             },
             
             // Informações gerais

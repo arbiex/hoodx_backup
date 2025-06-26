@@ -111,6 +111,11 @@ const disguiseControl: { [userId: string]: {
   maxBreakMinutes: number;         // Máximo de minutos de pausa (60)
   minSequencesTarget: number;      // Mínimo de sequências antes de pausar (2)
   maxSequencesTarget: number;      // Máximo de sequências antes de pausar (5)
+  
+  // ⏰ NOVO: Campos para timer visual
+  breakStartTime: number;          // Timestamp do início da pausa
+  breakEndTime: number;            // Timestamp do fim da pausa
+  nextAutomaticBreakTime: number;  // Timestamp da próxima pausa automática
 } } = {};
 
 // Função para calcular sequência de martingale baseada no tip
@@ -204,7 +209,11 @@ function initializeDisguiseControl(userId: string) {
       minBreakMinutes: 20,
       maxBreakMinutes: 60,
       minSequencesTarget: 2,
-      maxSequencesTarget: 5
+      maxSequencesTarget: 5,
+      // ⏰ NOVO: Campos para timer visual
+      breakStartTime: 0,
+      breakEndTime: 0,
+      nextAutomaticBreakTime: 0
     };
     
     addWebSocketLog(userId, `🕶️ Sistema de disfarce ativado - Meta: ${disguiseControl[userId].targetSequences} sequências`, 'info');
@@ -227,11 +236,19 @@ function checkForWinBreak(userId: string): boolean {
   const disguise = disguiseControl[userId];
   if (!disguise || disguise.isOnBreakFromWins || disguise.isOnScheduledBreak) return false;
   
+  // 💰 NOVO: Verificar se está com lucro antes de permitir pausa
+  const operation = operationState[userId];
+  if (!operation || operation.stats.profit <= 0) {
+    addWebSocketLog(userId, `🚫 Pausa bloqueada - Bot no prejuízo (R$ ${operation?.stats.profit.toFixed(2) || '0.00'})`, 'info');
+    return false;
+  }
+  
   disguise.completedSequences++;
   addWebSocketLog(userId, `🏆 Sequência completada! Total: ${disguise.completedSequences}/${disguise.targetSequences}`, 'success');
   
   if (disguise.completedSequences >= disguise.targetSequences) {
-    // Atingiu meta - iniciar pausa por ganhos consecutivos
+    // Atingiu meta E está com lucro - iniciar pausa por ganhos consecutivos
+    addWebSocketLog(userId, `💰 Bot com lucro (R$ ${operation.stats.profit.toFixed(2)}) - Pausa autorizada`, 'success');
     startWinBreak(userId);
     return true;
   }
@@ -245,6 +262,10 @@ function startWinBreak(userId: string) {
   
   disguise.isOnBreakFromWins = true;
   disguise.lastBreakTime = Date.now();
+  
+  // ⏰ NOVO: Definir timestamps para timer visual
+  disguise.breakStartTime = Date.now();
+  disguise.breakEndTime = Date.now() + disguise.nextBreakDuration;
   
   // Parar operação atual
   if (operationState[userId]) {
@@ -270,6 +291,10 @@ function startScheduledBreak(userId: string) {
   
   disguise.isOnScheduledBreak = true;
   disguise.lastBreakTime = Date.now();
+  
+  // ⏰ NOVO: Definir timestamps para timer visual
+  disguise.breakStartTime = Date.now();
+  disguise.breakEndTime = Date.now() + disguise.nextBreakDuration;
   
   // Parar operação atual
   if (operationState[userId]) {
@@ -298,6 +323,10 @@ async function resumeFromBreak(userId: string) {
   disguise.isOnScheduledBreak = false;
   disguise.waitingBreakTimer = null;
   
+  // ⏰ NOVO: Limpar timestamps de pausa
+  disguise.breakStartTime = 0;
+  disguise.breakEndTime = 0;
+  
   // Gerar novos valores aleatórios
   disguise.completedSequences = 0;
   disguise.targetSequences = generateRandomSequenceTarget();
@@ -306,10 +335,38 @@ async function resumeFromBreak(userId: string) {
   addWebSocketLog(userId, `🔄 RETOMANDO OPERAÇÃO APÓS PAUSA`, 'success');
   addWebSocketLog(userId, `🕶️ Nova meta: ${disguise.targetSequences} sequências - Próxima pausa: ${Math.floor(disguise.nextBreakDuration / (60 * 1000))} min`, 'info');
   
-  // Reconectar automaticamente (simular clique no botão conectar)
-  // Usar tipValue padrão ou último usado
-  const lastTipValue = operationState[userId]?.strategy?.sequences?.[0] || 1.0;
-  await connectToBettingGame(userId, lastTipValue);
+  try {
+    // Reconectar automaticamente (simular clique no botão conectar)
+    // Usar tipValue padrão ou último usado
+    const lastTipValue = operationState[userId]?.strategy?.sequences?.[0] || 1.0;
+    await connectToBettingGame(userId, lastTipValue);
+    
+    addWebSocketLog(userId, `✅ Tentativa de reconexão automática iniciada`, 'success');
+    
+    // Aguardar um pouco e iniciar operação automaticamente
+    setTimeout(async () => {
+      try {
+        // Verificar se conectou com sucesso antes de iniciar operação
+        if (activeWebSockets[userId]) {
+          await startSimpleOperation(userId);
+          addWebSocketLog(userId, `🚀 Operação reiniciada automaticamente após pausa`, 'success');
+        } else {
+          addWebSocketLog(userId, `⚠️ WebSocket não conectado - tentando novamente em 30s`, 'error');
+          // Tentar novamente em 30 segundos
+          setTimeout(() => resumeFromBreak(userId), 30000);
+        }
+      } catch (error) {
+        addWebSocketLog(userId, `❌ Erro ao reiniciar operação: ${error}`, 'error');
+        // Tentar novamente em 30 segundos
+        setTimeout(() => resumeFromBreak(userId), 30000);
+      }
+    }, 5000); // Aguardar 5 segundos para conexão estabilizar
+    
+  } catch (error) {
+    addWebSocketLog(userId, `❌ Erro na reconexão automática: ${error}`, 'error');
+    // Tentar novamente em 30 segundos
+    setTimeout(() => resumeFromBreak(userId), 30000);
+  }
   
   // 🕶️ NOVO: Reagendar próxima pausa automática
   scheduleNextAutomaticBreak(userId);
@@ -330,13 +387,28 @@ function scheduleNextAutomaticBreak(userId: string) {
   const randomTimeMs = Math.floor(Math.random() * (maxTimeMs - minTimeMs + 1)) + minTimeMs;
   
   const breakInMinutes = Math.floor(randomTimeMs / (60 * 1000));
+  
+  // ⏰ NOVO: Definir timestamp da próxima pausa automática
+  disguise.nextAutomaticBreakTime = Date.now() + randomTimeMs;
+  
   addWebSocketLog(userId, `⏰ Próxima pausa automática programada em ${breakInMinutes} minutos`, 'info');
   
   // Programar pausa automática
   disguise.waitingBreakTimer = setTimeout(() => {
-    // Verificar se ainda está operando antes de pausar
-    if (operationState[userId]?.active && !disguise.isOnBreakFromWins && !disguise.isOnScheduledBreak) {
-      startScheduledBreak(userId);
+    // 💰 NOVO: Verificar se está com lucro antes de pausar automaticamente
+    const operation = operationState[userId];
+    const isOperating = operation?.active;
+    const hasProfit = operation && operation.stats.profit > 0;
+    
+    if (isOperating && !disguise.isOnBreakFromWins && !disguise.isOnScheduledBreak) {
+      if (hasProfit) {
+        addWebSocketLog(userId, `💰 Bot com lucro (R$ ${operation.stats.profit.toFixed(2)}) - Pausa automática autorizada`, 'success');
+        startScheduledBreak(userId);
+      } else {
+        addWebSocketLog(userId, `🚫 Pausa automática bloqueada - Bot no prejuízo (R$ ${operation.stats.profit.toFixed(2)})`, 'info');
+        // Reagendar para mais tarde (mesmo tempo)
+        scheduleNextAutomaticBreak(userId);
+      }
     } else {
       // Se não está operando, reagendar para mais tarde
       scheduleNextAutomaticBreak(userId);
@@ -1638,7 +1710,15 @@ async function getWebSocketLogs(userId: string) {
           level: operation.currentLevel,
           martingaleLevel: operation.martingaleLevel,
           waitingForResult: operation.waitingForResult,
-          stats: operation.stats
+          stats: operation.stats,
+          // 💰 NOVO: Status de lucro em tempo real
+          profitStatus: {
+            current: operation.stats.profit,
+            isProfit: operation.stats.profit > 0,
+            canPause: operation.stats.profit > 0, // Só pode pausar se tiver lucro
+            formatted: `R$ ${operation.stats.profit.toFixed(2)}`,
+            status: operation.stats.profit > 0 ? 'LUCRO' : operation.stats.profit < 0 ? 'PREJUÍZO' : 'NEUTRO'
+          }
         } : null,
         canStartOperation,
         bettingWindow: {
@@ -1663,17 +1743,69 @@ async function getWebSocketLogs(userId: string) {
           totalNoise: parseFloat(humanizationStats[userId].totalNoise.toFixed(2)),
           lastNoiseApplied: parseFloat(humanizationStats[userId].lastNoiseApplied.toFixed(2))
         } : null,
-        // 🕶️ NOVO: Estatísticas do sistema de disfarce
-        disguiseStats: disguiseControl[userId] ? {
-          completedSequences: disguiseControl[userId].completedSequences,
-          targetSequences: disguiseControl[userId].targetSequences,
-          isOnBreakFromWins: disguiseControl[userId].isOnBreakFromWins,
-          isOnScheduledBreak: disguiseControl[userId].isOnScheduledBreak,
-          nextBreakDuration: Math.floor(disguiseControl[userId].nextBreakDuration / (60 * 1000)), // em minutos
-          timeSinceLastBreak: disguiseControl[userId].lastBreakTime > 0 ? 
-            Math.floor((Date.now() - disguiseControl[userId].lastBreakTime) / (60 * 1000)) : 0, // em minutos
-          hasActiveTimer: !!disguiseControl[userId].waitingBreakTimer
-        } : null
+        // 🕶️ NOVO: Estatísticas do sistema de disfarce com timer visual
+        disguiseStats: disguiseControl[userId] ? (() => {
+          const disguise = disguiseControl[userId];
+          const now = Date.now();
+          
+          // Calcular status atual
+          let currentStatus = 'Operando';
+          let timeRemaining = 0;
+          let progressPercent = 0;
+          
+          if (disguise.isOnBreakFromWins || disguise.isOnScheduledBreak) {
+            currentStatus = disguise.isOnBreakFromWins ? 'Hibernando (Ganhos)' : 'Hibernando (Programada)';
+            if (disguise.breakEndTime > 0) {
+              timeRemaining = Math.max(0, disguise.breakEndTime - now);
+              const totalDuration = disguise.breakEndTime - disguise.breakStartTime;
+              progressPercent = totalDuration > 0 ? Math.min(100, ((totalDuration - timeRemaining) / totalDuration) * 100) : 0;
+            }
+          } else if (!operationState[userId]?.active) {
+            currentStatus = 'Aguardando';
+          }
+          
+          // Calcular tempo para próxima pausa automática
+          let timeToNextBreak = 0;
+          if (disguise.nextAutomaticBreakTime > 0 && disguise.nextAutomaticBreakTime > now) {
+            timeToNextBreak = disguise.nextAutomaticBreakTime - now;
+          }
+          
+          return {
+            // Status atual
+            currentStatus,
+            
+            // Timer da pausa atual (se ativa)
+            currentBreak: {
+              isActive: disguise.isOnBreakFromWins || disguise.isOnScheduledBreak,
+              type: disguise.isOnBreakFromWins ? 'wins' : 'scheduled',
+              timeRemainingMs: timeRemaining,
+              timeRemainingMinutes: Math.ceil(timeRemaining / (60 * 1000)),
+              progressPercent: Math.round(progressPercent),
+              startTime: disguise.breakStartTime,
+              endTime: disguise.breakEndTime
+            },
+            
+            // Progresso das sequências
+            sequences: {
+              completed: disguise.completedSequences,
+              target: disguise.targetSequences,
+              progressPercent: Math.round((disguise.completedSequences / disguise.targetSequences) * 100)
+            },
+            
+            // Próxima pausa automática
+            nextAutomaticBreak: {
+              timeRemainingMs: timeToNextBreak,
+              timeRemainingMinutes: Math.ceil(timeToNextBreak / (60 * 1000)),
+              scheduledTime: disguise.nextAutomaticBreakTime
+            },
+            
+            // Informações gerais
+            nextBreakDuration: Math.floor(disguise.nextBreakDuration / (60 * 1000)), // em minutos
+            timeSinceLastBreak: disguise.lastBreakTime > 0 ? 
+              Math.floor((now - disguise.lastBreakTime) / (60 * 1000)) : 0, // em minutos
+            hasActiveTimer: !!disguise.waitingBreakTimer
+          };
+        })() : null
       }
     });
   } catch (error) {

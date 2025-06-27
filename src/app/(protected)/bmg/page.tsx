@@ -28,8 +28,8 @@ export default function BMG() {
     type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' 
   }>>([]);
 
-  // Estados para últimos 20 resultados
-  const [lastTwentyResults, setLastTwentyResults] = useState<Array<{ 
+  // Estados para últimos 10 resultados
+  const [lastTenResults, setLastTenResults] = useState<Array<{ 
     number: number; 
       color: string;
     gameId: string; 
@@ -394,7 +394,7 @@ export default function BMG() {
           }
           
           setWebsocketLogs(result.data.logs || []);
-                      setLastTwentyResults(result.data.lastTwentyResults || []);
+          setLastTenResults(result.data.lastTenResults || []);
           setConnectionStatus(result.data.connectionStatus || { connected: false, lastUpdate: Date.now() });
           setOperationActive(result.data.operationActive || false);
           setOperationState(result.data.operationState || null);
@@ -514,13 +514,20 @@ export default function BMG() {
   }, []);
 
   // NOVO: Controle inteligente do botão baseado no padrão E janela de apostas
-  const hasCompletePattern = lastTwentyResults.length >= 20;
+  const hasCompletePattern = lastTenResults.length >= 10;
   const canStartOperation = hasCompletePattern && bettingWindow.isOpen && !operationActive;
   
-  // IMPORTANTE: Pattern para apostas usa os primeiros 5 invertidos (posições 1-5)
-  const currentPattern = lastTwentyResults.length >= 20 
-    ? lastTwentyResults.slice(0, 5).map((r: any) => r.color).reverse().join('')
-    : '';
+  // IMPORTANTE: Pattern para apostas = inverter ordem (recente→antigo para antigo→recente) + cores opostas
+  const currentPattern = lastTenResults
+    .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
+    .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color) // 2. Trocar cores
+    .join('');
+
+  // Pattern para exibição no ESTADO_OPERAÇÃO (ordem cronológica: antigo → recente, cores opostas)
+  const displayPattern = lastTenResults
+    .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
+    .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color) // 2. Trocar cores
+    .join('');
 
   // Adicionar função para capturar informações do usuário
   function getUserInfo() {
@@ -752,41 +759,36 @@ export default function BMG() {
                     </span>
                   </div>
                   
-                  {isOperating && (websocketLogs.length > 0 || lastTwentyResults.length > 0) && (
+                  {isOperating && (websocketLogs.length > 0 || lastTenResults.length > 0) && (
                     <div className="text-xs font-mono text-gray-500">
-                      LOGS: {websocketLogs.length} | ÚLTIMOS_20: {lastTwentyResults.length}/20
+                      LOGS: {websocketLogs.length} | ÚLTIMOS_10: {lastTenResults.length}/10
                     </div>
                   )}
                 </div>
 
-                {/* Últimos 20 Resultados */}
-                {lastTwentyResults.length > 0 && (
+                {/* Últimos 10 Resultados */}
+                {lastTenResults.length > 0 && (
                   <div className="space-y-2">
-                    <div className="text-xs font-mono text-blue-400 font-semibold">🎯 ÚLTIMOS_20_RESULTADOS:</div>
-                    <div className="grid grid-cols-10 gap-2 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
-                      {lastTwentyResults.slice().reverse().map((result: any, index: any) => {
+                    <div className="text-xs font-mono text-blue-400 font-semibold">🎯 ÚLTIMOS_10_RESULTADOS:</div>
+                    <div className="flex gap-2 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg flex-wrap">
+                      {lastTenResults.slice().reverse().map((result: any, index: number) => {
                         const baseClasses = "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold font-mono shadow-lg transition-all duration-300 hover:scale-110";
                         const colorClasses = result.color === 'R' 
                           ? 'bg-red-500 text-white shadow-red-500/50' 
                           : 'bg-gray-800 text-white border border-gray-600 shadow-gray-800/50';
                         
-                        // Destacar os primeiros 5 (que serão usados como padrão)
-                        // Como estamos mostrando reversed, os primeiros 5 são os últimos no array visual
-                        const isPatternResult = index >= lastTwentyResults.length - 5;
-                        const patternClasses = isPatternResult ? 'ring-2 ring-yellow-400' : '';
-                        
                         return (
                           <div
                             key={`result-${index}-${result.gameId}`}
-                            className={`${baseClasses} ${colorClasses} ${patternClasses}`}
-                            title={`${isPatternResult ? '⭐ PADRÃO: ' : ''}Número: ${result.number} | Game: ${result.gameId}`}
+                            className={`${baseClasses} ${colorClasses}`}
+                            title={`Número: ${result.number} | Game: ${result.gameId}`}
                           >
                             {result.color}
                           </div>
                         );
                       })}
-                      {lastTwentyResults.length < 20 && (
-                        Array.from({ length: 20 - lastTwentyResults.length }).map((_, index) => (
+                      {lastTenResults.length < 10 && (
+                        Array.from({ length: 10 - lastTenResults.length }).map((_, index) => (
                           <div
                             key={`empty-${index}`}
                             className="w-8 h-8 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center text-xs text-gray-500"
@@ -797,11 +799,11 @@ export default function BMG() {
                       )}
                     </div>
                     <div className="text-xs font-mono text-gray-400">
-                      Padrão com gap de 15: {currentPattern || 'Aguardando...'} ({lastTwentyResults.length}/20 completo)
+                      Padrão para apostas: {currentPattern || 'Aguardando...'} ({lastTenResults.length}/10 completo)
                     </div>
-                    {lastTwentyResults.length >= 20 && (
+                    {lastTenResults.length >= 10 && (
                       <div className="text-xs font-mono text-blue-300 bg-blue-500/10 p-2 rounded border border-blue-500/20">
-                        💡 Padrão dos PRIMEIROS 5 (cronológico): {currentPattern.split('').join(' → ')} | Gap de 15 resultados
+                        💡 Apostas contra padrão: {currentPattern.split('').join(' → ')} (apenas cores opostas)
                   </div>
                 )}
 
@@ -826,11 +828,11 @@ export default function BMG() {
                     <div className="p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg space-y-1 text-xs font-mono">
                       <div className="flex justify-between">
                         <span className="text-gray-400">Padrão Ativo:</span>
-                        <span className="text-cyan-400">{operationState.pattern}</span>
+                        <span className="text-cyan-400">{displayPattern}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-400">Nível Atual:</span>
-                        <span className="text-cyan-400">{operationState.level + 1}/5</span>
+                        <span className="text-cyan-400">{operationState.level + 1}/10</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-400">Martingale:</span>

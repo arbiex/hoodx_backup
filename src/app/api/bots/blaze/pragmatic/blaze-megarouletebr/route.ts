@@ -49,8 +49,8 @@ interface BettingSession {
 const websocketLogs: { [userId: string]: Array<{ timestamp: number; message: string; type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' }> } = {};
 const connectionStatus: { [userId: string]: { connected: boolean; error?: string; lastUpdate: number } } = {};
 
-// NOVO: Sistema de gap com últimos 20 resultados
-const lastTwentyResults: { [userId: string]: Array<{ number: number; color: string; gameId: string; timestamp: number }> } = {};
+// NOVO: Sistema dos últimos 10 resultados para padrão invertido
+const lastTenResults: { [userId: string]: Array<{ number: number; color: string; gameId: string; timestamp: number }> } = {};
 
 // NOVO: Estado da operação simplificada
 const operationState: { [userId: string]: {
@@ -132,15 +132,15 @@ const activeSessions: { [userId: string]: {
   martingaleResets: number;   // Contador de resets do martingale
 } } = {};
 
-// Função para calcular sequência de martingale baseada no tip
+// Função para calcular sequência de martingale baseada no tip - 10 níveis
 function calculateMartingaleSequence(tipValue: number): number[] {
   const sequence: number[] = [];
   
   // Nível 1: 1 tip
   sequence.push(tipValue);
   
-  // Níveis 2-5: (anterior × 2) + (2 × tip)
-  for (let level = 2; level <= 5; level++) {
+  // Níveis 2-10: (anterior × 2) + (2 × tip)
+  for (let level = 2; level <= 10; level++) {
     const previousValue = sequence[level - 2];
     const newValue = (previousValue * 2) + (2 * tipValue);
     sequence.push(newValue);
@@ -573,47 +573,45 @@ function processGameResult(userId: string, gameId: string, number: number, color
     return;
   }
   
-  // Adiciona aos últimos 20 resultados
-  if (!lastTwentyResults[userId]) {
-    lastTwentyResults[userId] = [];
+  // Adiciona aos últimos 10 resultados
+  if (!lastTenResults[userId]) {
+    lastTenResults[userId] = [];
   }
   
-  lastTwentyResults[userId].push({
+  lastTenResults[userId].push({
     number,
     color: colorCode,
     gameId,
     timestamp: Date.now()
   });
   
-  // Mantém apenas os últimos 20
-  if (lastTwentyResults[userId].length > 20) {
-    lastTwentyResults[userId].shift();
+  // Mantém apenas os últimos 10
+  if (lastTenResults[userId].length > 10) {
+    lastTenResults[userId].shift();
   }
   
-  addWebSocketLog(userId, `🎲 Resultado: ${number} ${color} | Últimos 20: ${lastTwentyResults[userId].map(r => r.color).join('')}`, 'game');
+  addWebSocketLog(userId, `🎲 Resultado: ${number} ${color} | Últimos 10: ${lastTenResults[userId].map((r: any) => r.color).join('')}`, 'game');
   
   // Se operação ativa, processa aposta
   if (operationState[userId]?.active) {
     processOperationResult(userId, colorCode);
   } else {
-    // ✅ NOVO: Reativar automaticamente se operação estava pausada e agora tem 20 resultados
-    if (operationState[userId] && !operationState[userId].active && lastTwentyResults[userId].length >= 20) {
-      addWebSocketLog(userId, `🔄 REATIVAÇÃO AUTOMÁTICA: 20 resultados coletados`, 'success');
+    // ✅ NOVO: Reativar automaticamente se operação estava pausada e agora tem padrão
+    if (operationState[userId] && !operationState[userId].active && lastTenResults[userId].length >= 10) {
+      addWebSocketLog(userId, `🔄 REATIVAÇÃO AUTOMÁTICA: Padrão disponível detectado`, 'success');
       
-      // Buscar padrão válido com gap de 15
-      const validPattern = findValidPatternWithGap(userId);
-      if (validPattern) {
-        operationState[userId].active = true;
-        operationState[userId].currentPattern = validPattern;
-        operationState[userId].currentLevel = 0;
-        operationState[userId].martingaleLevel = 0;
-        operationState[userId].waitingForResult = false;
-        
-        addWebSocketLog(userId, `🚀 PADRÃO VÁLIDO ENCONTRADO: ${validPattern.join('')}`, 'success');
-        addWebSocketLog(userId, `📋 Sequência a seguir: ${validPattern.map((c: any, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
-      } else {
-        addWebSocketLog(userId, `⚠️ Nenhum padrão válido encontrado - aguardando novos resultados`, 'error');
-      }
+      operationState[userId].active = true;
+      // 🔄 APOSTA CONTRA PADRÃO: Inverter ordem (recente→antigo para antigo→recente) + cores opostas
+      operationState[userId].currentPattern = lastTenResults[userId]
+        .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
+        .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color); // 2. Trocar cores
+      operationState[userId].currentLevel = 0;
+      operationState[userId].martingaleLevel = 0;
+      operationState[userId].waitingForResult = false;
+      
+      const newPattern = operationState[userId].currentPattern.join('');
+      addWebSocketLog(userId, `🚀 NOVO PADRÃO AUTOMÁTICO: ${newPattern}`, 'success');
+      addWebSocketLog(userId, `📋 Sequência a seguir: ${newPattern.split('').map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
     }
   }
 }
@@ -634,8 +632,8 @@ function processOperationResult(userId: string, resultColor: string) {
       // ✅ GANHOU - Avança para próximo nível do padrão
       operation.stats.wins++;
       
-      // Usar valor apostado atual para calcular lucro
-      const betAmount = operation.strategy.sequences[operation.currentLevel] || 0.50;
+      // Usar valor apostado atual para calcular lucro (martingale atual)
+      const betAmount = operation.strategy.sequences[operation.martingaleLevel] || 0.50;
       operation.stats.profit += betAmount;
       
       operation.currentLevel++; // ✅ AVANÇA NÍVEL
@@ -646,116 +644,53 @@ function processOperationResult(userId: string, resultColor: string) {
       
       addWebSocketLog(userId, `✅ VITÓRIA Nível ${operation.currentLevel}! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName}`, 'success');
       
-      if (operation.currentLevel >= 5) {
-        // ✅ PADRÃO COMPLETO! Buscar próximo padrão
-        addWebSocketLog(userId, `🎉 PADRÃO COMPLETO! ${operation.currentPattern.join('')} finalizado com sucesso!`, 'success');
+      if (operation.currentLevel >= 10) {
+        // Completou toda sequência!
+        addWebSocketLog(userId, `🎉 SEQUÊNCIA COMPLETA! Padrão invertido ${operation.currentPattern.join('')} finalizado com sucesso!`, 'success');
         
-        // Buscar novo padrão válido com gap de 15
-        findNextValidPattern(userId);
-        return;
+        resetOperationForNewPattern(userId);
+        return; // Para aqui, não continua apostando
     } else {
         // Próximo nível da sequência
         const nextBet = operation.currentPattern[operation.currentLevel];
         const nextBetName = COLOR_NAMES[nextBet] || nextBet;
         addWebSocketLog(userId, `➡️ Próximo nível ${operation.currentLevel + 1}: ${nextBetName} (${nextBet})`, 'info');
+        // ✅ Continua ativo para próxima aposta
       }
       
     } else {
-      // ❌ PERDEU - REINICIA O MESMO PADRÃO (não troca!)
+      // ❌ PERDEU - Avança no martingale
       operation.stats.losses++;
       
-      const betAmount = operation.strategy.sequences[operation.currentLevel] || 0.50;
+      const betAmount = operation.strategy.sequences[operation.martingaleLevel] || 0.50;
       operation.stats.profit -= betAmount;
       
       const expectedColorName = COLOR_NAMES[expectedColor] || expectedColor;
       const resultColorName = COLOR_NAMES[resultColor] || resultColor;
       
       const defeatReason = resultColor === 'green' ? '(ZERO)' : `(${resultColorName})`;
-      addWebSocketLog(userId, `❌ DERROTA Nível ${operation.currentLevel + 1}! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName} ${defeatReason}`, 'error');
-      addWebSocketLog(userId, `🔄 REINICIANDO MESMO PADRÃO: ${operation.currentPattern.join('')}`, 'info');
       
-      // ✅ REINICIA MESMO PADRÃO - não troca!
-      operation.currentLevel = 0;
-      operation.martingaleLevel = 0;
-      operation.waitingForResult = false;
-      // Mantém operation.active = true e currentPattern inalterado
+      // ✅ AVANÇA NO MARTINGALE
+      operation.martingaleLevel++;
+      
+      if (operation.martingaleLevel >= 10) {
+        // ❌ PERDEU M10 - Para e pega novo padrão
+        addWebSocketLog(userId, `❌ DERROTA M10! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName} ${defeatReason}`, 'error');
+        addWebSocketLog(userId, `🛑 MARTINGALE M10 PERDIDO - Buscando novo padrão`, 'error');
+        
+        resetOperationForNewPattern(userId);
+      } else {
+        // ❌ PERDEU M1-M9 - Continua no mesmo nível com martingale
+        const nextMartingale = operation.martingaleLevel + 1;
+        addWebSocketLog(userId, `❌ DERROTA M${operation.martingaleLevel}! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName} ${defeatReason}`, 'error');
+        addWebSocketLog(userId, `🔄 Próxima aposta: M${nextMartingale} no mesmo nível ${operation.currentLevel + 1} (${expectedColorName})`, 'info');
+        
+        // ✅ Continua ativo para próxima aposta no mesmo nível
+      }
     }
 }
 
-// ✅ NOVA FUNÇÃO: Validar se padrão aparece no gap de 15 resultados
-function validatePatternGap(userId: string, pattern: string[]): boolean {
-  const results = lastTwentyResults[userId];
-  if (!results || results.length < 20) return false;
-  
-  // Gap: últimos 15 resultados (posições 5-19, ou seja, índices 5-19)
-  const gapResults = results.slice(5, 20); // Posições 6-20 (índices 5-19)
-  const patternString = pattern.join('');
-  
-  // Verificar se o padrão aparece em sequência no gap
-  for (let i = 0; i <= gapResults.length - pattern.length; i++) {
-    const sequence = gapResults.slice(i, i + pattern.length).map(r => r.color).join('');
-    if (sequence === patternString) {
-      addWebSocketLog(userId, `⚠️ PADRÃO ENCONTRADO NO GAP: ${patternString} na posição ${i+6}-${i+5+pattern.length}`, 'error');
-      return false; // Padrão inválido
-    }
-  }
-  
-  addWebSocketLog(userId, `✅ PADRÃO VÁLIDO: ${patternString} não encontrado no gap de 15`, 'success');
-  return true; // Padrão válido
-}
-
-// ✅ NOVA FUNÇÃO: Buscar padrão válido com gap de 15
-function findValidPatternWithGap(userId: string): string[] | null {
-  const results = lastTwentyResults[userId];
-  if (!results || results.length < 20) {
-    addWebSocketLog(userId, `⚠️ Insuficientes resultados: ${results?.length || 0}/20`, 'error');
-    return null;
-  }
-  
-  // Extrair padrão: primeiros 5 resultados (posições 1-5) em ordem cronológica
-  const firstFive = results.slice(0, 5); // Primeiros 5 (mais antigos)
-  const candidatePattern = firstFive.map(r => r.color); // Manter ordem cronológica
-  
-  addWebSocketLog(userId, `🔍 CANDIDATO: ${candidatePattern.join('')} (pos 1-5 cronológicas)`, 'info');
-  
-  // Validar se padrão não aparece no gap de 15
-  if (validatePatternGap(userId, candidatePattern)) {
-    return candidatePattern;
-  }
-  
-  // Se padrão inválido, aguardar novos resultados
-  addWebSocketLog(userId, `🔄 Padrão inválido - aguardando novos resultados`, 'info');
-  return null;
-}
-
-// ✅ NOVA FUNÇÃO: Buscar próximo padrão válido
-function findNextValidPattern(userId: string) {
-  const operation = operationState[userId];
-  if (!operation) return;
-  
-  // Tentar encontrar novo padrão válido
-  const validPattern = findValidPatternWithGap(userId);
-  
-  if (validPattern) {
-    operation.currentPattern = validPattern;
-    operation.currentLevel = 0;
-    operation.martingaleLevel = 0;
-    operation.waitingForResult = false;
-    // Mantém operation.active = true
-    
-    addWebSocketLog(userId, `🔄 NOVO PADRÃO VÁLIDO: ${validPattern.join('')}`, 'success');
-    addWebSocketLog(userId, `📋 Sequência a seguir: ${validPattern.map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
-    
-    // Reset da sequência de martingale
-    const tipValue = operation.strategy.sequences[0] || 0.50;
-    operation.strategy.sequences = calculateMartingaleSequence(tipValue);
-  } else {
-    addWebSocketLog(userId, `⚠️ Nenhum padrão válido disponível - pausando operação`, 'error');
-    resetOperationForNewPattern(userId);
-  }
-}
-
-// NOVO: Reset para aguardar novos resultados
+// NOVO: Reset para novo padrão - OPERAÇÃO CONTÍNUA
 function resetOperationForNewPattern(userId: string) {
   if (!operationState[userId]) return;
   
@@ -765,21 +700,33 @@ function resetOperationForNewPattern(userId: string) {
     session.martingaleResets++;
   }
   
-  addWebSocketLog(userId, `🔄 Aguardando novos resultados para continuar...`, 'info');
+  // ✅ OPERAÇÃO CONTÍNUA - busca automaticamente próximo padrão
+  const results = lastTenResults[userId] || [];
   
-  // Reset para aguardar novo padrão
-  operationState[userId].active = false; // ✅ Fica inativo aguardando novos resultados
-  operationState[userId].currentPattern = [];
-  operationState[userId].currentLevel = 0;
-  operationState[userId].martingaleLevel = 0;
-  operationState[userId].waitingForResult = false;
-  
-  // Reset da sequência de martingale (volta para valores originais)
-  const tipValue = operationState[userId].strategy.sequences[0] || 0.50;
-  operationState[userId].strategy.sequences = calculateMartingaleSequence(tipValue);
-  
-  // ✅ IMPORTANTE: Não reseta as estatísticas, mantém acumuladas
-  // operation.stats permanece intacto para continuar contabilizando
+  if (results.length >= 10) {
+    // Tem padrão disponível - continua automaticamente
+    // 🔄 APOSTA CONTRA PADRÃO: Inverter ordem (recente→antigo para antigo→recente) + cores opostas
+    operationState[userId].currentPattern = results
+      .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
+      .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color); // 2. Trocar cores
+    operationState[userId].currentLevel = 0;
+    operationState[userId].martingaleLevel = 0;
+    operationState[userId].waitingForResult = false;
+    // ✅ MANTÉM active = true para continuar operando
+    
+    const newPattern = operationState[userId].currentPattern.join('');
+    addWebSocketLog(userId, `🔄 NOVO PADRÃO AUTOMÁTICO: ${newPattern}`, 'success');
+    addWebSocketLog(userId, `📋 Próxima sequência: ${newPattern.split('').map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
+  } else {
+    // Não tem padrão suficiente - para e aguarda
+    operationState[userId].active = false;
+    operationState[userId].currentPattern = [];
+    operationState[userId].currentLevel = 0;
+    operationState[userId].martingaleLevel = 0;
+    operationState[userId].waitingForResult = false;
+    
+    addWebSocketLog(userId, `⏳ Aguardando novos resultados para continuar (${results.length}/10)`, 'info');
+  }
 }
 
 // NOVO: Função para renovar sessão automaticamente
@@ -921,7 +868,7 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
     }
     
     // Inicializar estados
-    lastTwentyResults[userId] = [];
+    lastTenResults[userId] = [];
     resultCollectionEnabled[userId] = false; // Só habilita após primeiro "apostas fechadas"
     operationState[userId] = {
       active: false,
@@ -977,36 +924,32 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
 // NOVO: Iniciar operação simplificada
 async function startSimpleOperation(userId: string) {
   try {
-    // Verificar se tem 20 resultados
-    const results = lastTwentyResults[userId] || [];
+    // Verificar se tem 10 resultados
+    const results = lastTenResults[userId] || [];
     
-    if (results.length < 20) {
+    if (results.length < 10) {
       return NextResponse.json({
         success: false,
-        error: `Aguarde 20 resultados para iniciar (atual: ${results.length}/20)`
+        error: `Aguarde 10 resultados para iniciar (atual: ${results.length}/10)`
       });
     }
     
-    // Buscar padrão válido com gap de 15
-    const pattern = findValidPatternWithGap(userId);
-    if (!pattern) {
-      return NextResponse.json({
-        success: false,
-        error: 'Nenhum padrão válido encontrado - aguarde novos resultados'
-      });
-    }
+    // Inicializar operação - usar mesma ordem do frontend (mais recente primeiro)
     operationState[userId] = {
       ...operationState[userId],
       active: true,
-      currentPattern: pattern,
+      // 🔄 APOSTA CONTRA PADRÃO: Inverter ordem (recente→antigo para antigo→recente) + cores opostas
+      currentPattern: results
+        .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
+        .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color), // 2. Trocar cores
       currentLevel: 0,
       martingaleLevel: 0,
       waitingForResult: false
     };
     
-    const patternString = operationState[userId].currentPattern.join('');
-    addWebSocketLog(userId, `🚀 Operação iniciada! Padrão FIXO: ${patternString}`, 'success');
-    addWebSocketLog(userId, `📋 Sequência a seguir: ${operationState[userId].currentPattern.map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
+    const pattern = operationState[userId].currentPattern.join('');
+    addWebSocketLog(userId, `🚀 Operação iniciada! Padrão FIXO: ${pattern}`, 'success');
+    addWebSocketLog(userId, `📋 Sequência a seguir: ${pattern.split('').map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
     
     // ✅ NOVO: Ativar renovação automática de sessão
     setupAutoRenewal(userId);
@@ -1491,7 +1434,8 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   if (!operation || !operation.active) return;
   
   const expectedColor = operation.currentPattern[operation.currentLevel];
-  const betAmount = operation.strategy.sequences[operation.currentLevel]; // Valor original do martingale
+  // ✅ USAR VALOR DO MARTINGALE ATUAL (M1, M2, M3...)
+  const betAmount = operation.strategy.sequences[operation.martingaleLevel]; // Valor do martingale atual
   const betCode = COLOR_TO_BET_CODE[expectedColor];
   const colorName = COLOR_NAMES[expectedColor];
   
@@ -1549,8 +1493,8 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     
     // Log da aposta com indicação de humanização
     const humanTag = isHumanized ? ' 🎭' : '';
-    addWebSocketLog(userId, `🎯 APOSTA NÍVEL ${operation.currentLevel + 1}: ${colorName} (${expectedColor}) R$ ${finalBetAmount.toFixed(2)}${humanTag} → Game ${gameId}`, 'success');
-    addWebSocketLog(userId, `🔧 Nível: ${operation.currentLevel + 1}/5 | Valor ${isHumanized ? 'humanizado' : 'padrão'} | Padrão: ${operation.currentPattern.join('')} | Código: ${betCode}`, 'info');
+    addWebSocketLog(userId, `🎯 APOSTA NÍVEL ${operation.currentLevel + 1} M${operation.martingaleLevel + 1}: ${colorName} (${expectedColor}) R$ ${finalBetAmount.toFixed(2)}${humanTag} → Game ${gameId}`, 'success');
+    addWebSocketLog(userId, `🔧 Nível: ${operation.currentLevel + 1}/10 | Martingale: M${operation.martingaleLevel + 1}/10 | Padrão: ${operation.currentPattern.join('')}`, 'info');
     
     // TODO: Debitar créditos quando necessário
     // await debitUserCredits(userId, finalBetAmount);
@@ -1659,13 +1603,13 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
 async function getWebSocketLogs(userId: string) {
   try {
     const logs = websocketLogs[userId] || [];
-    const results = lastTwentyResults[userId] || [];
+    const results = lastTenResults[userId] || [];
     const status = connectionStatus[userId] || { connected: false, lastUpdate: Date.now() };
     const operation = operationState[userId];
 
-    // NOVO: Verificar se pode iniciar operação (20 resultados + janela de apostas aberta)
+    // NOVO: Verificar se pode iniciar operação (padrão completo + janela de apostas aberta)
     const bettingWindow = bettingWindowState[userId];
-    const hasCompletePattern = results.length >= 20;
+    const hasCompletePattern = results.length >= 10;
     const bettingWindowOpen = bettingWindow?.isOpen || false;
     const canStartOperation = hasCompletePattern && bettingWindowOpen && !operation?.active;
 
@@ -1674,7 +1618,7 @@ async function getWebSocketLogs(userId: string) {
       data: {
         logs,
         connectionStatus: status,
-        lastTwentyResults: results,
+        lastTenResults: results,
         operationActive: operation?.active || false,
         operationState: operation ? {
           pattern: operation.currentPattern.join(''),
@@ -1799,7 +1743,7 @@ async function resetOperationReport(userId: string) {
 async function getConnectionStatus(userId: string) {
   try {
     const status = connectionStatus[userId] || { connected: false, lastUpdate: Date.now() };
-    const results = lastTwentyResults[userId] || [];
+    const results = lastTenResults[userId] || [];
     const operation = operationState[userId];
 
     return NextResponse.json({
@@ -1808,7 +1752,7 @@ async function getConnectionStatus(userId: string) {
         connected: status.connected,
         lastUpdate: status.lastUpdate,
         error: status.error,
-        lastTwentyCount: results.length,
+        lastFiveCount: results.length,
         operationActive: operation?.active || false
       }
     });

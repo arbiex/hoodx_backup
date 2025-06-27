@@ -29,38 +29,37 @@ export default function BlazeMegaRouletteStrategyModal({
 }: BlazeMegaRouletteStrategyModalProps) {
   const [selectedTip, setSelectedTip] = useState<number | null>(null)
 
-  // Valores de tip disponíveis
-  const tipOptions = [1, 2, 5, 10, 25, 50, 100, 250]
+  // Valores de tip disponíveis - apenas 0.50, 1.00 e 2.00
+  const tipOptions = [0.50, 1, 2]
 
-  // Função para calcular sequência de martingale com +2 tips
+  // Função para calcular sequência de martingale com +2 tips - 10 níveis
   const calculateMartingaleSequence = (tipValue: number): StrategyInfo => {
     const sequence: MartingaleSequence[] = []
     
     // Nível 1: 1 tip
     sequence.push({ level: 1, value: tipValue })
     
-    // Níveis 2-5: (anterior × 2) + (2 × tip)
-    for (let level = 2; level <= 5; level++) {
+    // Níveis 2-10: (anterior × 2) + (2 × tip)
+    for (let level = 2; level <= 10; level++) {
       const previousValue = sequence[level - 2].value
       const newValue = (previousValue * 2) + (2 * tipValue)
       sequence.push({ level, value: newValue })
     }
 
-    // Banca ideal: M5 × 10, arredondado para cima
-    const m5Value = sequence[4].value // 5º nível (índice 4)
-    const bancaBase = m5Value * 10
-    let bancaIdeal = bancaBase
+    // Banca ideal: soma de todos os níveis de martingale, arredondado para cima
+    const somaTotal = sequence.reduce((sum, item) => sum + item.value, 0)
+    let bancaIdeal = somaTotal
 
-    // Arredondamento inteligente
-    if (bancaBase <= 500) {
+    // Arredondamento inteligente para cima
+    if (somaTotal <= 500) {
       // Arredondar para múltiplos de 50
-      bancaIdeal = Math.ceil(bancaBase / 50) * 50
-    } else if (bancaBase <= 1000) {
+      bancaIdeal = Math.ceil(somaTotal / 50) * 50
+    } else if (somaTotal <= 1000) {
       // Arredondar para múltiplos de 100
-      bancaIdeal = Math.ceil(bancaBase / 100) * 100
+      bancaIdeal = Math.ceil(somaTotal / 100) * 100
     } else {
       // Arredondar para múltiplos de 500
-      bancaIdeal = Math.ceil(bancaBase / 500) * 500
+      bancaIdeal = Math.ceil(somaTotal / 500) * 500
     }
 
     return {
@@ -78,17 +77,17 @@ export default function BlazeMegaRouletteStrategyModal({
   }
 
   const getStrategyColor = (tipValue: number) => {
-    if (tipValue <= 2) return 'green'
-    if (tipValue <= 10) return 'blue'
-    if (tipValue <= 50) return 'orange'
+    if (tipValue === 0.50) return 'green'
+    if (tipValue === 1) return 'blue'
+    if (tipValue === 2) return 'orange'
     return 'red'
   }
 
   const getRiskLevel = (tipValue: number) => {
-    if (tipValue <= 2) return 'Baixo risco'
-    if (tipValue <= 10) return 'Risco médio'
-    if (tipValue <= 50) return 'Alto risco'
-    return 'Risco extremo'
+    if (tipValue === 0.50) return 'Risco muito baixo'
+    if (tipValue === 1) return 'Risco baixo'
+    if (tipValue === 2) return 'Risco médio'
+    return 'Risco alto'
   }
 
   const selectedStrategyData = selectedTip ? calculateMartingaleSequence(selectedTip) : null
@@ -118,7 +117,7 @@ export default function BlazeMegaRouletteStrategyModal({
         {/* Botões de seleção de tip */}
         <div>
           <div className="text-xs font-mono text-gray-400 mb-2">VALOR_DO_TIP:</div>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 gap-3">
             {tipOptions.map((tip) => {
               const color = getStrategyColor(tip)
               return (
@@ -132,7 +131,7 @@ export default function BlazeMegaRouletteStrategyModal({
                   }`}
                 >
                   <div className="text-sm font-mono font-semibold">
-                    {tip}
+                    R$ {tip.toFixed(2)}
                   </div>
                 </button>
               )
@@ -149,11 +148,12 @@ export default function BlazeMegaRouletteStrategyModal({
                 <div className={`text-xl font-mono font-bold text-${getStrategyColor(selectedTip)}-400`}>
                   R$ {selectedStrategyData.bancaIdeal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </div>
-                
+                <div className="text-xs font-mono text-gray-500">
+                  {getRiskLevel(selectedTip)}
+                </div>
               </div>
-              
 
-              
+
             </div>
           </div>
         )}

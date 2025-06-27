@@ -523,11 +523,8 @@ export default function BMG() {
     .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color) // 2. Trocar cores
     .join('');
 
-  // Pattern para exibição no ESTADO_OPERAÇÃO (ordem cronológica: antigo → recente, cores opostas)
-  const displayPattern = lastTenResults
-    .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
-    .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color) // 2. Trocar cores
-    .join('');
+  // Pattern para exibição no ESTADO_OPERAÇÃO - vem da API quando operação está ativa
+  const displayPattern = operationState?.pattern || currentPattern;
 
   // Adicionar função para capturar informações do usuário
   function getUserInfo() {

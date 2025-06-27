@@ -776,7 +776,9 @@ export default function BMG() {
                     <div className="text-xs font-mono text-blue-400 font-semibold">🎯 ÚLTIMOS_10_RESULTADOS:</div>
                     <div className="flex gap-2 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg flex-wrap">
                       {lastTenResults.slice().reverse().map((result: any, index: number) => {
-                        const baseClasses = "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold font-mono shadow-lg transition-all duration-300 hover:scale-110";
+                        // Calcular posição cronológica: index 0 = posição 10 (mais recente), index 9 = posição 1 (mais antigo)
+                        const cronologicalPosition = lastTenResults.length - index;
+                        const baseClasses = "w-12 h-12 rounded-full flex flex-col items-center justify-center text-xs font-bold font-mono shadow-lg transition-all duration-300 hover:scale-110";
                         const colorClasses = result.color === 'R' 
                           ? 'bg-red-500 text-white shadow-red-500/50' 
                           : 'bg-gray-800 text-white border border-gray-600 shadow-gray-800/50';
@@ -785,29 +787,34 @@ export default function BMG() {
                           <div
                             key={`result-${index}-${result.gameId}`}
                             className={`${baseClasses} ${colorClasses}`}
-                            title={`Número: ${result.number} | Game: ${result.gameId}`}
+                            title={`Posição ${cronologicalPosition} | Número: ${result.number} | Game: ${result.gameId}`}
                           >
-                            {result.color}
+                            <div className="text-[8px] leading-none">{cronologicalPosition}</div>
+                            <div className="text-xs leading-none">{result.color}</div>
                           </div>
                         );
                       })}
                       {lastTenResults.length < 10 && (
-                        Array.from({ length: 10 - lastTenResults.length }).map((_, index) => (
-                          <div
-                            key={`empty-${index}`}
-                            className="w-8 h-8 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center text-xs text-gray-500"
-                          >
-                            ?
-                    </div>
-                        ))
+                        Array.from({ length: 10 - lastTenResults.length }).map((_, index) => {
+                          const cronologicalPosition = 10 - lastTenResults.length - index;
+                          return (
+                            <div
+                              key={`empty-${index}`}
+                              className="w-12 h-12 rounded-full border-2 border-dashed border-gray-600 flex flex-col items-center justify-center text-xs text-gray-500"
+                            >
+                              <div className="text-[8px] leading-none">{cronologicalPosition}</div>
+                              <div className="text-xs leading-none">?</div>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                     <div className="text-xs font-mono text-gray-400">
-                      Padrão para apostas: {currentPattern || 'Aguardando...'} ({lastTenResults.length}/10 completo)
+                      Padrão para apostas: {currentPattern ? currentPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' ') : 'Aguardando...'} ({lastTenResults.length}/10 completo)
                     </div>
                     {lastTenResults.length >= 10 && (
                       <div className="text-xs font-mono text-blue-300 bg-blue-500/10 p-2 rounded border border-blue-500/20">
-                        💡 Apostas contra padrão: {currentPattern.split('').join(' → ')} (apenas cores opostas)
+                        💡 Apostas contra padrão: {currentPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' → ')} (1=antigo → 10=recente)
                   </div>
                 )}
 
@@ -832,7 +839,7 @@ export default function BMG() {
                     <div className="p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg space-y-1 text-xs font-mono">
                       <div className="flex justify-between">
                         <span className="text-gray-400">Padrão Ativo:</span>
-                        <span className="text-cyan-400">{displayPattern}</span>
+                        <span className="text-cyan-400">{displayPattern ? displayPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' ') : 'N/A'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-400">Nível Atual:</span>

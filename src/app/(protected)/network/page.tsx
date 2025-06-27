@@ -23,6 +23,11 @@ export default function HackerNetworkPage() {
   } = useNetwork()
   
   const { isOpen: isFiltersModalOpen, openModal: openFiltersModal, closeModal: closeFiltersModal } = useModal()
+  
+  // Estados para proteção por senha
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [password, setPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
   const [filters, setFilters] = useState({
     level: '',
     dateFrom: '',
@@ -91,6 +96,14 @@ export default function HackerNetworkPage() {
   const pagination = usePagination(filteredNodes.length, itemsPerPage)
   const paginatedNodes = pagination.getPageItems(filteredNodes)
 
+  // Verificar se já está autenticado no localStorage
+  useEffect(() => {
+    const networkAuth = localStorage.getItem('network_authenticated')
+    if (networkAuth === 'true') {
+      setIsAuthenticated(true)
+    }
+  }, [])
+
   // Check for referral code from URL on mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
@@ -110,10 +123,26 @@ export default function HackerNetworkPage() {
     }
   }, [getSponsorInfo])
 
+  // Função para verificar a senha
+  const handlePasswordSubmit = () => {
+    if (password === 'matrix') {
+      setIsAuthenticated(true)
+      localStorage.setItem('network_authenticated', 'true')
+      setPasswordError('')
+      setPassword('')
+    } else {
+      setPasswordError('Senha incorreta. Tente novamente.')
+    }
+  }
+
+  // Função para fazer logout (limpar autenticação)
+  const handleLogout = () => {
+    setIsAuthenticated(false)
+    localStorage.removeItem('network_authenticated')
+  }
+
   const commissionRates = [
-    { level: 1, rate: 25, icon: Crown, description: 'Conexões diretas', color: 'text-yellow-400 border-yellow-500/50' },
-    { level: 2, rate: 15, icon: Shield, description: 'Nível 2 da rede', color: 'text-blue-400 border-blue-500/50' },
-    { level: 3, rate: 10, icon: Target, description: 'Nível 3 da rede', color: 'text-green-400 border-green-500/50' }
+    { level: 1, rate: 50, icon: Crown, description: 'Indicações diretas', color: 'text-yellow-400 border-yellow-500/50' }
   ]
 
   const handleWithdrawalClick = () => {
@@ -156,6 +185,73 @@ export default function HackerNetworkPage() {
     })
   }
 
+  // Se não estiver autenticado, mostrar modal de senha
+  if (!isAuthenticated) {
+    return (
+      <div className="px-4 relative">
+        {/* Matrix Rain Background */}
+        <MatrixRain />
+        
+        <div className="relative z-10 min-h-screen flex items-center justify-center">
+          <Card className="border-green-500/30 backdrop-blur-sm max-w-md w-full">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-green-400 font-mono text-center">
+                <Shield className="h-5 w-5" />
+                ACESSO_RESTRITO
+              </CardTitle>
+              <CardDescription className="text-gray-400 font-mono text-xs text-center">
+                {`// Digite a senha para acessar a rede`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Input
+                  type="password"
+                  placeholder="Digite a senha..."
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    setPasswordError('')
+                  }}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handlePasswordSubmit()
+                    }
+                  }}
+                  className="bg-gray-800/50 border-gray-600 text-white font-mono focus:border-green-500"
+                />
+                {passwordError && (
+                  <div className="flex items-center gap-2 text-red-400 text-sm font-mono">
+                    <AlertCircle className="h-4 w-4" />
+                    {passwordError}
+                  </div>
+                )}
+              </div>
+              
+              <Button 
+                onClick={handlePasswordSubmit}
+                className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono"
+                variant="outline"
+              >
+                ACESSAR_REDE
+              </Button>
+              
+              <div className="text-center">
+                <Button
+                  onClick={() => window.history.back()}
+                  variant="ghost"
+                  className="text-gray-400 hover:text-white font-mono text-sm"
+                >
+                  ← VOLTAR
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="px-4 relative">
       {/* Matrix Rain Background */}
@@ -163,9 +259,19 @@ export default function HackerNetworkPage() {
       
       <div className="relative z-10">
                  {/* Page Title */}
-         <div className="mb-6">
-           <h1 className="text-2xl font-bold text-green-400 font-mono mb-2">REDE.exe</h1>
-           <p className="text-gray-400 font-mono text-sm">// Expanda sua rede e ganhe comissões</p>
+         <div className="mb-6 flex justify-between items-center">
+           <div>
+             <h1 className="text-2xl font-bold text-green-400 font-mono mb-2">REDE.exe</h1>
+             <p className="text-gray-400 font-mono text-sm">// Expanda sua rede e ganhe comissões</p>
+           </div>
+           <Button
+             onClick={handleLogout}
+             variant="ghost"
+             size="sm"
+             className="text-gray-500 hover:text-red-400 font-mono text-xs"
+           >
+             SAIR
+           </Button>
          </div>
 
          {/* Network Stats Overview */}
@@ -271,7 +377,7 @@ export default function HackerNetworkPage() {
                <div>
              <CardTitle className="text-green-400 font-mono">ESTRUTURA_COMISSÕES</CardTitle>
              <CardDescription className="text-gray-400 font-mono text-xs">
-               // Taxas de comissão multi-nível para sua rede
+               // Taxa de comissão para indicações diretas
              </CardDescription>
                </div>
                <Button
@@ -299,16 +405,16 @@ export default function HackerNetworkPage() {
                         <Icon className={`h-6 w-6 ${tier.color.split(' ')[0]}`} />
                         <div>
                           <div className={`font-bold font-mono ${tier.color.split(' ')[0]}`}>
-                            LEVEL_{tier.level} - {tier.rate}%
+                            INDICAÇÃO_DIRETA - {tier.rate}%
                           </div>
                           <div className="text-sm text-gray-400 font-mono">{tier.description}</div>
                         </div>
                       </div>
                                              <div className="text-right">
                          <div className={`text-lg font-bold font-mono ${tier.color.split(' ')[0]}`}>
-                           {networkNodes.filter(node => node.level === tier.level).length}
+                           {networkStats?.total_referrals || 0}
                          </div>
-                         <div className="text-xs text-gray-400 font-mono">NÓS</div>
+                         <div className="text-xs text-gray-400 font-mono">INDICADOS</div>
                       </div>
                     </div>
                   </div>
@@ -331,7 +437,7 @@ export default function HackerNetworkPage() {
                     <div>
                       <div className="font-medium font-mono text-green-400 text-sm">FONTE_COMISSÃO</div>
                       <div className="text-xs text-gray-400 font-mono mt-1">
-                        Ganhos são calculados sobre compras de créditos feitas pelos membros da sua rede
+                        Ganhos são calculados sobre compras de créditos feitas pelos seus indicados diretos
                       </div>
                     </div>
                   </div>
@@ -417,10 +523,10 @@ export default function HackerNetworkPage() {
               <div>
                 <CardTitle className="text-green-400 font-mono flex items-center gap-2">
                   <Users className="h-5 w-5" />
-                  TODOS_NÓS_REDE
+                  SEUS_INDICADOS
                 </CardTitle>
                 <CardDescription className="text-gray-400 font-mono text-xs">
-                  // Diretório completo de membros da rede
+                  // Lista de todos os seus indicados diretos
                 </CardDescription>
               </div>
               <Button
@@ -434,6 +540,8 @@ export default function HackerNetworkPage() {
             </div>
           </CardHeader>
           <CardContent>
+
+
             {/* Loading State */}
             {loading && (
               <div className="text-center py-8">
@@ -449,11 +557,11 @@ export default function HackerNetworkPage() {
             )}
 
             {/* Empty State */}
-            {!loading && !error && filteredNodes.length === 0 && (
+                          {!loading && !error && filteredNodes.length === 0 && (
               <div className="text-center py-8">
                 <div className="text-gray-400 font-mono">
                   {networkNodes.length === 0 
-                    ? 'Nenhum membro na sua rede ainda' 
+                    ? 'Nenhum indicado ainda. Compartilhe seu link para começar!' 
                     : 'Nenhum resultado encontrado com os filtros aplicados'
                   }
                 </div>
@@ -470,8 +578,7 @@ export default function HackerNetworkPage() {
                       <div className="flex items-center gap-4">
                         <div className={`w-2 h-2 rounded-full transition-all duration-300 ${
                           node.status === 'active' 
-                            ? (node.level === 1 ? 'bg-yellow-400' : 
-                               node.level === 2 ? 'bg-blue-400' : 'bg-green-400')
+                            ? 'bg-yellow-400' 
                             : 'bg-gray-500 opacity-30'
                         }`}></div>
                         <div className="flex-1">
@@ -481,7 +588,7 @@ export default function HackerNetworkPage() {
                           <div className={`text-xs font-mono transition-all duration-300 ${
                             node.status === 'active' ? 'text-gray-400' : 'text-gray-600 opacity-50'
                           }`}>
-                            Nível {node.level} • Entrou em: {new Date(node.joined_date).toLocaleDateString('pt-BR')}
+                            Indicado direto • Entrou em: {new Date(node.joined_date).toLocaleDateString('pt-BR')}
                             {node.status === 'inactive' && ' • Sem compras'}
                           </div>
                         </div>
@@ -542,18 +649,16 @@ export default function HackerNetworkPage() {
           }}
         >
           <div className="space-y-4">
-            {/* Level Filter */}
-            <div>
+            {/* Level Filter - Removido pois só há nível 1 */}
+            <div style={{ display: 'none' }}>
               <label className="text-green-400 font-mono text-sm mb-2 block">NÍVEL</label>
               <select
                 value={filters.level}
                 onChange={(e) => setFilters({...filters, level: e.target.value})}
                 className="w-full bg-black/50 border border-green-500/30 text-green-400 font-mono text-sm rounded px-3 py-2"
               >
-                <option value="">Todos os níveis</option>
-                <option value="1">Nível 1</option>
-                <option value="2">Nível 2</option>
-                <option value="3">Nível 3</option>
+                <option value="">Todas as indicações</option>
+                <option value="1">Indicações diretas</option>
               </select>
             </div>
 

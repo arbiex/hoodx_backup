@@ -123,21 +123,17 @@ export function useRealTimeMonitoring({
         const latestGameId = newData.results?.[0]?.gameId;
         if (latestGameId && latestGameId !== lastGameIdRef.current) {
           // LOGS REDUZIDOS - Apenas para debug crítico
-          // console.log(`🎯 [HOOK] NOVO resultado detectado: ${latestGameId} (anterior: ${lastGameIdRef.current})`);
           
           lastGameIdRef.current = latestGameId;
           setNewResultsCount(prev => {
             const newCount = prev + 1;
             // LOGS REDUZIDOS - Apenas para debug crítico
-            // console.log(`📊 [HOOK] Contador atualizado: ${prev} → ${newCount}/5`);
             
             if (newCount >= 5) {
               // LOGS REDUZIDOS - Apenas para debug crítico
-              // console.log('🔄 [HOOK] Rotação automática - 5 novos resultados atingidos');
               setForceRotation(true);
               setTimeout(() => {
                 // LOGS REDUZIDOS - Apenas para debug crítico
-                // console.log('🔄 [HOOK] Contador resetado após rotação');
                 setNewResultsCount(0);
                 setForceRotation(false);
               }, 1000);
@@ -150,7 +146,6 @@ export function useRealTimeMonitoring({
         // Verificar mudança de URL/tableId
         if (newData.tableId && newData.tableId !== currentTableIdRef.current) {
           // LOGS REDUZIDOS - Apenas mudanças importantes
-          // console.log(`🔄 [HOOK] Mudança de URL detectada: ${currentTableIdRef.current} → ${newData.tableId}`);
           currentTableIdRef.current = newData.tableId;
           setCurrentTableId(newData.tableId);
         }
@@ -162,11 +157,9 @@ export function useRealTimeMonitoring({
         // Processar sinais de roleta se disponíveis
         if (newData.rouletteSignals) {
           // LOGS REDUZIDOS - Apenas para debug crítico
-          // console.log('🎲 [PADRÕES] Convertendo histórico para detecção de padrões...');
           
           const sequences = convertHistoryToSequences(newData.results || []);
           // LOGS REDUZIDOS - Apenas para debug crítico
-          // console.log('📊 [PADRÕES] Sequências geradas:', sequences);
           
           // Detectar padrões usando RPC
           try {
@@ -178,7 +171,6 @@ export function useRealTimeMonitoring({
             });
 
             // LOGS REDUZIDOS - Apenas quando há padrões ou erro
-            // console.log('🎯 [HOOK] Sinais recebidos:', {
             //   success: !patternsError,
             //   patterns: patternsData?.patterns?.length || 0,
             //   error: patternsError?.message
@@ -188,13 +180,11 @@ export function useRealTimeMonitoring({
               const patterns = patternsData.patterns;
               // LOGS REDUZIDOS - Apenas quando há padrões detectados
               if (patterns.length > 0) {
-                console.log('🎯 [HOOK] Padrões detectados:', patterns.length);
               }
               setDetectedPatterns(patterns);
               setLastPatternCheck(Date.now());
             }
           } catch (error) {
-            console.error('❌ [HOOK] Erro ao detectar padrões:', error);
           }
         }
       } else {
@@ -206,7 +196,6 @@ export function useRealTimeMonitoring({
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
-      console.error('❌ Erro no monitoramento:', err);
       setData(null);
       if (onHistoryUpdateRef.current) {
         onHistoryUpdateRef.current([]);
@@ -335,17 +324,11 @@ export function useRealTimeMonitoring({
   ) => {
     // Só analisar se temos pelo menos 5 resultados válidos
     if (sequences.validResults < 5) {
-      console.log('🎲 [PADRÕES] Histórico insuficiente para análise:', sequences.validResults, 'resultados válidos');
       return;
     }
 
     try {
-      console.log('🔍 [PADRÕES] Chamando RPC com sequências convertidas:', {
-        colors: sequences.colors,
-        parity: sequences.parity,
-        zones: sequences.zones,
-        validResults: sequences.validResults
-      });
+      // Debug removido
 
       const response = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
         method: 'POST',
@@ -366,19 +349,16 @@ export function useRealTimeMonitoring({
       
       if (result.success && result.data?.rouletteSignals) {
         const patterns = result.data.rouletteSignals.patterns || [];
-        console.log('🎯 [PADRÕES] Padrões detectados:', patterns.length);
         
         if (onPatternsUpdate) {
           onPatternsUpdate(patterns);
         }
       } else {
-        console.log('⚠️ [PADRÕES] Nenhum padrão detectado');
         if (onPatternsUpdate) {
           onPatternsUpdate([]);
         }
       }
     } catch (error) {
-      console.error('❌ [PADRÕES] Erro na detecção:', error);
       if (onPatternsUpdate) {
         onPatternsUpdate([]);
       }

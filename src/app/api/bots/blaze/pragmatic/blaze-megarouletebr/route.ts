@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 // Interface simplificada para configuração
 interface MegaRouletteConfig {
   userId: string;
-  action?: 'bet-connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic';
+  action?: 'bet-connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic' | 'get-sessions-history';
 }
 
 // Interface para resultado de autenticação
@@ -17,12 +17,40 @@ interface AuthResult {
   timestamp: string;
 }
 
+// 📊 Interface para sessão de apostas
+interface BettingSession {
+  id: string;
+  userId: string;
+  sessionId: string;
+  gameType: string;
+  startedAt: Date;
+  endedAt?: Date;
+  totalBets: number;
+  totalWins: number;
+  totalLosses: number;
+  totalWagered: number;
+  totalWinnings: number;
+  netProfit: number;
+  maxMartingaleLevel: number;
+  martingaleResets: number;
+  humanizedBets: number;
+  totalNoiseApplied: number;
+  // Campos de disfarce removidos - sistema simplificado
+  bettingPattern?: string;
+  tipValue: number;
+  sessionStatus: 'active' | 'completed' | 'interrupted' | 'error';
+  endReason?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  metadata?: any;
+}
+
 // Armazenamento dos logs do WebSocket
 const websocketLogs: { [userId: string]: Array<{ timestamp: number; message: string; type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' }> } = {};
 const connectionStatus: { [userId: string]: { connected: boolean; error?: string; lastUpdate: number } } = {};
 
-// NOVO: Sistema simplificado dos últimos 5 resultados
-const lastFiveResults: { [userId: string]: Array<{ number: number; color: string; gameId: string; timestamp: number }> } = {};
+// NOVO: Sistema de gap com últimos 20 resultados
+const lastTwentyResults: { [userId: string]: Array<{ number: number; color: string; gameId: string; timestamp: number }> } = {};
 
 // NOVO: Estado da operação simplificada
 const operationState: { [userId: string]: {
@@ -93,21 +121,15 @@ const humanizationStats: { [userId: string]: {
   lastNoiseApplied: number;  // Último ruído aplicado
 } } = {};
 
-// 🕶️ Sistema de disfarce por ganhos consecutivos
-const disguiseControl: { [userId: string]: {
-  // Controle de ganhos consecutivos
-  completedSequences: number;      // Sequências de 5 vitórias completadas
-  targetSequences: number;         // Meta de sequências antes de pausar (2-5)
-  isOnBreakFromWins: boolean;      // Se está em pausa por ganhos consecutivos
-  
-  // Controle de pausas
-  waitingBreakTimer: NodeJS.Timeout | null;  // Timer da pausa
-  nextBreakDuration: number;       // Duração da próxima pausa (20-60min)
-  lastBreakTime: number;           // Timestamp da última pausa
-  
-  // ⏰ Campos para timer visual
-  breakStartTime: number;          // Timestamp do início da pausa
-  breakEndTime: number;            // Timestamp do fim da pausa
+// 🎭 Sistema de humanização simplificado (apenas ruído nas apostas)
+
+// 📊 NOVO: Controle de sessões ativas
+const activeSessions: { [userId: string]: {
+  sessionId: string;
+  startedAt: number;
+  lastBreakStart?: number;    // Para calcular tempo total de pausas
+  totalBreakTime: number;     // Tempo total em pausas (segundos)
+  martingaleResets: number;   // Contador de resets do martingale
 } } = {};
 
 // Função para calcular sequência de martingale baseada no tip
@@ -188,144 +210,146 @@ function updateHumanizationStats(userId: string, wasHumanized: boolean, appliedN
 }
 
 // 🕶️ NOVO: Funções do sistema de disfarce
-function initializeDisguiseControl(userId: string) {
-  if (!disguiseControl[userId]) {
-    disguiseControl[userId] = {
-      completedSequences: 0,
-      targetSequences: generateRandomSequenceTarget(),
-      isOnBreakFromWins: false,
-      waitingBreakTimer: null,
-      nextBreakDuration: generateRandomBreakDuration(),
-      lastBreakTime: 0,
-      // ⏰ Campos para timer visual
-      breakStartTime: 0,
-      breakEndTime: 0
+// 🎭 Funções de humanização mantidas (sistema simplificado)
+
+
+
+// 📊 NOVO: Funções para gerenciar sessões de apostas
+function generateSessionId(): string {
+  return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+async function createBettingSession(userId: string, tipValue: number, ipAddress?: string, userAgent?: string): Promise<string> {
+  try {
+    const sessionId = generateSessionId();
+    const now = new Date();
+    
+    // Criar cliente Supabase
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+    );
+    
+    // Inserir nova sessão no banco
+    const { data, error } = await supabase
+      .from('betting_sessions_history')
+      .insert({
+        user_id: userId,
+        session_id: sessionId,
+        game_type: 'blaze-megaroulettebr',
+        started_at: now.toISOString(),
+        tip_value: tipValue,
+        session_status: 'active',
+        ip_address: ipAddress,
+        user_agent: userAgent,
+        metadata: {
+          version: '1.0',
+          features: ['humanization', 'disguise', 'martingale']
+        }
+      })
+      .select()
+      .single();
+    
+    if (error) {
+
+      throw error;
+    }
+    
+    // Inicializar controle local da sessão
+    activeSessions[userId] = {
+      sessionId: sessionId,
+      startedAt: Date.now(),
+      totalBreakTime: 0,
+      martingaleResets: 0
     };
     
-    addWebSocketLog(userId, `🕶️ Sistema de disfarce ativado - Meta: ${disguiseControl[userId].targetSequences} sequências`, 'info');
-  }
-}
-
-function generateRandomSequenceTarget(): number {
-  // Entre 2 e 5 sequências
-  return Math.floor(Math.random() * 4) + 2; // 2, 3, 4 ou 5
-}
-
-function generateRandomBreakDuration(): number {
-  // Entre 20 e 60 minutos (em milissegundos)
-  const minMs = 20 * 60 * 1000; // 20 minutos
-  const maxMs = 60 * 60 * 1000; // 60 minutos
-  return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-}
-
-function checkForWinBreak(userId: string): boolean {
-  const disguise = disguiseControl[userId];
-  if (!disguise || disguise.isOnBreakFromWins) return false;
-  
-  // 💰 NOVO: Verificar se está com lucro antes de permitir pausa
-  const operation = operationState[userId];
-  if (!operation || operation.stats.profit <= 0) {
-    addWebSocketLog(userId, `🚫 Pausa bloqueada - Bot no prejuízo (R$ ${operation?.stats.profit.toFixed(2) || '0.00'})`, 'info');
-    return false;
-  }
-  
-  disguise.completedSequences++;
-  addWebSocketLog(userId, `🏆 Sequência completada! Total: ${disguise.completedSequences}/${disguise.targetSequences}`, 'success');
-  
-  if (disguise.completedSequences >= disguise.targetSequences) {
-    // Atingiu meta E está com lucro - iniciar pausa por ganhos consecutivos
-    addWebSocketLog(userId, `💰 Bot com lucro (R$ ${operation.stats.profit.toFixed(2)}) - Pausa autorizada`, 'success');
-    startWinBreak(userId);
-    return true;
-  }
-  
-  return false;
-}
-
-function startWinBreak(userId: string) {
-  const disguise = disguiseControl[userId];
-  if (!disguise) return;
-  
-  disguise.isOnBreakFromWins = true;
-  disguise.lastBreakTime = Date.now();
-  
-  // ⏰ NOVO: Definir timestamps para timer visual
-  disguise.breakStartTime = Date.now();
-  disguise.breakEndTime = Date.now() + disguise.nextBreakDuration;
-  
-  // Parar operação atual
-  if (operationState[userId]) {
-    operationState[userId].active = false;
-  }
-  
-  // Desconectar WebSocket
-  stopAllConnections(userId, false);
-  
-  const breakMinutes = Math.floor(disguise.nextBreakDuration / (60 * 1000));
-  addWebSocketLog(userId, `🕶️ PAUSA POR GANHOS CONSECUTIVOS - ${disguise.completedSequences} sequências completadas`, 'info');
-  addWebSocketLog(userId, `⏰ Pausa de ${breakMinutes} minutos iniciada - Reconexão automática`, 'info');
-  
-  // Programar reconexão automática
-  disguise.waitingBreakTimer = setTimeout(() => {
-    resumeFromBreak(userId);
-  }, disguise.nextBreakDuration);
-}
-
-
-
-async function resumeFromBreak(userId: string) {
-  const disguise = disguiseControl[userId];
-  if (!disguise) return;
-  
-  // Limpar estado de pausa
-  disguise.isOnBreakFromWins = false;
-  disguise.waitingBreakTimer = null;
-  
-  // ⏰ Limpar timestamps de pausa
-  disguise.breakStartTime = 0;
-  disguise.breakEndTime = 0;
-  
-  // Gerar novos valores aleatórios
-  disguise.completedSequences = 0;
-  disguise.targetSequences = generateRandomSequenceTarget();
-  disguise.nextBreakDuration = generateRandomBreakDuration();
-  
-  addWebSocketLog(userId, `🔄 RETOMANDO OPERAÇÃO APÓS PAUSA`, 'success');
-  addWebSocketLog(userId, `🕶️ Nova meta: ${disguise.targetSequences} sequências`, 'info');
-  
-  try {
-    // Reconectar automaticamente (simular clique no botão conectar)
-    // Usar tipValue padrão ou último usado
-    const lastTipValue = operationState[userId]?.strategy?.sequences?.[0] || 1.0;
-    await connectToBettingGame(userId, lastTipValue);
-    
-    addWebSocketLog(userId, `✅ Tentativa de reconexão automática iniciada`, 'success');
-    
-    // Aguardar um pouco e iniciar operação automaticamente
-    setTimeout(async () => {
-      try {
-        // Verificar se conectou com sucesso antes de iniciar operação
-        if (activeWebSockets[userId]) {
-          await startSimpleOperation(userId);
-          addWebSocketLog(userId, `🚀 Operação reiniciada automaticamente após pausa`, 'success');
-        } else {
-          addWebSocketLog(userId, `⚠️ WebSocket não conectado - tentando novamente em 30s`, 'error');
-          // Tentar novamente em 30 segundos
-          setTimeout(() => resumeFromBreak(userId), 30000);
-        }
-      } catch (error) {
-        addWebSocketLog(userId, `❌ Erro ao reiniciar operação: ${error}`, 'error');
-        // Tentar novamente em 30 segundos
-        setTimeout(() => resumeFromBreak(userId), 30000);
-      }
-    }, 5000); // Aguardar 5 segundos para conexão estabilizar
+    addWebSocketLog(userId, `📊 Nova sessão criada: ${sessionId}`, 'success');
+    return sessionId;
     
   } catch (error) {
-    addWebSocketLog(userId, `❌ Erro na reconexão automática: ${error}`, 'error');
-    // Tentar novamente em 30 segundos
-    setTimeout(() => resumeFromBreak(userId), 30000);
+    throw error;
   }
 }
+
+async function updateBettingSession(userId: string, updates: Partial<BettingSession>): Promise<void> {
+  try {
+    const session = activeSessions[userId];
+    if (!session) return;
+    
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+    );
+    
+    // Atualizar sessão no banco
+    const { error } = await supabase
+      .from('betting_sessions_history')
+      .update(updates)
+      .eq('session_id', session.sessionId)
+      .eq('user_id', userId);
+    
+    if (error) {
+    }
+    
+  } catch (error) {
+  }
+}
+
+async function finalizeBettingSession(userId: string, endReason: string): Promise<void> {
+  try {
+    const session = activeSessions[userId];
+    const operation = operationState[userId];
+    const humanization = humanizationStats[userId];
+    
+    if (!session || !operation) return;
+    
+    const now = new Date();
+    const durationSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
+    
+    // Calcular estatísticas finais - usar campos do banco de dados
+    const finalStats = {
+      ended_at: now.toISOString(),
+      total_bets: operation.stats.totalBets,
+      total_wins: operation.stats.wins,
+      total_losses: operation.stats.losses,
+      total_wagered: operation.stats.totalBets > 0 ? (operation.stats.totalBets * operation.strategy.sequences[0]) : 0, // Estimativa
+      total_winnings: operation.stats.profit + (operation.stats.totalBets * operation.strategy.sequences[0]), // Estimativa
+      net_profit: operation.stats.profit,
+      max_martingale_level: Math.max(1, operation.martingaleLevel || 0),
+      martingale_resets: session.martingaleResets,
+      humanized_bets: humanization?.humanizedBets || 0,
+      total_noise_applied: humanization?.totalNoise || 0,
+              // Campos de disfarce removidos - sistema simplificado
+      betting_pattern: operation.currentPattern?.join('') || null,
+      session_status: 'completed' as const,
+      end_reason: endReason
+    };
+    
+    // Atualizar diretamente no banco usando campos corretos
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+    );
+    
+    const { error } = await supabase
+      .from('betting_sessions_history')
+      .update(finalStats)
+      .eq('session_id', session.sessionId)
+      .eq('user_id', userId);
+    
+    if (error) {
+    }
+    
+    // Limpar sessão ativa
+    delete activeSessions[userId];
+    
+    addWebSocketLog(userId, `📊 Sessão finalizada: ${endReason} | Lucro: R$ ${operation.stats.profit.toFixed(2)}`, 'success');
+    
+  } catch (error) {
+  }
+}
+
+// Função removida - sistema de pausas automáticas desabilitado
 
 
 
@@ -352,7 +376,6 @@ export async function POST(request: NextRequest) {
     try {
       requestBody = await request.json();
     } catch (jsonError) {
-      console.error('❌ Erro ao parsear JSON:', jsonError);
       return NextResponse.json({
         success: false,
         error: 'Dados da requisição inválidos - JSON malformado'
@@ -368,18 +391,8 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    console.log(`🎯 [${action.toUpperCase()}] Usuário: ${userId.slice(0, 8)}... IP: ${clientIP}`);
 
-    // DEBUG: Mostrar estado atual dos objetos globais para este usuário
-    console.log(`🔍 [DEBUG-${action.toUpperCase()}] Estado atual para usuário ${userId.slice(0, 8)}:`, {
-      hasWebSocket: !!activeWebSockets[userId],
-      hasOperationState: !!operationState[userId],
-      operationActive: operationState[userId]?.active || false,
-      hasSessionControl: !!sessionControl[userId],
-      hasRenewalTimer: !!renewalTimers[userId],
-      clientIP: clientIP,
-      timestamp: new Date().toISOString()
-    });
+    // DEBUG: Estado atual removido
 
     // Ações disponíveis
     switch (action) {
@@ -407,6 +420,9 @@ export async function POST(request: NextRequest) {
       case 'server-diagnostic':
         return await getServerDiagnostic();
       
+      case 'get-sessions-history':
+        return await getSessionsHistory(userId);
+      
       default:
       return NextResponse.json({
         success: false,
@@ -415,7 +431,6 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('❌ Erro no MegaRoulette Bot:', error);
     return NextResponse.json({
       success: false,
       error: 'Erro interno do servidor'
@@ -426,13 +441,11 @@ export async function POST(request: NextRequest) {
 // Função de autenticação usando edge function
 async function performAuthentication(userId: string): Promise<{ success: boolean; data?: AuthResult; error?: string }> {
   try {
-    console.log('🔗 [AUTH] Iniciando autenticação para usuário:', userId);
     
     let actualUserId = userId;
     
     // Se userId é um email, buscar UUID primeiro
     if (userId.includes('@')) {
-      console.log('📧 [AUTH] Buscando UUID para email:', userId);
       
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -458,7 +471,6 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
       }
 
       actualUserId = foundUser.id;
-      console.log('✅ [AUTH] UUID encontrado para email:', actualUserId);
     }
 
     // Chamar edge function para autenticação
@@ -476,7 +488,6 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
       'Cache-Control': 'no-cache'
     };
     
-    console.log('🚀 [AUTH] Fazendo requisição para edge function...');
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
       headers: requestHeaders,
@@ -500,7 +511,6 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
       };
     }
 
-    console.log('✅ [AUTH] Autenticação realizada com sucesso');
 
     return {
       success: true,
@@ -514,7 +524,6 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
     };
 
   } catch (error) {
-    console.error('❌ [AUTH] Erro geral na autenticação:', error);
     return {
       success: false,
       error: `Erro interno na autenticação: ${error instanceof Error ? error.message : 'Erro desconhecido'}`
@@ -539,7 +548,6 @@ function addWebSocketLog(userId: string, message: string, type: 'info' | 'error'
     websocketLogs[userId] = websocketLogs[userId].slice(0, 50);
   }
   
-  console.log(`📝 [LOG-${userId.slice(0, 8)}] ${message}`);
 }
 
 // NOVO: Função para processar resultado do jogo
@@ -565,42 +573,47 @@ function processGameResult(userId: string, gameId: string, number: number, color
     return;
   }
   
-  // Adiciona aos últimos 5 resultados
-  if (!lastFiveResults[userId]) {
-    lastFiveResults[userId] = [];
+  // Adiciona aos últimos 20 resultados
+  if (!lastTwentyResults[userId]) {
+    lastTwentyResults[userId] = [];
   }
   
-  lastFiveResults[userId].push({
+  lastTwentyResults[userId].push({
     number,
     color: colorCode,
     gameId,
     timestamp: Date.now()
   });
   
-  // Mantém apenas os últimos 5
-  if (lastFiveResults[userId].length > 5) {
-    lastFiveResults[userId].shift();
+  // Mantém apenas os últimos 20
+  if (lastTwentyResults[userId].length > 20) {
+    lastTwentyResults[userId].shift();
   }
   
-  addWebSocketLog(userId, `🎲 Resultado: ${number} ${color} | Últimos 5: ${lastFiveResults[userId].map(r => r.color).join('')}`, 'game');
+  addWebSocketLog(userId, `🎲 Resultado: ${number} ${color} | Últimos 20: ${lastTwentyResults[userId].map(r => r.color).join('')}`, 'game');
   
   // Se operação ativa, processa aposta
   if (operationState[userId]?.active) {
     processOperationResult(userId, colorCode);
   } else {
-    // ✅ NOVO: Reativar automaticamente se operação estava pausada e agora tem padrão
-    if (operationState[userId] && !operationState[userId].active && lastFiveResults[userId].length >= 5) {
-      addWebSocketLog(userId, `🔄 REATIVAÇÃO AUTOMÁTICA: Padrão disponível detectado`, 'success');
+    // ✅ NOVO: Reativar automaticamente se operação estava pausada e agora tem 20 resultados
+    if (operationState[userId] && !operationState[userId].active && lastTwentyResults[userId].length >= 20) {
+      addWebSocketLog(userId, `🔄 REATIVAÇÃO AUTOMÁTICA: 20 resultados coletados`, 'success');
       
-      operationState[userId].active = true;
-      operationState[userId].currentPattern = lastFiveResults[userId].slice().reverse().map(r => r.color);
-      operationState[userId].currentLevel = 0;
-      operationState[userId].martingaleLevel = 0;
-      operationState[userId].waitingForResult = false;
-      
-      const newPattern = operationState[userId].currentPattern.join('');
-      addWebSocketLog(userId, `🚀 NOVO PADRÃO AUTOMÁTICO: ${newPattern}`, 'success');
-      addWebSocketLog(userId, `📋 Sequência a seguir: ${newPattern.split('').map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
+      // Buscar padrão válido com gap de 15
+      const validPattern = findValidPatternWithGap(userId);
+      if (validPattern) {
+        operationState[userId].active = true;
+        operationState[userId].currentPattern = validPattern;
+        operationState[userId].currentLevel = 0;
+        operationState[userId].martingaleLevel = 0;
+        operationState[userId].waitingForResult = false;
+        
+        addWebSocketLog(userId, `🚀 PADRÃO VÁLIDO ENCONTRADO: ${validPattern.join('')}`, 'success');
+        addWebSocketLog(userId, `📋 Sequência a seguir: ${validPattern.map((c: any, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
+      } else {
+        addWebSocketLog(userId, `⚠️ Nenhum padrão válido encontrado - aguardando novos resultados`, 'error');
+      }
     }
   }
 }
@@ -634,27 +647,21 @@ function processOperationResult(userId: string, resultColor: string) {
       addWebSocketLog(userId, `✅ VITÓRIA Nível ${operation.currentLevel}! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName}`, 'success');
       
       if (operation.currentLevel >= 5) {
-        // Completou toda sequência!
-        addWebSocketLog(userId, `🎉 SEQUÊNCIA COMPLETA! Padrão ${operation.currentPattern.join('')} finalizado com sucesso!`, 'success');
+        // ✅ PADRÃO COMPLETO! Buscar próximo padrão
+        addWebSocketLog(userId, `🎉 PADRÃO COMPLETO! ${operation.currentPattern.join('')} finalizado com sucesso!`, 'success');
         
-        // 🕶️ NOVO: Verificar se deve aplicar disfarce por ganhos consecutivos
-        const shouldBreak = checkForWinBreak(userId);
-        if (shouldBreak) {
-          return; // Para aqui se entrou em pausa por ganhos consecutivos
-        }
-        
-        resetOperationForNewPattern(userId);
-        return; // Para aqui, não continua apostando
+        // Buscar novo padrão válido com gap de 15
+        findNextValidPattern(userId);
+        return;
     } else {
         // Próximo nível da sequência
         const nextBet = operation.currentPattern[operation.currentLevel];
         const nextBetName = COLOR_NAMES[nextBet] || nextBet;
         addWebSocketLog(userId, `➡️ Próximo nível ${operation.currentLevel + 1}: ${nextBetName} (${nextBet})`, 'info');
-        // ✅ Continua ativo para próxima aposta
       }
       
     } else {
-      // ❌ PERDEU - Para e pega próximo padrão
+      // ❌ PERDEU - REINICIA O MESMO PADRÃO (não troca!)
       operation.stats.losses++;
       
       const betAmount = operation.strategy.sequences[operation.currentLevel] || 0.50;
@@ -665,41 +672,114 @@ function processOperationResult(userId: string, resultColor: string) {
       
       const defeatReason = resultColor === 'green' ? '(ZERO)' : `(${resultColorName})`;
       addWebSocketLog(userId, `❌ DERROTA Nível ${operation.currentLevel + 1}! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName} ${defeatReason}`, 'error');
-      addWebSocketLog(userId, `🛑 Padrão ${operation.currentPattern.join('')} interrompido no nível ${operation.currentLevel + 1}`, 'error');
+      addWebSocketLog(userId, `🔄 REINICIANDO MESMO PADRÃO: ${operation.currentPattern.join('')}`, 'info');
       
-      // Para e aguarda novo padrão
-      resetOperationForNewPattern(userId);
+      // ✅ REINICIA MESMO PADRÃO - não troca!
+      operation.currentLevel = 0;
+      operation.martingaleLevel = 0;
+      operation.waitingForResult = false;
+      // Mantém operation.active = true e currentPattern inalterado
     }
 }
 
-// NOVO: Reset para novo padrão - OPERAÇÃO CONTÍNUA
+// ✅ NOVA FUNÇÃO: Validar se padrão aparece no gap de 15 resultados
+function validatePatternGap(userId: string, pattern: string[]): boolean {
+  const results = lastTwentyResults[userId];
+  if (!results || results.length < 20) return false;
+  
+  // Gap: últimos 15 resultados (posições 5-19, ou seja, índices 5-19)
+  const gapResults = results.slice(5, 20); // Posições 6-20 (índices 5-19)
+  const patternString = pattern.join('');
+  
+  // Verificar se o padrão aparece em sequência no gap
+  for (let i = 0; i <= gapResults.length - pattern.length; i++) {
+    const sequence = gapResults.slice(i, i + pattern.length).map(r => r.color).join('');
+    if (sequence === patternString) {
+      addWebSocketLog(userId, `⚠️ PADRÃO ENCONTRADO NO GAP: ${patternString} na posição ${i+6}-${i+5+pattern.length}`, 'error');
+      return false; // Padrão inválido
+    }
+  }
+  
+  addWebSocketLog(userId, `✅ PADRÃO VÁLIDO: ${patternString} não encontrado no gap de 15`, 'success');
+  return true; // Padrão válido
+}
+
+// ✅ NOVA FUNÇÃO: Buscar padrão válido com gap de 15
+function findValidPatternWithGap(userId: string): string[] | null {
+  const results = lastTwentyResults[userId];
+  if (!results || results.length < 20) {
+    addWebSocketLog(userId, `⚠️ Insuficientes resultados: ${results?.length || 0}/20`, 'error');
+    return null;
+  }
+  
+  // Extrair padrão: primeiros 5 resultados (posições 1-5) em ordem cronológica
+  const firstFive = results.slice(0, 5); // Primeiros 5 (mais antigos)
+  const candidatePattern = firstFive.map(r => r.color); // Manter ordem cronológica
+  
+  addWebSocketLog(userId, `🔍 CANDIDATO: ${candidatePattern.join('')} (pos 1-5 cronológicas)`, 'info');
+  
+  // Validar se padrão não aparece no gap de 15
+  if (validatePatternGap(userId, candidatePattern)) {
+    return candidatePattern;
+  }
+  
+  // Se padrão inválido, aguardar novos resultados
+  addWebSocketLog(userId, `🔄 Padrão inválido - aguardando novos resultados`, 'info');
+  return null;
+}
+
+// ✅ NOVA FUNÇÃO: Buscar próximo padrão válido
+function findNextValidPattern(userId: string) {
+  const operation = operationState[userId];
+  if (!operation) return;
+  
+  // Tentar encontrar novo padrão válido
+  const validPattern = findValidPatternWithGap(userId);
+  
+  if (validPattern) {
+    operation.currentPattern = validPattern;
+    operation.currentLevel = 0;
+    operation.martingaleLevel = 0;
+    operation.waitingForResult = false;
+    // Mantém operation.active = true
+    
+    addWebSocketLog(userId, `🔄 NOVO PADRÃO VÁLIDO: ${validPattern.join('')}`, 'success');
+    addWebSocketLog(userId, `📋 Sequência a seguir: ${validPattern.map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
+    
+    // Reset da sequência de martingale
+    const tipValue = operation.strategy.sequences[0] || 0.50;
+    operation.strategy.sequences = calculateMartingaleSequence(tipValue);
+  } else {
+    addWebSocketLog(userId, `⚠️ Nenhum padrão válido disponível - pausando operação`, 'error');
+    resetOperationForNewPattern(userId);
+  }
+}
+
+// NOVO: Reset para aguardar novos resultados
 function resetOperationForNewPattern(userId: string) {
   if (!operationState[userId]) return;
   
-  // ✅ OPERAÇÃO CONTÍNUA - busca automaticamente próximo padrão
-  const results = lastFiveResults[userId] || [];
-  
-  if (results.length >= 5) {
-    // Tem padrão disponível - continua automaticamente
-    operationState[userId].currentPattern = results.slice().reverse().map(r => r.color);
-    operationState[userId].currentLevel = 0;
-    operationState[userId].martingaleLevel = 0;
-    operationState[userId].waitingForResult = false;
-    // ✅ MANTÉM active = true para continuar operando
-    
-    const newPattern = operationState[userId].currentPattern.join('');
-    addWebSocketLog(userId, `🔄 NOVO PADRÃO AUTOMÁTICO: ${newPattern}`, 'success');
-    addWebSocketLog(userId, `📋 Próxima sequência: ${newPattern.split('').map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
-  } else {
-    // Não tem padrão suficiente - para e aguarda
-    operationState[userId].active = false;
-    operationState[userId].currentPattern = [];
-    operationState[userId].currentLevel = 0;
-    operationState[userId].martingaleLevel = 0;
-    operationState[userId].waitingForResult = false;
-    
-    addWebSocketLog(userId, `⏳ Aguardando novos resultados para continuar (${results.length}/5)`, 'info');
+  // 📊 NOVO: Contar reset do martingale para estatísticas
+  const session = activeSessions[userId];
+  if (session) {
+    session.martingaleResets++;
   }
+  
+  addWebSocketLog(userId, `🔄 Aguardando novos resultados para continuar...`, 'info');
+  
+  // Reset para aguardar novo padrão
+  operationState[userId].active = false; // ✅ Fica inativo aguardando novos resultados
+  operationState[userId].currentPattern = [];
+  operationState[userId].currentLevel = 0;
+  operationState[userId].martingaleLevel = 0;
+  operationState[userId].waitingForResult = false;
+  
+  // Reset da sequência de martingale (volta para valores originais)
+  const tipValue = operationState[userId].strategy.sequences[0] || 0.50;
+  operationState[userId].strategy.sequences = calculateMartingaleSequence(tipValue);
+  
+  // ✅ IMPORTANTE: Não reseta as estatísticas, mantém acumuladas
+  // operation.stats permanece intacto para continuar contabilizando
 }
 
 // NOVO: Função para renovar sessão automaticamente
@@ -747,7 +827,6 @@ async function renewSession(userId: string): Promise<boolean> {
       try {
         activeWebSockets[userId].ws.close(1000, 'Renovando sessão');
       } catch (error) {
-        console.error('Erro ao fechar WebSocket antigo:', error);
       }
     }
 
@@ -833,11 +912,16 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
     
     addWebSocketLog(userId, `🎯 Tip selecionado: ${tipValue || 'padrão'} - Sequência: [${calculatedSequence.map(v => v.toFixed(2)).join(', ')}]`, 'info');
 
-    // 🕶️ Inicializar sistema de disfarce
-    initializeDisguiseControl(userId);
+    // Sistema de disfarce removido - controle manual pelo usuário
+    
+    // 📊 NOVO: Criar nova sessão de apostas
+    try {
+      await createBettingSession(userId, tipValue || 1.0, clientIP, 'HoodX Bot v1.0');
+    } catch (error) {
+    }
     
     // Inicializar estados
-    lastFiveResults[userId] = [];
+    lastTwentyResults[userId] = [];
     resultCollectionEnabled[userId] = false; // Só habilita após primeiro "apostas fechadas"
     operationState[userId] = {
       active: false,
@@ -880,7 +964,6 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
     });
 
   } catch (error) {
-    console.error('❌ Erro ao conectar:', error);
     const errorMsg = `Erro na conexão: ${error instanceof Error ? error.message : 'Erro desconhecido'}`;
     addWebSocketLog(userId, errorMsg, 'error');
     updateConnectionStatus(userId, false, errorMsg);
@@ -894,29 +977,36 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
 // NOVO: Iniciar operação simplificada
 async function startSimpleOperation(userId: string) {
   try {
-    // Verificar se tem 5 resultados
-    const results = lastFiveResults[userId] || [];
+    // Verificar se tem 20 resultados
+    const results = lastTwentyResults[userId] || [];
     
-    if (results.length < 5) {
+    if (results.length < 20) {
       return NextResponse.json({
         success: false,
-        error: `Aguarde 5 resultados para iniciar (atual: ${results.length}/5)`
+        error: `Aguarde 20 resultados para iniciar (atual: ${results.length}/20)`
       });
     }
     
-    // Inicializar operação - usar mesma ordem do frontend (mais recente primeiro)
+    // Buscar padrão válido com gap de 15
+    const pattern = findValidPatternWithGap(userId);
+    if (!pattern) {
+      return NextResponse.json({
+        success: false,
+        error: 'Nenhum padrão válido encontrado - aguarde novos resultados'
+      });
+    }
     operationState[userId] = {
       ...operationState[userId],
       active: true,
-      currentPattern: results.slice().reverse().map(r => r.color),
+      currentPattern: pattern,
       currentLevel: 0,
       martingaleLevel: 0,
       waitingForResult: false
     };
     
-    const pattern = operationState[userId].currentPattern.join('');
-    addWebSocketLog(userId, `🚀 Operação iniciada! Padrão FIXO: ${pattern}`, 'success');
-    addWebSocketLog(userId, `📋 Sequência a seguir: ${pattern.split('').map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
+    const patternString = operationState[userId].currentPattern.join('');
+    addWebSocketLog(userId, `🚀 Operação iniciada! Padrão FIXO: ${patternString}`, 'success');
+    addWebSocketLog(userId, `📋 Sequência a seguir: ${operationState[userId].currentPattern.map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
     
     // ✅ NOVO: Ativar renovação automática de sessão
     setupAutoRenewal(userId);
@@ -947,7 +1037,6 @@ async function startSimpleOperation(userId: string) {
     });
 
   } catch (error) {
-    console.error('❌ Erro ao iniciar operação:', error);
     return NextResponse.json({
       success: false,
       error: 'Erro ao iniciar operação'
@@ -958,6 +1047,12 @@ async function startSimpleOperation(userId: string) {
 // NOVO: Parar operação
 async function stopSimpleOperation(userId: string) {
   try {
+    // 📊 NOVO: Finalizar sessão de apostas
+    try {
+      await finalizeBettingSession(userId, 'user_stop');
+    } catch (error) {
+    }
+    
     // Parar operação de apostas
     if (operationState[userId]) {
       operationState[userId].active = false;
@@ -1235,12 +1330,10 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
         
       } catch (parseError) {
         addWebSocketLog(userId, `❌ Erro ao processar mensagem: ${parseError}`, 'error');
-        console.log('📝 [WS] Mensagem não parseável:', data.toString().substring(0, 100));
       }
     });
     
     ws.on('error', (error) => {
-      console.error('❌ WebSocket error:', error);
       addWebSocketLog(userId, `❌ Erro na conexão: ${error.message}`, 'error');
       updateConnectionStatus(userId, false, error.message);
       
@@ -1285,7 +1378,6 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     };
     
   } catch (error) {
-    console.error('❌ Erro ao criar WebSocket:', error);
     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
     addWebSocketLog(userId, `❌ Erro ao conectar: ${errorMessage}`, 'error');
     updateConnectionStatus(userId, false, errorMessage);
@@ -1318,41 +1410,33 @@ async function sendWebSocketMessage(ws: any, message: string, userId: string): P
     // Método 1: Tentar envio direto (funciona em desenvolvimento)
     try {
       ws.send(message);
-      console.log('✅ [WEBSOCKET] Mensagem enviada via método direto');
       return { success: true };
     } catch (directError: any) {
-      console.log('⚠️ [WEBSOCKET] Método direto falhou:', directError.message);
       
       // Método 2: Tentar com Buffer (para compatibilidade com diferentes implementações)
       try {
         const buffer = Buffer.from(message, 'utf8');
         ws.send(buffer);
-        console.log('✅ [WEBSOCKET] Mensagem enviada via Buffer');
         return { success: true };
       } catch (bufferError: any) {
-        console.log('⚠️ [WEBSOCKET] Método Buffer falhou:', bufferError.message);
         
         // Método 3: Tentar forçar como string
         try {
           const stringMessage = String(message);
           ws.send(stringMessage, { binary: false });
-          console.log('✅ [WEBSOCKET] Mensagem enviada como string forçada');
           return { success: true };
         } catch (stringError: any) {
-          console.log('⚠️ [WEBSOCKET] Método string forçada falhou:', stringError.message);
           
           // Método 4: Tentar usando _socket diretamente (último recurso)
           try {
             if (ws._socket && ws._socket.write) {
               const frame = createWebSocketFrame(message);
               ws._socket.write(frame);
-              console.log('✅ [WEBSOCKET] Mensagem enviada via _socket.write');
               return { success: true };
             } else {
               throw new Error('_socket.write não disponível');
             }
           } catch (socketError: any) {
-            console.error('❌ [WEBSOCKET] Todos os métodos falharam:', socketError.message);
             addWebSocketLog(userId, `❌ Erro crítico no WebSocket: ${socketError.message}`, 'error');
             
             return {
@@ -1364,7 +1448,6 @@ async function sendWebSocketMessage(ws: any, message: string, userId: string): P
       }
     }
   } catch (error: any) {
-    console.error('❌ [WEBSOCKET] Erro geral:', error);
     return {
       success: false,
       error: `Erro geral no WebSocket: ${error.message || 'Erro desconhecido'}`
@@ -1453,7 +1536,6 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
 </command>`;
 
     // Log da mensagem XML que será enviada
-    console.log('📤 [AUTO-BET] XML da aposta:', betXml);
     addWebSocketLog(userId, `📤 Enviando XML: ${betXml.replace(/\n/g, ' ').replace(/\s+/g, ' ')}`, 'info');
           
     // Enviar aposta via WebSocket com tratamento robusto
@@ -1507,10 +1589,8 @@ async function debitUserCredits(userId: string, amount: number) {
     });
 
     if (error) {
-      console.error('❌ Erro ao debitar créditos:', error);
     }
   } catch (error) {
-    console.error('❌ Erro ao debitar créditos:', error);
   }
 }
 
@@ -1527,7 +1607,6 @@ function resetReconnectionControl(userId: string) {
 }
 
 function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
-  console.log(`🛑 [DEBUG-STOP] Parando conexões para usuário ${userId.slice(0, 8)}...`);
   
   // Fechar WebSocket se existir
   if (activeWebSockets[userId]?.ws) {
@@ -1537,18 +1616,14 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
         ws.close(1000, 'Operação parada pelo usuário');
       }
   } catch (error) {
-      console.error('❌ Erro ao fechar WebSocket:', error);
     }
       delete activeWebSockets[userId];
-      console.log(`✅ [DEBUG-STOP] WebSocket removido para ${userId.slice(0, 8)}`);
     } else {
-    console.log(`ℹ️ [DEBUG-STOP] Nenhum WebSocket ativo para ${userId.slice(0, 8)}`);
   }
     
   // Limpar controle de reconexão
   if (reconnectionControl[userId]) {
     delete reconnectionControl[userId];
-    console.log(`✅ [DEBUG-STOP] Controle de reconexão removido para ${userId.slice(0, 8)}`);
   }
   
   // ✅ NOVO: Limpar timer de renovação automática
@@ -1556,55 +1631,41 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
     clearTimeout(renewalTimers[userId]);
     delete renewalTimers[userId];
     addWebSocketLog(userId, '⏰ Timer de renovação automática cancelado', 'info');
-    console.log(`✅ [DEBUG-STOP] Timer de renovação removido para ${userId.slice(0, 8)}`);
   }
   
   // ✅ NOVO: Limpar controle de sessão
   if (sessionControl[userId]) {
     delete sessionControl[userId];
-    console.log(`✅ [DEBUG-STOP] Controle de sessão removido para ${userId.slice(0, 8)}`);
   }
   
   // NOVO: Resetar flag de coleta de resultados
   resultCollectionEnabled[userId] = false;
-  console.log(`✅ [DEBUG-STOP] Coleta de resultados desabilitada para ${userId.slice(0, 8)}`);
   
   // NOVO: Resetar estado da janela de apostas
   if (bettingWindowState[userId]) {
     delete bettingWindowState[userId];
-    console.log(`✅ [DEBUG-STOP] Estado da janela de apostas removido para ${userId.slice(0, 8)}`);
   }
   
-  // 🕶️ NOVO: Limpar sistema de disfarce
-  if (disguiseControl[userId]) {
-    // Cancelar timer de pausa se existir
-    if (disguiseControl[userId].waitingBreakTimer) {
-      clearTimeout(disguiseControl[userId].waitingBreakTimer);
-    }
-    delete disguiseControl[userId];
-    addWebSocketLog(userId, '🕶️ Sistema de disfarce desativado', 'info');
-    console.log(`✅ [DEBUG-STOP] Sistema de disfarce removido para ${userId.slice(0, 8)}`);
-  }
+  // Sistema de disfarce removido - controle manual pelo usuário
   
   // Atualizar status de conexão
   if (setErrorStatus) {
     updateConnectionStatus(userId, false, 'Operação parada pelo usuário');
   }
   
-  console.log(`🏁 [DEBUG-STOP] Limpeza completa para usuário ${userId.slice(0, 8)} finalizada`);
 }
 
 // Obter logs do WebSocket
 async function getWebSocketLogs(userId: string) {
   try {
     const logs = websocketLogs[userId] || [];
-    const results = lastFiveResults[userId] || [];
+    const results = lastTwentyResults[userId] || [];
     const status = connectionStatus[userId] || { connected: false, lastUpdate: Date.now() };
     const operation = operationState[userId];
 
-    // NOVO: Verificar se pode iniciar operação (padrão completo + janela de apostas aberta)
+    // NOVO: Verificar se pode iniciar operação (20 resultados + janela de apostas aberta)
     const bettingWindow = bettingWindowState[userId];
-    const hasCompletePattern = results.length >= 5;
+    const hasCompletePattern = results.length >= 20;
     const bettingWindowOpen = bettingWindow?.isOpen || false;
     const canStartOperation = hasCompletePattern && bettingWindowOpen && !operation?.active;
 
@@ -1613,7 +1674,7 @@ async function getWebSocketLogs(userId: string) {
       data: {
         logs,
         connectionStatus: status,
-        lastFiveResults: results,
+        lastTwentyResults: results,
         operationActive: operation?.active || false,
         operationState: operation ? {
           pattern: operation.currentPattern.join(''),
@@ -1653,56 +1714,8 @@ async function getWebSocketLogs(userId: string) {
           totalNoise: parseFloat(humanizationStats[userId].totalNoise.toFixed(2)),
           lastNoiseApplied: parseFloat(humanizationStats[userId].lastNoiseApplied.toFixed(2))
         } : null,
-        // 🕶️ Sistema de disfarce por ganhos consecutivos
-        disguiseStats: disguiseControl[userId] ? (() => {
-          const disguise = disguiseControl[userId];
-          const now = Date.now();
-          
-          // Calcular status atual
-          let currentStatus = 'Operando';
-          let timeRemaining = 0;
-          let progressPercent = 0;
-          
-          if (disguise.isOnBreakFromWins) {
-            currentStatus = 'Hibernando (Ganhos)';
-            if (disguise.breakEndTime > 0) {
-              timeRemaining = Math.max(0, disguise.breakEndTime - now);
-              const totalDuration = disguise.breakEndTime - disguise.breakStartTime;
-              progressPercent = totalDuration > 0 ? Math.min(100, ((totalDuration - timeRemaining) / totalDuration) * 100) : 0;
-            }
-          } else if (!operationState[userId]?.active) {
-            currentStatus = 'Aguardando';
-          }
-          
-          return {
-            // Status atual
-            currentStatus,
-            
-            // Timer da pausa atual (se ativa)
-            currentBreak: {
-              isActive: disguise.isOnBreakFromWins,
-              type: 'wins',
-              timeRemainingMs: timeRemaining,
-              timeRemainingMinutes: Math.ceil(timeRemaining / (60 * 1000)),
-              progressPercent: Math.round(progressPercent),
-              startTime: disguise.breakStartTime,
-              endTime: disguise.breakEndTime
-            },
-            
-            // Progresso das sequências
-            sequences: {
-              completed: disguise.completedSequences,
-              target: disguise.targetSequences,
-              progressPercent: Math.round((disguise.completedSequences / disguise.targetSequences) * 100)
-            },
-            
-            // Informações gerais
-            nextBreakDuration: Math.floor(disguise.nextBreakDuration / (60 * 1000)), // em minutos
-            timeSinceLastBreak: disguise.lastBreakTime > 0 ? 
-              Math.floor((now - disguise.lastBreakTime) / (60 * 1000)) : 0, // em minutos
-            hasActiveTimer: !!disguise.waitingBreakTimer
-          };
-        })() : null
+        // Sistema de disfarce removido - dados simplificados
+        disguiseStats: null
       }
     });
   } catch (error) {
@@ -1786,7 +1799,7 @@ async function resetOperationReport(userId: string) {
 async function getConnectionStatus(userId: string) {
   try {
     const status = connectionStatus[userId] || { connected: false, lastUpdate: Date.now() };
-    const results = lastFiveResults[userId] || [];
+    const results = lastTwentyResults[userId] || [];
     const operation = operationState[userId];
 
     return NextResponse.json({
@@ -1795,7 +1808,7 @@ async function getConnectionStatus(userId: string) {
         connected: status.connected,
         lastUpdate: status.lastUpdate,
         error: status.error,
-        lastFiveCount: results.length,
+        lastTwentyCount: results.length,
         operationActive: operation?.active || false
       }
     });
@@ -1808,6 +1821,94 @@ async function getConnectionStatus(userId: string) {
 }
 
 // Função para diagnóstico do servidor - mostra todos os usuários ativos
+// 📊 NOVO: Buscar histórico de sessões
+async function getSessionsHistory(userId: string) {
+  try {
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+    );
+    
+    // Buscar sessões do usuário ordenadas por data (mais recentes primeiro)
+    const { data: sessions, error } = await supabase
+      .from('betting_sessions_history')
+      .select('*')
+      .eq('user_id', userId)
+      .order('started_at', { ascending: false })
+      .limit(50); // Últimas 50 sessões
+    
+    if (error) {
+      return NextResponse.json({
+        success: false,
+        error: 'Erro ao buscar histórico de sessões'
+      });
+    }
+    
+    // Calcular totais gerais
+    const totals = sessions?.reduce((acc, session) => ({
+      totalSessions: acc.totalSessions + 1,
+      totalBets: acc.totalBets + (session.total_bets || 0),
+      totalWins: acc.totalWins + (session.total_wins || 0),
+      totalLosses: acc.totalLosses + (session.total_losses || 0),
+      totalWagered: acc.totalWagered + (session.total_wagered || 0),
+      totalWinnings: acc.totalWinnings + (session.total_winnings || 0),
+      totalProfit: acc.totalProfit + (session.net_profit || 0),
+      totalHumanizedBets: acc.totalHumanizedBets + (session.humanized_bets || 0),
+      totalCompletedSequences: acc.totalCompletedSequences + (session.completed_sequences || 0),
+      totalBreaksTaken: acc.totalBreaksTaken + (session.breaks_taken || 0)
+    }), {
+      totalSessions: 0,
+      totalBets: 0,
+      totalWins: 0,
+      totalLosses: 0,
+      totalWagered: 0,
+      totalWinnings: 0,
+      totalProfit: 0,
+      totalHumanizedBets: 0,
+      totalCompletedSequences: 0,
+      totalBreaksTaken: 0
+    }) || {
+      totalSessions: 0,
+      totalBets: 0,
+      totalWins: 0,
+      totalLosses: 0,
+      totalWagered: 0,
+      totalWinnings: 0,
+      totalProfit: 0,
+      totalHumanizedBets: 0,
+      totalCompletedSequences: 0,
+      totalBreaksTaken: 0
+    };
+    
+    // Calcular taxa de acerto geral
+    const overallWinRate = totals.totalBets > 0 
+      ? ((totals.totalWins / totals.totalBets) * 100).toFixed(2)
+      : '0.00';
+    
+    return NextResponse.json({
+      success: true,
+      data: {
+        sessions: sessions || [],
+        totals: {
+          ...totals,
+          overallWinRate: parseFloat(overallWinRate)
+        },
+        currentSession: activeSessions[userId] ? {
+          sessionId: activeSessions[userId].sessionId,
+          startedAt: new Date(activeSessions[userId].startedAt).toISOString(),
+          isActive: true
+        } : null
+      }
+    });
+    
+  } catch (error) {
+    return NextResponse.json({
+      success: false,
+      error: 'Erro interno do servidor'
+    });
+  }
+}
+
 async function getServerDiagnostic() {
   try {
     const activeUsers = Object.keys(activeWebSockets);
@@ -1815,7 +1916,6 @@ async function getServerDiagnostic() {
     const usersWithSessions = Object.keys(sessionControl);
     const usersWithTimers = Object.keys(renewalTimers);
     
-    console.log('🩺 [SERVER-DIAGNOSTIC] Gerando diagnóstico do servidor...');
     
     return NextResponse.json({
       success: true,

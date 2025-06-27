@@ -69,69 +69,7 @@ export default function ConfigPage() {
         </CardContent>
       </Card>
 
-      {/* System Settings */}
-      <Card className="mb-6 border-green-500/30 backdrop-blur-lg shadow-2xl shadow-green-500/10">
-        <CardHeader>
-          <CardTitle className="text-green-400 font-mono">CONFIGURAÇÕES_SISTEMA</CardTitle>
-          <CardDescription className="text-gray-400 font-mono text-xs">
-            // Configuração da aplicação
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-green-400 font-mono">NOTIFICAÇÕES</div>
-                <div className="text-sm text-gray-400 font-mono">Habilitar notificações do sistema</div>
-              </div>
-              <Button variant="outline" size="sm" className="bg-green-500/20 border-green-500/50 text-green-400 font-mono">
-                HABILITADO
-              </Button>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-green-400 font-mono">TRADING_AUTO</div>
-                <div className="text-sm text-gray-400 font-mono">Modo de trading automático</div>
-              </div>
-              <Button variant="outline" size="sm" className="bg-red-500/20 border-red-500/50 text-red-400 font-mono">
-                DESABILITADO
-              </Button>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-green-400 font-mono">MODO_ESCURO</div>
-                <div className="text-sm text-gray-400 font-mono">Tema da interface</div>
-              </div>
-              <Button variant="outline" size="sm" className="bg-green-500/20 border-green-500/50 text-green-400 font-mono">
-                HABILITADO
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Security */}
-      <Card className="border-green-500/30 backdrop-blur-lg shadow-2xl shadow-green-500/10">
-        <CardHeader>
-          <CardTitle className="text-green-400 font-mono">SEGURANÇA</CardTitle>
-          <CardDescription className="text-gray-400 font-mono text-xs">
-            // Configurações de segurança da conta
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <Button className="w-full bg-blue-500/20 border border-blue-500/50 text-blue-400 hover:bg-blue-500/30 font-mono" variant="outline">
-              ALTERAR_SENHA
-            </Button>
-            <Button className="w-full bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/30 font-mono" variant="outline">
-              HABILITAR_2FA
-            </Button>
-            <Button className="w-full bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30 font-mono" variant="outline">
-              EXCLUIR_CONTA
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 } 

@@ -333,7 +333,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
               </Button>
             </form>
 
-            {!isInviteOnly && (
+            {!isInviteOnly && defaultMode !== 'login' && (
               <div className="mt-6 text-center">
                 <button
                   type="button"
@@ -345,6 +345,20 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
                     : '// Já tem conta? Retornar para autenticação'
                   }
                 </button>
+              </div>
+            )}
+
+            {defaultMode === 'login' && (
+              <div className="mt-6 text-center">
+                <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                  <p className="text-xs text-yellow-400 font-mono">
+                    <Crown className="h-3 w-3 inline mr-1" />
+                    CADASTROS APENAS POR CONVITE
+                  </p>
+                  <p className="text-xs text-gray-400 font-mono mt-1">
+                    // Solicite um link de indicação para criar sua conta
+                  </p>
+                </div>
               </div>
             )}
 

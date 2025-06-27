@@ -106,7 +106,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(betResult);
 
   } catch (error) {
-    console.error('❌ [BET] Erro na API de apostas:', error);
     return NextResponse.json({
       success: false,
       error: 'Erro interno do servidor'
@@ -402,11 +401,9 @@ function isValidBetCode(betCode: string): boolean {
 // Função para debitar créditos do usuário
 async function debitUserCredits(userId: string, amount: number) {
   try {
-    console.log(`💳 Debitando R$ ${amount} do usuário ${userId}`);
     // Implementar integração com sistema de créditos
     return { success: true };
   } catch (error) {
-    console.error('❌ Erro ao debitar créditos:', error);
     return { success: false };
   }
 }

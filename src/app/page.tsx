@@ -34,7 +34,7 @@ function HomeContent() {
 
   return (
     <div className="min-h-screen bg-black">
-      <Auth onAuthSuccess={handleAuthSuccess} />
+      <Auth onAuthSuccess={handleAuthSuccess} defaultMode="login" />
     </div>
   )
 }

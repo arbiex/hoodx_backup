@@ -72,7 +72,7 @@ export default function BlazeMegaRouletteStrategyModal({
 
   const handleConfirm = () => {
     if (selectedTip) {
-      console.log('🎯 [STRATEGY] Tip selecionado:', selectedTip)
+  
       onConfirm(selectedTip)
     }
   }
@@ -152,24 +152,7 @@ export default function BlazeMegaRouletteStrategyModal({
                 
               </div>
               
-              <div className="text-xs font-mono text-gray-400 mb-2">SEQUÊNCIA_MARTINGALE:</div>
-              <div className="grid grid-cols-5 gap-2 text-xs mb-4">
-                {selectedStrategyData.sequence.map((seq, index) => (
-                  <div 
-                    key={seq.level}
-                    className={`p-2 rounded text-center font-mono ${
-                      index === 0 ? 'bg-green-500/20 text-green-400' :
-                      index === 1 ? 'bg-blue-500/20 text-blue-400' :
-                      index === 2 ? 'bg-yellow-500/20 text-yellow-400' :
-                      index === 3 ? 'bg-orange-500/20 text-orange-400' :
-                      'bg-red-500/20 text-red-400'
-                    }`}
-                  >
-                                         <div className="text-xs">M{seq.level}</div>
-                     <div className="font-semibold">{seq.value.toFixed(2)}</div>
-                  </div>
-                ))}
-              </div>
+
               
             </div>
           </div>

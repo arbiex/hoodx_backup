@@ -79,7 +79,6 @@ export default function StrategyModal({ isOpen, onClose, onConfirm, loading = fa
       const { data: { user } } = await supabase.auth.getUser()
       
       if (!user?.email) {
-        console.error('Usuário não encontrado')
         return
       }
 
@@ -103,7 +102,6 @@ export default function StrategyModal({ isOpen, onClose, onConfirm, loading = fa
         })))
       }
     } catch (error) {
-      console.error('Erro ao carregar dados de martingale:', error)
     } finally {
       setLoadingData(false)
     }
@@ -117,11 +115,9 @@ export default function StrategyModal({ isOpen, onClose, onConfirm, loading = fa
         const { data: { user } } = await supabase.auth.getUser()
         
         if (!user?.email) {
-          console.error('Usuário não encontrado')
           return
         }
 
-        console.log('🧹 [STRATEGY] Limpando sessões antes de ativar nova estratégia...')
         
         // Limpar sessões existentes antes de ativar nova estratégia
         const cleanupResponse = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
@@ -136,20 +132,16 @@ export default function StrategyModal({ isOpen, onClose, onConfirm, loading = fa
         const cleanupResult = await cleanupResponse.json()
         
         if (cleanupResult.success) {
-          console.log('✅ [STRATEGY] Sessões limpas com sucesso:', cleanupResult.data)
         } else {
-          console.warn('⚠️ [STRATEGY] Aviso na limpeza de sessões:', cleanupResult.error)
         }
 
         // Aguardar um pouco para garantir que a limpeza foi processada
         await new Promise(resolve => setTimeout(resolve, 500))
 
         // Ativar nova estratégia
-        console.log('🎯 [STRATEGY] Ativando estratégia:', selectedStrategy)
         onConfirm(selectedStrategy)
         
       } catch (error) {
-        console.error('❌ [STRATEGY] Erro ao limpar sessões:', error)
         // Mesmo com erro na limpeza, continuar com a ativação
         onConfirm(selectedStrategy)
       }

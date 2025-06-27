@@ -186,14 +186,12 @@ export function useMegaRouletteBlaze() {
 
   // SISTEMA ÚNICO DE MONITORAMENTO EM TEMPO REAL (SEM CACHE)
   const startRealTimeMonitoring = useCallback(async () => {
-    console.log('🎯 startRealTimeMonitoring CHAMADA!');
     
     // Parar qualquer monitoramento existente primeiro
     stopExistingMonitoring();
     
     try {
       const userId = await getCurrentUserId();
-      console.log('👤 UserId obtido:', userId);
       if (!userId) {
         addLog('❌ Usuário não autenticado');
         return;
@@ -204,18 +202,14 @@ export function useMegaRouletteBlaze() {
       activeMonitoringSession = sessionId;
 
       addLog('🚀 Iniciando monitoramento em tempo real...');
-      console.log('📝 Log adicionado: Iniciando monitoramento');
       
       let isMonitoring = false;
       let lastGameId = '';
-      console.log('📝 Variáveis inicializadas');
 
       const monitorHistory = async () => {
-        console.log('📝 monitorHistory CHAMADA!');
         
         // Verificar se esta sessão ainda é ativa
         if (activeMonitoringSession !== sessionId) {
-          console.log('🛑 Sessão de monitoramento não é mais ativa, parando...');
           return;
         }
         
@@ -231,7 +225,6 @@ export function useMegaRouletteBlaze() {
           });
 
           if (!shouldContinue) {
-            console.log('🛑 Bot não está mais ativo, parando monitoramento...');
             return;
           }
 
@@ -317,7 +310,6 @@ export function useMegaRouletteBlaze() {
 
         } catch (error) {
           isMonitoring = false;
-          console.error('Erro no monitoramento:', error);
           
           // Tentar novamente em caso de erro apenas se sessão ainda ativa
           if (activeMonitoringSession === sessionId) {
@@ -333,16 +325,12 @@ export function useMegaRouletteBlaze() {
 
       // Carregar histórico inicial
       setState(prev => ({ ...prev, historyLoading: true }));
-      console.log('📝 Estado historyLoading definido como true');
       
       // Buscar histórico inicial da API
       addLog('🔍 Carregando histórico inicial...');
-      console.log('📝 Chamando monitorHistory...');
       await monitorHistory();
-      console.log('📝 monitorHistory executado!');
       
       addLog('✅ Monitoramento em tempo real ativo (3s)');
-      console.log('📝 Função startRealTimeMonitoring FINALIZADA!');
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -366,7 +354,6 @@ export function useMegaRouletteBlaze() {
       const { data: { user } } = await supabase.auth.getUser();
       return user?.id || null;
     } catch (error) {
-      console.error('Erro ao obter userId:', error);
       return null;
     }
   };
@@ -471,7 +458,6 @@ export function useMegaRouletteBlaze() {
 
         // Buscar saldo e histórico iniciais
         fetchBalance();
-        console.log('🔥 Chamando startRealTimeMonitoring do startBot...');
         startRealTimeMonitoring();
       } else {
         throw new Error(data.error || 'Erro ao conectar bot');
@@ -600,10 +586,8 @@ export function useMegaRouletteBlaze() {
 
   // Iniciar monitoramento quando bot ativo
   useEffect(() => {
-    console.log('🔄 useEffect monitoramento:', { isActive: state.isActive });
     if (!state.isActive) return;
     
-    console.log('🚀 Iniciando startRealTimeMonitoring via useEffect...');
     startRealTimeMonitoring();
   }, [state.isActive]);
 

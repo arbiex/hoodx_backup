@@ -1,14 +1,19 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Play, Square, RefreshCw, Zap, Key, Settings } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
-  import InlineAlert from '@/components/ui/inline-alert';
+import InlineAlert from '@/components/ui/inline-alert';
   import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
+import CreditDisplay from '@/components/CreditDisplay';
+import { OperationsHistoryCard } from '@/components/OperationsHistoryCard';
+import { useSimpleOperationsHistory } from '@/hooks/useSimpleOperationsHistory';
+import { useBettingLogs } from '@/hooks/useBettingLogs';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -95,9 +100,12 @@ export default function BlazeMegaRouletteBR() {
     };
   } | null>(null);
 
+
+
   // Estados para modal de estratégia
   const [strategyModalOpen, setStrategyModalOpen] = useState(false);
   const [strategyLoading, setStrategyLoading] = useState(false);
+  const [tutorialModalOpen, setTutorialModalOpen] = useState(false);
   const [selectedTipValue, setSelectedTipValue] = useState<number | null>(null);
 
   // NOVO: Estado da janela de apostas
@@ -106,6 +114,8 @@ export default function BlazeMegaRouletteBR() {
     currentGameId?: string;
     lastUpdate?: number;
   }>({ isOpen: false });
+
+
 
   const monitoringRef = useRef<boolean>(false);
   const operationRef = useRef<boolean>(false);
@@ -118,10 +128,73 @@ export default function BlazeMegaRouletteBR() {
     location: 'Detectando...'
   });
 
+  // Hook para histórico de operações
+  const operationsHistory = useSimpleOperationsHistory();
+  
+  // NOVO: Hook simples para logs de apostas
+  const bettingLogs = useBettingLogs();
+
   useEffect(() => {
     checkUser();
     checkBlazeConfiguration();
   }, []);
+
+  // Removido: Sistema complexo de operações ativas removido
+
+  // ✅ NOVO: Sistema simples - controla dados da operação
+  const [lastSavedData, setLastSavedData] = useState<{
+    totalBets: number;
+    netProfit: number;
+  } | null>(null);
+  const [operationStarted, setOperationStarted] = useState(false);
+
+  // 📊 ATUALIZAÇÃO DE DADOS - só quando operação está ativa E tem dados
+  useEffect(() => {
+    if (!isOperating || !operationStarted || !operationReport?.summary) {
+      return;
+    }
+
+    const currentData = {
+      totalBets: operationReport.summary.totalBets,
+      netProfit: operationReport.summary.profit
+    };
+
+    // 🎯 CHAVE: Só continua se os dados mudaram
+    const hasChanged = !lastSavedData || 
+      lastSavedData.totalBets !== currentData.totalBets ||
+      lastSavedData.netProfit !== currentData.netProfit;
+
+    if (!hasChanged) {
+      console.log('⏭️ Dados iguais - não atualizando');
+      return;
+    }
+
+    console.log('📊 ATUALIZANDO OPERAÇÃO:', {
+      anterior: lastSavedData,
+      atual: currentData
+    });
+
+    // 🔄 ATUALIZAR registro existente
+    const updateOperationData = async () => {
+      const result = await bettingLogs.logCurrentData({
+        totalBets: currentData.totalBets,
+        netProfit: currentData.netProfit
+      });
+
+      if (result.success) {
+        setLastSavedData(currentData);
+        console.log('✅ Registro atualizado:', result);
+        
+        // 🔄 DISPARAR SINCRONIZAÇÃO EM CASCATA (atualização contínua)
+        window.dispatchEvent(new CustomEvent('credits-updated'));
+        window.dispatchEvent(new CustomEvent('operations-updated'));
+      } else {
+        console.error('❌ Erro ao atualizar:', result.error);
+      }
+    };
+    
+    updateOperationData();
+  }, [operationReport, isOperating, operationStarted, bettingLogs, lastSavedData]);
 
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -129,12 +202,8 @@ export default function BlazeMegaRouletteBR() {
       setUserEmail(user.email);
       userIdRef.current = user.id;
       
-      // DEBUG: Log detalhado do usuário
-      console.log('🔐 [DEBUG] Usuário atual:', {
-        email: user.email,
-        id: user.id.slice(0, 8) + '...',
-        timestamp: new Date().toISOString()
-      });
+
+      setTimeout(() => checkInitialServerStatus(), 500); // Delay pequeno para garantir que o estado seja atualizado
     }
   };
 
@@ -151,7 +220,6 @@ export default function BlazeMegaRouletteBR() {
         .eq('casino_code', 'BLAZE');
 
       if (error) {
-        console.error('Error checking Blaze configuration:', error);
         return;
       }
 
@@ -160,7 +228,6 @@ export default function BlazeMegaRouletteBR() {
         token.is_active && token.token && token.token.trim() !== ''
       ));
     } catch (error) {
-      console.error('Error checking Blaze configuration:', error);
     } finally {
       setIsLoadingStatus(false);
     }
@@ -203,7 +270,6 @@ export default function BlazeMegaRouletteBR() {
       }, 2000);
 
     } catch (error: any) {
-      console.error('Erro ao configurar token:', error);
       setAlertMessage({
         type: 'error',
         message: `Erro ao configurar token: ${error.message}`
@@ -215,7 +281,7 @@ export default function BlazeMegaRouletteBR() {
 
   // Função para iniciar operação com tip específico
   const startOperation = async (tipValue: number) => {
-    setOperationLoading(true);
+        setOperationLoading(true);
     setOperationError(null);
     
     try {
@@ -230,21 +296,9 @@ export default function BlazeMegaRouletteBR() {
       // ✅ NOVO: Capturar dados completos do usuário
       const userInfo = getUserInfo();
       
-      console.log('🚀 [DEBUG] Iniciando operação para usuário:', {
-        userId: user.id.slice(0, 8) + '...',
-        email: user.email,
-        tipValue,
-        userInfo: {
-          ip: userNetworkInfo.ip,
-          platform: userInfo.platform,
-          browser: userInfo.browser,
-          userAgent: userInfo.userAgent.substring(0, 50) + '...'
-        },
-        timestamp: new Date().toISOString()
-      });
-      
-      console.log('🎮 Conectando ao WebSocket para operação...');
       setOperationStatus('CONECTANDO...');
+
+      // Sistema simplificado - sem necessidade de gerenciar operações ativas
 
       // Conectar ao WebSocket
       const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
@@ -267,12 +321,28 @@ export default function BlazeMegaRouletteBR() {
       const result = await response.json();
 
       if (!result.success) {
+        // Se falhou a conexão, não precisa finalizar histórico (ainda não foi criado)
         setOperationError(`Erro na conexão WebSocket: ${result.error}`);
         setOperationStatus('ERRO');
         return;
       }
 
-      console.log('✅ [DEBUG] Conectado ao WebSocket com sucesso para:', user.id.slice(0, 8) + '...');
+      // 🟢 CRIAR OPERAÇÃO NO BANCO - DIRETO DO BOTÃO
+      console.log('🟢 BOTÃO INICIAR CLICADO - Criando operação...');
+      const operationResult = await bettingLogs.logCurrentData({
+        totalBets: 0,
+        netProfit: 0
+      });
+      
+      if (operationResult.success) {
+        console.log('✅ Operação criada no banco:', operationResult);
+        setOperationStarted(true);
+        
+        // 🔄 DISPARAR SINCRONIZAÇÃO EM CASCATA
+        console.log('🔄 Disparando eventos de sincronização (início)...');
+        window.dispatchEvent(new CustomEvent('credits-updated'));
+        window.dispatchEvent(new CustomEvent('operations-updated'));
+      }
       
       setIsOperating(true);
       operationRef.current = true;
@@ -284,7 +354,7 @@ export default function BlazeMegaRouletteBR() {
       startMonitoring();
 
     } catch (error) {
-      console.error('❌ Erro ao conectar:', error);
+      // Se houve erro, não precisa finalizar histórico (ainda não foi criado)
       setOperationError('Erro inesperado na conexão');
       setOperationStatus('ERRO');
     } finally {
@@ -298,11 +368,7 @@ export default function BlazeMegaRouletteBR() {
       setStrategyLoading(true);
       setSelectedTipValue(tipValue);
       
-      console.log('🎯 [STRATEGY] Estratégia confirmada:', {
-        tipValue,
-        userId: userIdRef.current.slice(0, 8) + '...',
-        timestamp: new Date().toISOString()
-      });
+
       
       // Fechar modal de estratégia
       setStrategyModalOpen(false);
@@ -311,7 +377,6 @@ export default function BlazeMegaRouletteBR() {
       await startOperation(tipValue);
       
     } catch (error) {
-      console.error('❌ Erro ao confirmar estratégia:', error);
       setOperationError('Erro ao confirmar estratégia');
     } finally {
       setStrategyLoading(false);
@@ -325,24 +390,24 @@ export default function BlazeMegaRouletteBR() {
       try {
         setOperationLoading(true);
         
-        console.log('🛑 [DEBUG] Parando operação para usuário:', {
-          userId: userIdRef.current.slice(0, 8) + '...',
-          email: userEmail,
-          timestamp: new Date().toISOString()
-        });
-        
-        const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    userId: userIdRef.current,
-            action: 'stop-operation'
-                  })
-                });
-                
-        const result = await response.json();
+
+
+      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userIdRef.current,
+          action: 'stop-operation'
+        })
+      });
+
+      const result = await response.json();
 
         if (result.success) {
+          // 🏁 FINALIZAR OPERAÇÃO NO BANCO - DIRETO DO BOTÃO
+          console.log('🔴 BOTÃO PARAR CLICADO - Finalizando operação...');
+          await bettingLogs.finishOperation();
+          
           setIsOperating(false);
           operationRef.current = false;
           setOperationStatus('DESCONECTADO');
@@ -352,18 +417,24 @@ export default function BlazeMegaRouletteBR() {
           // Parar monitoramento
           monitoringRef.current = false;
           setError(null);
-          
-          console.log('✅ [DEBUG] Operação parada com sucesso para:', userIdRef.current.slice(0, 8) + '...');
+          setOperationStarted(false); // Reset para próxima operação
+          setLastSavedData(null);
+
+          // 🔄 DISPARAR SINCRONIZAÇÃO EM CASCATA
+          console.log('🔄 Disparando eventos de sincronização...');
+          window.dispatchEvent(new CustomEvent('credits-updated'));
+          window.dispatchEvent(new CustomEvent('operations-updated'));
+
           setOperationSuccess('Operação encerrada com sucesso');
           setTimeout(() => setOperationSuccess(null), 3000);
           } else {
           setOperationError(`Erro ao parar operação: ${result.error}`);
         }
-      } catch (error: any) {
+    } catch (error: any) {
         setOperationError('Erro inesperado ao parar operação');
-      } finally {
+    } finally {
         setOperationLoading(false);
-      }
+    }
       return;
     }
 
@@ -375,7 +446,6 @@ export default function BlazeMegaRouletteBR() {
 
   // Iniciar monitoramento dos logs
   const startMonitoring = async () => {
-    console.log(`🔄 [DEBUG-MONITOR] Iniciando monitoramento para usuário: ${userIdRef.current?.slice(0, 8)}...`);
     
     while (monitoringRef.current) {
     try {
@@ -391,13 +461,7 @@ export default function BlazeMegaRouletteBR() {
       const result = await response.json();
 
         if (result.success && result.data) {
-          // DEBUG: Log dos dados recebidos (apenas primeira vez ou mudanças)
-          const currentLogsCount = result.data.logs?.length || 0;
-          const previousLogsCount = websocketLogs.length;
-          
-          if (currentLogsCount !== previousLogsCount) {
-            console.log(`📊 [DEBUG-MONITOR] Logs atualizados para ${userIdRef.current?.slice(0, 8)}: ${currentLogsCount} logs`);
-          }
+
           
           setWebsocketLogs(result.data.logs || []);
           setLastFiveResults(result.data.lastFiveResults || []);
@@ -406,16 +470,22 @@ export default function BlazeMegaRouletteBR() {
           setOperationState(result.data.operationState || null);
           // NOVO: Capturar estado da janela de apostas
           setBettingWindow(result.data.bettingWindow || { isOpen: false });
+          
+          // Sistema simplificado - dados salvos automaticamente via useEffect
+          
+          // NOVO: Atualizar estados do WebSocket baseado nos logs
+  
         }
 
-    } catch (error) {
-        console.error(`❌ [DEBUG-MONITOR] Erro no monitoramento para ${userIdRef.current?.slice(0, 8)}:`, error);
+          } catch (error) {
       }
 
-      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 segundos
+      // Verificar mais frequentemente durante operações ativas
+      const delay = operationActive ? 1000 : 2000; // 1 segundo se operando, 2 segundos se não
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
     
-    console.log(`🔄 [DEBUG-MONITOR] Monitoramento parado para usuário: ${userIdRef.current?.slice(0, 8)}...`);
+
   };
 
   // Buscar relatório
@@ -434,6 +504,8 @@ export default function BlazeMegaRouletteBR() {
 
       if (result.success && result.data) {
         setOperationReport(result.data);
+        
+        // Sistema simplificado - dados são salvos automaticamente pelo useEffect
       }
 
     } catch (error) {
@@ -441,36 +513,76 @@ export default function BlazeMegaRouletteBR() {
     }
   };
 
-  // Reset relatório
-  const resetOperationReport = async () => {
+
+
+
+
+  useEffect(() => {
+    if (userIdRef.current && isOperating) {
+      fetchOperationReport();
+      const interval = setInterval(fetchOperationReport, 2000); // ✅ CORRIGIDO: A cada 2 segundos para tempo real
+    return () => clearInterval(interval);
+    }
+  }, [isOperating]);
+
+
+
+
+
+  // NOVO: Verificar status inicial do servidor ao carregar a página
+  const checkInitialServerStatus = useCallback(async () => {
+    if (!userIdRef.current) return;
+    
+
+    
     try {
       const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: userIdRef.current,
-          action: 'reset-operation-report'
+          action: 'get-websocket-logs'
         })
       });
 
       const result = await response.json();
 
-      if (result.success) {
-        await fetchOperationReport();
+      if (result.success && result.data) {
+        const { connectionStatus, operationActive, logs = [], lastFiveResults = [], bettingWindow = { isOpen: false }, operationState = null } = result.data;
+        
+
+        
+        // Verificar se há atividade REAL no servidor (conexão ativa E operação ativa)
+        const isReallyActive = connectionStatus?.connected && operationActive;
+        
+        // Sempre sincronizar os dados disponíveis (para mostrar logs históricos)
+        if (logs.length > 0 || lastFiveResults.length > 0) {
+          setWebsocketLogs(logs);
+          setLastFiveResults(lastFiveResults);
+          setConnectionStatus(connectionStatus || { connected: false, lastUpdate: Date.now() });
+          setOperationState(operationState);
+          setBettingWindow(bettingWindow);
+
+        }
+        
+        // Só considerar "operando" se realmente estiver ativo
+        if (isReallyActive) {
+          setIsOperating(true);
+          setOperationActive(true);
+          setOperationStatus('OPERANDO');
+          monitoringRef.current = true;
+          startMonitoring();
+        } else {
+          setIsOperating(false);
+          setOperationActive(false);
+          setOperationStatus('DESCONECTADO');
+        }
       }
-
     } catch (error) {
-      console.error('Erro ao resetar relatório:', error);
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    if (userIdRef.current && isOperating) {
-      fetchOperationReport();
-      const interval = setInterval(fetchOperationReport, 10000); // A cada 10 segundos
-      return () => clearInterval(interval);
-    }
-  }, [isOperating]);
+
 
   useEffect(() => {
     return () => {
@@ -570,7 +682,6 @@ export default function BlazeMegaRouletteBR() {
               break; // Parar no primeiro sucesso
             }
           } catch (error) {
-            console.log(`Tentativa de API falhou: ${api}`);
             continue;
           }
         }
@@ -603,7 +714,6 @@ export default function BlazeMegaRouletteBR() {
         }
 
       } catch (error) {
-        console.error('Erro ao detectar informações de rede:', error);
         setUserNetworkInfo({
           ip: 'Erro na detecção',
           vpnDetected: false,
@@ -685,15 +795,7 @@ export default function BlazeMegaRouletteBR() {
           </button>
 
           {/* Card Operação */}
-          <Card className="border-blue-500/30 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
-                ⚡ OPERAÇÃO_WEBSOCKET
-              </CardTitle>
-              <CardDescription className="text-gray-400 font-mono text-xs">
-                {`// Conexão WebSocket para apostas no MegaRoulette - Sistema Simplificado`}
-              </CardDescription>
-            </CardHeader>
+          <Card className="border-green-500/30 backdrop-blur-sm">
             <CardContent>
               <div className="space-y-4">
                 
@@ -718,120 +820,10 @@ export default function BlazeMegaRouletteBR() {
                     </span>
                   </div>
                   
-                  {isOperating && (websocketLogs.length > 0 || lastFiveResults.length > 0) && (
-                    <div className="text-xs font-mono text-gray-500">
-                      LOGS: {websocketLogs.length} | ÚLTIMOS_5: {lastFiveResults.length}/5
-                    </div>
-                  )}
+
                 </div>
 
-                {/* Últimos 5 Resultados */}
-                {lastFiveResults.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="text-xs font-mono text-blue-400 font-semibold">🎯 ÚLTIMOS_5_RESULTADOS:</div>
-                    <div className="flex gap-2 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
-                      {lastFiveResults.slice().reverse().map((result, index) => {
-                        const baseClasses = "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold font-mono shadow-lg transition-all duration-300 hover:scale-110";
-                        const colorClasses = result.color === 'R' 
-                          ? 'bg-red-500 text-white shadow-red-500/50' 
-                          : 'bg-gray-800 text-white border border-gray-600 shadow-gray-800/50';
-                        
-                        return (
-                          <div
-                            key={`result-${index}-${result.gameId}`}
-                            className={`${baseClasses} ${colorClasses}`}
-                            title={`Número: ${result.number} | Game: ${result.gameId}`}
-                          >
-                            {result.color}
-                          </div>
-                        );
-                      })}
-                      {lastFiveResults.length < 5 && (
-                        Array.from({ length: 5 - lastFiveResults.length }).map((_, index) => (
-                          <div
-                            key={`empty-${index}`}
-                            className="w-8 h-8 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center text-xs text-gray-500"
-                          >
-                            ?
-                    </div>
-                        ))
-                      )}
-                    </div>
-                    <div className="text-xs font-mono text-gray-400">
-                      Padrão para apostas: {currentPattern || 'Aguardando...'} ({lastFiveResults.length}/5 completo)
-                    </div>
-                    {lastFiveResults.length >= 5 && (
-                      <div className="text-xs font-mono text-blue-300 bg-blue-500/10 p-2 rounded border border-blue-500/20">
-                        💡 Apostas seguem ordem visual: {currentPattern.split('').join(' → ')} (mais recente primeiro)
-                  </div>
-                )}
 
-                    {/* NOVO: Estado da janela de apostas */}
-                    {isOperating && (
-                      <div className={`text-xs font-mono p-2 rounded border ${
-                        bettingWindow.isOpen 
-                          ? 'text-green-300 bg-green-500/10 border-green-500/20' 
-                          : 'text-orange-300 bg-orange-500/10 border-orange-500/20'
-                      }`}>
-                        🎰 Janela de apostas: {bettingWindow.isOpen ? 'ABERTA' : 'FECHADA'}
-                        {bettingWindow.currentGameId && ` | Jogo: ${bettingWindow.currentGameId}`}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Estado da Operação */}
-                {operationState && (
-                  <div className="space-y-2">
-                    <div className="text-xs font-mono text-cyan-400 font-semibold">🤖 ESTADO_OPERAÇÃO:</div>
-                    <div className="p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg space-y-1 text-xs font-mono">
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Padrão Ativo:</span>
-                        <span className="text-cyan-400">{operationState.pattern}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Nível Atual:</span>
-                        <span className="text-cyan-400">{operationState.level + 1}/5</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Martingale:</span>
-                        <span className="text-cyan-400">{operationState.martingaleLevel}x</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Status:</span>
-                        <span className={operationState.waitingForResult ? 'text-yellow-400' : 'text-green-400'}>
-                          {operationState.waitingForResult ? 'AGUARDANDO_RESULTADO' : 'PRONTO'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Logs do WebSocket */}
-                {websocketLogs.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="text-xs font-mono text-blue-400 font-semibold">📋 LOGS_WEBSOCKET:</div>
-                    <div className="max-h-64 overflow-y-auto p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1">
-                      {websocketLogs.slice(0, 20).map((log, index) => (
-                        <div key={`log-${index}-${log.timestamp}`} className="text-xs font-mono flex items-start gap-2">
-                          <span className="text-gray-500 text-xs">
-                            {new Date(log.timestamp).toLocaleTimeString('pt-BR')}
-                          </span>
-                          <span className={`flex-1 ${
-                            log.type === 'error' ? 'text-red-400' :
-                            log.type === 'success' ? 'text-green-400' :
-                            log.type === 'game' ? 'text-yellow-400' :
-                            log.type === 'bets-open' ? 'text-green-400 font-bold' :
-                            log.type === 'bets-closed' ? 'text-red-400 font-bold' :
-                            'text-gray-300'
-                          }`}>
-                            {log.message}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 {/* Erro */}
                 {operationError && (
@@ -884,158 +876,102 @@ export default function BlazeMegaRouletteBR() {
 
           {/* Card Relatório de Operações */}
           {operationReport && (
-            <Card className="border-cyan-500/30 backdrop-blur-sm">
+            <Card className="border-green-500/30 backdrop-blur-sm">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-cyan-400 font-mono">
-                  📊 RELATÓRIO_OPERAÇÕES
+                <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
+                  📈 OPERAÇÕES
                 </CardTitle>
                 <CardDescription className="text-gray-400 font-mono text-xs">
-                  {`// Estatísticas das operações de apostas automáticas`}
+                  {`// Estatísticas em tempo real`}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   
-                                     {/* Resumo Principal */}
-                   <div className="grid grid-cols-3 gap-4">
-                     <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-lg text-center">
-                       <div className="text-2xl font-bold text-cyan-400 font-mono">
-                        {operationReport.summary.totalBets || 0}
+                                     {/* Resumo Principal - Layout Responsivo */}
+                   {/* Desktop: Grid 3 colunas / Mobile: Cards empilhados */}
+                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                     {/* Card APOSTAS */}
+                     <div className="p-3 sm:p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                       {/* Mobile: Layout horizontal */}
+                       <div className="flex items-center justify-between sm:hidden">
+                         <div className="text-sm text-gray-400 font-mono">APOSTAS:</div>
+                         <div className="text-2xl font-bold text-green-400 font-mono">
+                           {operationReport.summary.totalBets || 0}
+                         </div>
                        </div>
-                      <div className="text-xs text-gray-400 font-mono">APOSTAS</div>
+                       {/* Desktop: Layout centralizado */}
+                       <div className="hidden sm:block text-center">
+                         <div className="text-2xl font-bold text-green-400 font-mono">
+                           {operationReport.summary.totalBets || 0}
+                         </div>
+                         <div className="text-xs text-gray-400 font-mono">APOSTAS</div>
+                       </div>
                      </div>
                      
-                     <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-center">
-                       <div className="text-2xl font-bold text-blue-400 font-mono">
-                        {operationReport.summary.winRate || 0}%
+                     {/* Card TAXA_ACERTO */}
+                     <div className="p-3 sm:p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                       {/* Mobile: Layout horizontal */}
+                       <div className="flex items-center justify-between sm:hidden">
+                         <div className="text-sm text-gray-400 font-mono">TAXA_ACERTO:</div>
+                         <div className="text-2xl font-bold text-green-400 font-mono">
+                           {operationReport.summary.winRate || 0}%
+                         </div>
                        </div>
-                      <div className="text-xs text-gray-400 font-mono">TAXA_ACERTO</div>
+                       {/* Desktop: Layout centralizado */}
+                       <div className="hidden sm:block text-center">
+                         <div className="text-2xl font-bold text-green-400 font-mono">
+                           {operationReport.summary.winRate || 0}%
+                         </div>
+                         <div className="text-xs text-gray-400 font-mono">TAXA_ACERTO</div>
+                       </div>
                      </div>
                      
-                     <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-center">
-                      <div className={`text-2xl font-bold font-mono ${
-                        (operationReport.summary.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'
-                      }`}>
-                        R$ {(operationReport.summary.profit || 0).toFixed(2)}
+                     {/* Card LUCRO */}
+                     <div className="p-3 sm:p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                       {/* Mobile: Layout horizontal */}
+                       <div className="flex items-center justify-between sm:hidden">
+                         <div className="text-sm text-gray-400 font-mono">LUCRO:</div>
+                         <div className={`text-2xl font-bold font-mono ${
+                           (operationReport.summary.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                         }`}>
+                           R$ {(operationReport.summary.profit || 0).toFixed(2)}
+                         </div>
                        </div>
-                       <div className="text-xs text-gray-400 font-mono">LUCRO</div>
+                       {/* Desktop: Layout centralizado */}
+                       <div className="hidden sm:block text-center">
+                         <div className={`text-2xl font-bold font-mono ${
+                           (operationReport.summary.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                         }`}>
+                           R$ {(operationReport.summary.profit || 0).toFixed(2)}
+                         </div>
+                         <div className="text-xs text-gray-400 font-mono">LUCRO</div>
+                       </div>
                      </div>
                    </div>
 
                   {/* Detalhes */}
-                  <div className="grid grid-cols-2 gap-4 text-sm font-mono">
-                    <div className="space-y-2">
-                                             <div className="flex justify-between">
-                         <span className="text-gray-400">Vitórias:</span>
-                        <span className="text-green-400">{operationReport.summary.wins || 0}</span>
-                       </div>
-                       <div className="flex justify-between">
-                         <span className="text-gray-400">Derrotas:</span>
-                        <span className="text-red-400">{operationReport.summary.losses || 0}</span>
-                       </div>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Iniciado:</span>
-                        <span className="text-gray-300">
-                          {new Date(operationReport.summary.startedAt).toLocaleTimeString('pt-BR')}
-                        </span>
-                      </div>
+                  <div className="text-sm font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Iniciado:</span>
+                      <span className="text-gray-300">
+                        {new Date(operationReport.summary.startedAt).toLocaleTimeString('pt-BR')}
+                      </span>
                     </div>
                   </div>
-
-                  {/* Botão Reset */}
-                  <Button 
-                    onClick={resetOperationReport}
-                    className="w-full font-mono bg-gray-500/20 border border-gray-500/50 text-gray-400 hover:bg-gray-500/30"
-                    variant="outline"
-                  >
-                    RESET_RELATÓRIO
-                  </Button>
 
                 </div>
               </CardContent>
             </Card>
           )}
 
-          {/* Nova seção: Dados Enviados para Pragmatic */}
-          <div className="bg-gradient-to-br from-gray-900/50 to-black/50 backdrop-blur-sm rounded-xl border border-gray-700/30 p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-500/20 rounded-lg">
-                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-blue-400">DADOS_ENVIADOS_PRAGMATIC</h3>
-            </div>
-            
-            <div className="text-sm text-gray-400 mb-4">
-              // Informações do seu dispositivo repassadas para os servidores da Pragmatic
-            </div>
 
-            <div className="space-y-3">
-              {/* IP do Usuário */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">IP_ORIGEM:</span>
-                <span className="text-green-400 font-mono text-sm" id="user-ip">{userNetworkInfo.ip}</span>
-              </div>
 
-              {/* Plataforma */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">PLATAFORMA:</span>
-                <span className="text-blue-400 font-mono text-sm" id="user-platform">{typeof window !== 'undefined' ? getUserInfo().platform : 'Loading...'}</span>
-              </div>
+          {/* Card CRÉDITOS_DISPONÍVEIS */}
+                          <CreditDisplay />
 
-              {/* Navegador */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">NAVEGADOR:</span>
-                <span className="text-purple-400 font-mono text-sm" id="user-browser">{typeof window !== 'undefined' ? getUserInfo().browser : 'Loading...'}</span>
-              </div>
-
-              {/* Dispositivo */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">DISPOSITIVO:</span>
-                <span className="text-yellow-400 font-mono text-sm" id="user-device">
-                  {typeof window !== 'undefined' ? (getUserInfo().isMobile ? 'MOBILE' : 'DESKTOP') : 'Loading...'}
-                </span>
-              </div>
-
-              {/* Timezone */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">TIMEZONE:</span>
-                <span className="text-cyan-400 font-mono text-sm" id="user-timezone">
-                  {typeof window !== 'undefined' ? getUserInfo().timezone : 'Loading...'}
-                </span>
-              </div>
-
-              {/* User Agent */}
-              <div className="p-3 bg-gray-800/30 rounded-lg">
-                <div className="text-gray-300 mb-2">USER_AGENT:</div>
-                <div className="text-orange-400 font-mono text-xs break-all bg-gray-900/50 p-2 rounded border-l-2 border-orange-400/30" id="user-agent">
-                  {typeof window !== 'undefined' ? getUserInfo().userAgent : 'Loading...'}
-                </div>
-              </div>
-
-              {/* Status VPN */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">VPN_DETECTADA:</span>
-                <span className="text-red-400 font-mono text-sm" id="vpn-status">{userNetworkInfo.vpnStatus}</span>
-              </div>
-            </div>
-
-            <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-              <div className="flex items-center gap-2 text-amber-400 text-sm">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-                <span className="font-medium">TRANSPARÊNCIA:</span>
-              </div>
-              <div className="text-amber-300/80 text-sm mt-1">
-                Estes são os dados exatos enviados aos servidores da Pragmatic. Seu IP real é repassado para evitar bloqueios.
-              </div>
-            </div>
-          </div>
+          {/* Card HISTÓRICO_DE_OPERAÇÕES */}
+          <OperationsHistoryCard />
 
         </div>
       </div>
@@ -1048,7 +984,7 @@ export default function BlazeMegaRouletteBR() {
           setAlertMessage(null);
           blazeConfigModal.closeModal();
         }}
-        title={isConfigured ? 'EDITAR_TOKEN_BLAZE' : 'CONFIG_BLAZE'}
+        title={isConfigured ? 'EDITAR_TOKEN_BLAZE' : 'CONFIGURAR_BLAZE'}
         description={isConfigured ? 'Atualize seu token de autenticação Blaze' : 'Configure seu token de autenticação Blaze'}
         type="info"
         actions={{
@@ -1093,17 +1029,33 @@ export default function BlazeMegaRouletteBR() {
           </div>
 
           <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
               <Settings className="h-4 w-4 text-blue-400" />
               <span className="text-sm font-semibold text-blue-400 font-mono">COMO_OBTER_TOKEN</span>
+              </div>
+              <button
+                onClick={() => setTutorialModalOpen(true)}
+                className="px-3 py-1 bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded-md text-xs font-semibold text-green-400 font-mono transition-colors duration-200"
+              >
+                VER_TUTORIAL
+              </button>
             </div>
             <div className="text-xs text-gray-300 font-mono space-y-1">
               <p>1. Faça login na sua conta Blaze</p>
               <p>2. Abra as Ferramentas do Desenvolvedor (F12)</p>
-              <p>3. Vá para Application → Local Storage</p>
+              <p>3. Vá para Aplicação (Application) → Armazenamento Local (Local Storage)</p>
               <p>4. Selecione &quot;https://blaze.bet.br&quot;</p>
               <p>5. Encontre &quot;ACCESS_TOKEN&quot; e copie o valor</p>
               <p>6. Cole no campo acima</p>
+            </div>
+            
+            <div className="mt-3 p-3 bg-gray-800/50 border border-gray-600/50 rounded-lg">
+              <div className="text-xs font-semibold text-yellow-400 font-mono mb-2">EXEMPLO_TOKEN:</div>
+              <div className="text-xs text-gray-300 font-mono flex items-center gap-2 overflow-hidden">
+                <span className="text-orange-400 flex-shrink-0">ACCESS_TOKEN:</span>
+                <span className="text-green-400 truncate">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTM5N.....</span>
+              </div>
             </div>
           </div>
         </div>
@@ -1116,6 +1068,48 @@ export default function BlazeMegaRouletteBR() {
         onConfirm={handleStrategyConfirm}
         loading={strategyLoading}
       />
+
+      {/* Modal do Tutorial GIF */}
+      {tutorialModalOpen && typeof window !== 'undefined' && createPortal(
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-[9999999] p-4">
+          <div className="relative bg-gray-900 rounded-xl border border-gray-700 max-w-4xl max-h-[90vh] overflow-hidden">
+            {/* Header do Modal */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-green-500/20 rounded-lg">
+                  <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-green-400 font-mono">TUTORIAL_ACCESS_TOKEN</h3>
+              </div>
+              <button
+                onClick={() => setTutorialModalOpen(false)}
+                className="p-2 hover:bg-gray-800 rounded-lg transition-colors duration-200 text-gray-400 hover:text-white"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            {/* Conteúdo do Modal */}
+            <div className="p-4">
+              <div className="text-sm text-gray-400 mb-4 font-mono">
+                // Tutorial visual: Como obter o ACCESS_TOKEN da Blaze
+              </div>
+              <div className="flex justify-center">
+                <img 
+                  src="/step_accesstoken.gif" 
+                  alt="Tutorial ACCESS_TOKEN"
+                  className="max-w-full max-h-[60vh] object-contain rounded-lg border border-gray-700"
+                />
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 } 

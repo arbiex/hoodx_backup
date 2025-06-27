@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { 
   LayoutDashboard, 
-  Network, 
   DollarSign, 
   Settings
 } from 'lucide-react'
@@ -31,18 +30,6 @@ export default function BottomSidebar() {
       description: 'Main dashboard'
     },
     {
-      name: 'Funds',
-      href: '/credits',
-      icon: DollarSign,
-      description: 'Manage funds'
-    },
-    {
-      name: 'Network',
-      href: '/network',
-      icon: Network,
-      description: 'Network expansion'
-    },
-    {
       name: 'Config',
       href: '/config',
       icon: Settings,
@@ -65,23 +52,10 @@ export default function BottomSidebar() {
                   className={`
                     flex items-center justify-center h-12 w-12 relative transition-all duration-300 rounded-xl
                     ${isActive 
-                      ? "bg-green-500/20 text-green-400 shadow-lg shadow-green-500/25 border border-green-500/50" 
-                      : "text-gray-400 border border-transparent"
+                      ? "bg-green-500/20 text-green-400 shadow-lg shadow-green-500/25 border border-green-500/50 hover:text-green-400 hover:bg-green-500/20" 
+                      : "text-gray-400 border border-transparent hover:text-green-400"
                     }
                   `}
-                  style={{
-                    transition: 'color 0.3s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive) {
-                      e.currentTarget.style.color = '#4ade80'
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) {
-                      e.currentTarget.style.color = '#9ca3af'
-                    }
-                  }}
                 >
                   <div className="relative">
                     <item.icon className="h-6 w-6" />

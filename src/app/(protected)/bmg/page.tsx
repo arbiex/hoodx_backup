@@ -523,6 +523,13 @@ export default function BMG() {
     .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color) // 2. Trocar cores
     .join('');
 
+  // 🐛 DEBUG: Log para verificar cálculos
+  console.log('🔍 DEBUG BMG:');
+  console.log('lastTenResults:', lastTenResults.map(r => r.color).join(' '));
+  console.log('após reverse:', lastTenResults.slice().reverse().map(r => r.color).join(' '));
+  console.log('currentPattern:', currentPattern);
+  console.log('operationState?.pattern:', operationState?.pattern);
+
   // Pattern para exibição no ESTADO_OPERAÇÃO - vem da API quando operação está ativa
   const displayPattern = operationState?.pattern || currentPattern;
 

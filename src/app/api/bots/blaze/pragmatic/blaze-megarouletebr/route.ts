@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 interface MegaRouletteConfig {
   userId: string;
   action?: 'bet-connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic' | 'get-sessions-history';
+  forceClientSideAuth?: boolean;
 }
 
 // Interface para resultado de autenticação
@@ -317,7 +318,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const { userId, action = 'bet-connect', tipValue, userFingerprint, clientHeaders, clientMetadata, authTokens } = requestBody;
+    const { userId, action = 'bet-connect', tipValue, userFingerprint, clientHeaders, clientMetadata, authTokens, forceClientSideAuth } = requestBody;
 
     if (!userId) {
       return NextResponse.json({
@@ -354,7 +355,7 @@ export async function POST(request: NextRequest) {
           pixelRatio: userFingerprint?.pixelRatio,
           hardwareConcurrency: userFingerprint?.hardwareConcurrency,
           connectionType: userFingerprint?.connectionType
-        }, authTokens);
+        }, authTokens, forceClientSideAuth);
       
       case 'start-operation':
         return await startSimpleOperation(userId);
@@ -1041,7 +1042,7 @@ function setupAutoRenewal(userId: string) {
 }
     
 // NOVO: Conectar ao WebSocket
-async function connectToBettingGame(userId: string, tipValue?: number, clientIP?: string, userFingerprint?: any, clientHeaders?: any, authTokens?: { ppToken: string; jsessionId: string; pragmaticUserId: string }) {
+async function connectToBettingGame(userId: string, tipValue?: number, clientIP?: string, userFingerprint?: any, clientHeaders?: any, authTokens?: { ppToken: string; jsessionId: string; pragmaticUserId: string }, forceClientSideAuth?: boolean) {
   try {
     addWebSocketLog(userId, '🔗 Iniciando conexão...', 'info');
     
@@ -1054,6 +1055,14 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
     if (authTokens && authTokens.ppToken && authTokens.jsessionId) {
       addWebSocketLog(userId, '🔐 Usando tokens do client-side (IP real do usuário)...', 'info');
       authResult = await validateClientTokens(userId, authTokens);
+    } else if (forceClientSideAuth) {
+      // ✅ NOVO: Se forceClientSideAuth é true, falhar em vez de usar fallback
+      addWebSocketLog(userId, '❌ Tokens client-side obrigatórios mas não fornecidos', 'error');
+      return NextResponse.json({
+        success: false,
+        error: 'Autenticação client-side obrigatória. Tokens não fornecidos.',
+        needsClientAuth: true
+      });
     } else {
       addWebSocketLog(userId, '🔐 Tokens não fornecidos - usando autenticação server-side...', 'info');
       authResult = await performBackupAuthentication(userId, userFingerprint, clientIP);

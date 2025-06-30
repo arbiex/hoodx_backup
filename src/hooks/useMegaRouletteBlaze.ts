@@ -421,28 +421,38 @@ export function useMegaRouletteBlaze() {
         throw new Error('Usuário não autenticado');
       }
 
-      // Etapa 1: Autenticação client-side (IP real do usuário)
+      // Etapa 1: Autenticação client-side OBRIGATÓRIA (IP real do usuário)
       addLog('🔐 Fazendo autenticação com IP real do usuário...');
+      addLog('⚠️ IMPORTANTE: Apenas autenticação client-side será usada');
+      
       const authSuccess = await clientAuth.authenticate();
       
       if (!authSuccess || !clientAuth.authTokens) {
-        throw new Error(clientAuth.error || 'Falha na autenticação client-side');
+        const errorMsg = clientAuth.error || 'Falha na autenticação client-side';
+        addLog(`❌ ${errorMsg}`);
+        addLog('💡 Dica: Verifique se seu token da Blaze está válido em /config');
+        throw new Error(errorMsg);
       }
 
       addLog('✅ Autenticação client-side completa!');
 
-      // Etapa 2: Conectar com tokens client-side
+      // Etapa 2: Conectar APENAS com tokens client-side (sem fallback)
+      addLog('📡 Conectando usando tokens client-side (IP preservado)...');
+      
       const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr/route', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
           action: 'bet-connect',
+          // ✅ FORÇAR uso de tokens client-side
           authTokens: {
             ppToken: clientAuth.authTokens.ppToken,
             jsessionId: clientAuth.authTokens.jsessionId,
             pragmaticUserId: clientAuth.authTokens.pragmaticUserId
-          }
+          },
+          // ✅ Flag para evitar fallback server-side
+          forceClientSideAuth: true
         })
       });
 

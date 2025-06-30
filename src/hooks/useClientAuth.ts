@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { authenticateClientSide, getUserBlazeToken } from '@/lib/blaze-auth';
+import { authenticateViaBrowser } from '@/lib/browser-auth';
 
 interface AuthTokens {
   ppToken: string;
@@ -49,26 +50,39 @@ export function useClientAuth(): UseClientAuthReturn {
         return false;
       }
 
-      // Etapa 2: Fazer autenticação client-side
-      console.log('🎮 [CLIENT-AUTH] Fazendo autenticação client-side...');
-      const authResult = await authenticateClientSide(tokenResult.token);
+      // Etapa 2: Tentar autenticação via IFRAME primeiro (100% client-side)
+      console.log('🌐 [CLIENT-AUTH] Tentando autenticação via iframe (IP real 100%)...');
+      const iframeResult = await authenticateViaBrowser(tokenResult.token);
       
-      console.log('📊 [CLIENT-AUTH] Resultado autenticação:', { 
-        success: authResult.success, 
-        hasData: !!authResult.data,
-        error: authResult.error 
-      });
+      let authResult;
+      
+      if (iframeResult.success && iframeResult.data) {
+        console.log('✅ [CLIENT-AUTH] Iframe bem-sucedida (IP real preservado)');
+        authResult = iframeResult;
+      } else {
+        console.log('⚠️ [CLIENT-AUTH] Iframe falhou, tentando proxy interno...');
+        console.log('🔄 [CLIENT-AUTH] Fazendo autenticação via proxy...');
+        
+        authResult = await authenticateClientSide(tokenResult.token);
+        
+        console.log('📊 [CLIENT-AUTH] Resultado autenticação proxy:', { 
+          success: authResult.success, 
+          hasData: !!authResult.data,
+          error: authResult.error 
+        });
+      }
       
       if (!authResult.success || !authResult.data) {
-        const errorMsg = authResult.error || 'Falha na autenticação';
-        console.error('❌ [CLIENT-AUTH] Falha na autenticação:', errorMsg);
+        const errorMsg = authResult.error || 'Todas as tentativas de autenticação falharam';
+        console.error('❌ [CLIENT-AUTH] Falha total na autenticação:', errorMsg);
         setError(errorMsg);
         setIsAuthenticating(false);
         return false;
       }
 
       // Sucesso!
-      console.log('✅ [CLIENT-AUTH] Tokens gerados:', {
+      const authMethod = iframeResult.success ? 'iframe (IP real 100%)' : 'proxy interno';
+      console.log(`✅ [CLIENT-AUTH] Tokens gerados via ${authMethod}:`, {
         ppToken: authResult.data.ppToken ? 'OK' : 'MISSING',
         jsessionId: authResult.data.jsessionId ? 'OK' : 'MISSING',
         pragmaticUserId: authResult.data.pragmaticUserId ? 'OK' : 'MISSING'
@@ -77,7 +91,7 @@ export function useClientAuth(): UseClientAuthReturn {
       setAuthTokens(authResult.data);
       setIsAuthenticating(false);
       
-      console.log('✅ [CLIENT-AUTH] Autenticação client-side completa!');
+      console.log(`✅ [CLIENT-AUTH] Autenticação completa via ${authMethod}!`);
       return true;
 
     } catch (error) {

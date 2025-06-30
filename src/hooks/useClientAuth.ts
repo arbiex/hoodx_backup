@@ -28,26 +28,52 @@ export function useClientAuth(): UseClientAuthReturn {
 
     try {
       console.log('🔐 [CLIENT-AUTH] Iniciando autenticação no browser...');
+      console.log('🌐 [CLIENT-AUTH] Environment:', process.env.NODE_ENV);
+      console.log('🌐 [CLIENT-AUTH] URL atual:', window.location.href);
 
       // Etapa 1: Buscar token da Blaze do usuário
+      console.log('🔍 [CLIENT-AUTH] Buscando token da Blaze...');
       const tokenResult = await getUserBlazeToken();
       
+      console.log('📊 [CLIENT-AUTH] Resultado busca token:', { 
+        success: tokenResult.success, 
+        hasToken: !!tokenResult.token,
+        error: tokenResult.error 
+      });
+      
       if (!tokenResult.success || !tokenResult.token) {
-        setError(tokenResult.error || 'Token da Blaze não encontrado');
+        const errorMsg = tokenResult.error || 'Token da Blaze não encontrado';
+        console.error('❌ [CLIENT-AUTH] Falha na busca do token:', errorMsg);
+        setError(errorMsg);
         setIsAuthenticating(false);
         return false;
       }
 
       // Etapa 2: Fazer autenticação client-side
+      console.log('🎮 [CLIENT-AUTH] Fazendo autenticação client-side...');
       const authResult = await authenticateClientSide(tokenResult.token);
       
+      console.log('📊 [CLIENT-AUTH] Resultado autenticação:', { 
+        success: authResult.success, 
+        hasData: !!authResult.data,
+        error: authResult.error 
+      });
+      
       if (!authResult.success || !authResult.data) {
-        setError(authResult.error || 'Falha na autenticação');
+        const errorMsg = authResult.error || 'Falha na autenticação';
+        console.error('❌ [CLIENT-AUTH] Falha na autenticação:', errorMsg);
+        setError(errorMsg);
         setIsAuthenticating(false);
         return false;
       }
 
       // Sucesso!
+      console.log('✅ [CLIENT-AUTH] Tokens gerados:', {
+        ppToken: authResult.data.ppToken ? 'OK' : 'MISSING',
+        jsessionId: authResult.data.jsessionId ? 'OK' : 'MISSING',
+        pragmaticUserId: authResult.data.pragmaticUserId ? 'OK' : 'MISSING'
+      });
+      
       setAuthTokens(authResult.data);
       setIsAuthenticating(false);
       
@@ -56,6 +82,7 @@ export function useClientAuth(): UseClientAuthReturn {
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
+      console.error('❌ [CLIENT-AUTH] Erro na autenticação:', error);
       setError(`Erro na autenticação: ${errorMsg}`);
       setIsAuthenticating(false);
       return false;

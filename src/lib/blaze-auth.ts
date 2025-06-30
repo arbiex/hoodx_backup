@@ -79,140 +79,99 @@ export async function authenticateClientSide(blazeToken: string): Promise<{ succ
 }
 
 /**
- * 🔥 Gerar ppToken - Requisição direta do browser para Blaze
+ * 🔥 Gerar ppToken - Via proxy interno (APENAS IP real do usuário)
  */
 async function generatePpTokenClient(blazeToken: string): Promise<string | null> {
   try {
-    const blazeUrl = 'mega-roulette---brazilian';
+    console.log('🔥 [BLAZE-CLIENT] Usando proxy interno (APENAS IP real)...');
+    console.log('📱 [BLAZE-CLIENT] User-Agent:', navigator.userAgent);
     
-    const response = await fetch(`https://blaze.bet.br/api/games/${blazeUrl}/play`, {
+    const response = await fetch('/api/blaze-proxy', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${blazeToken}`,
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Origin': 'https://blaze.bet.br',
-        'Referer': 'https://blaze.bet.br/',
-        'User-Agent': navigator.userAgent
+        'User-Agent': navigator.userAgent,
+        'Accept-Language': navigator.language
       },
       body: JSON.stringify({
-        selected_currency_type: 'BRL'
+        blazeToken,
+        selectedCurrencyType: 'BRL'
       })
     });
 
+    console.log('📊 [BLAZE-CLIENT] Status do proxy:', response.status);
+
     if (!response.ok) {
-      console.error('❌ [CLIENT-AUTH] Erro na requisição ppToken:', response.status);
+      const errorData = await response.json();
+      console.error('❌ [BLAZE-CLIENT] Erro no proxy:', response.status, errorData);
       return null;
     }
 
     const data = await response.json();
+    console.log('📊 [BLAZE-CLIENT] Resposta do proxy:', { success: data.success, hasPpToken: !!data.ppToken });
     
-    if (data.url && data.url.includes('playGame.do')) {
-      const tokenMatch = data.url.match(/token%3D([^%]+)/);
-      if (tokenMatch) {
-        console.log('✅ [CLIENT-AUTH] ppToken gerado (IP real do usuário)');
-        return tokenMatch[1];
-      }
+    if (data.success && data.ppToken) {
+      console.log('✅ [BLAZE-CLIENT] ppToken gerado (APENAS IP real preservado)');
+      return data.ppToken;
     }
 
-    console.error('❌ [CLIENT-AUTH] ppToken não encontrado na resposta');
+    console.error('❌ [BLAZE-CLIENT] ppToken não encontrado na resposta do proxy');
     return null;
     
   } catch (error) {
-    console.error('❌ [CLIENT-AUTH] Erro ao gerar ppToken:', error);
+    console.error('❌ [BLAZE-CLIENT] Erro ao gerar ppToken via proxy:', error);
     return null;
   }
 }
 
 /**
- * 🎮 Gerar jsessionId - Requisição direta do browser para Pragmatic Play
+ * 🎮 Gerar jsessionId - Via proxy interno (APENAS IP real do usuário)
  */
 async function generateJsessionIdClient(ppToken: string): Promise<{ jsessionId: string | null; pragmaticUserId: string | null }> {
   try {
-    console.log('⏳ [CLIENT-AUTH] Aguardando 2 segundos...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const extraData = {
-      lobbyUrl: 'https://blaze.bet.br',
-      requestCountryCode: 'BR',
-      cashierUrl: 'https://blaze.bet.br/?modal=cashier&type=deposit',
-      language: 'pt',
-      currency: 'BRL',
-      technology: 'H5',
-      platform: 'WEB'
-    };
-
-    const params = new URLSearchParams({
-      environmentID: PRAGMATIC_CONFIG.environmentID,
-      gameid: PRAGMATIC_CONFIG.gameSymbol,
-      secureLogin: PRAGMATIC_CONFIG.secureLogin,
-      requestCountryCode: 'BR',
-      userEnvId: PRAGMATIC_CONFIG.userEnvId,
-      ppCasinoId: PRAGMATIC_CONFIG.ppCasinoId,
-      ppGame: PRAGMATIC_CONFIG.gameSymbol,
-      ppToken: ppToken,
-      ppExtraData: btoa(JSON.stringify(extraData)),
-      isGameUrlApiCalled: 'true',
-      stylename: PRAGMATIC_CONFIG.stylename
-    });
-
-    const gameUrl = `https://games.pragmaticplaylive.net/api/secure/GameLaunch?${params}`;
+    console.log('🎮 [PRAGMATIC-CLIENT] Usando proxy interno (APENAS IP real)...');
+    console.log('📱 [PRAGMATIC-CLIENT] User-Agent:', navigator.userAgent);
     
-    console.log('🌐 [CLIENT-AUTH] Requisição para Pragmatic (IP real)...');
-
-    const response = await fetch(gameUrl, {
-      method: 'GET',
+    const response = await fetch('/api/pragmatic-proxy', {
+      method: 'POST',
       headers: {
+        'Content-Type': 'application/json',
         'User-Agent': navigator.userAgent,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': navigator.language
       },
-      redirect: 'manual'
+      body: JSON.stringify({
+        ppToken
+      })
     });
 
-    console.log('📊 [CLIENT-AUTH] Status Pragmatic:', response.status);
+    console.log('📊 [PRAGMATIC-CLIENT] Status do proxy:', response.status);
 
-    let jsessionId = null;
-    let pragmaticUserId = null;
-
-    // Verificar redirect (302)
-    if (response.status === 302) {
-      const location = response.headers.get('location');
-      console.log('🔄 [CLIENT-AUTH] Redirect detectado');
-      
-      if (location) {
-        // Extrair JSESSIONID
-        const jsessionMatch = location.match(/JSESSIONID=([^&]+)/);
-        if (jsessionMatch) {
-          jsessionId = jsessionMatch[1];
-          console.log('✅ [CLIENT-AUTH] jsessionId extraído do redirect');
-        }
-
-        // Extrair User ID do Pragmatic
-        const userIdMatch = location.match(/userId=([^&]+)/);
-        if (userIdMatch) {
-          pragmaticUserId = userIdMatch[1];
-          console.log('✅ [CLIENT-AUTH] Pragmatic userId extraído');
-        }
-      }
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('❌ [PRAGMATIC-CLIENT] Erro no proxy:', response.status, errorData);
+      return { jsessionId: null, pragmaticUserId: null };
     }
 
-    // Verificar cookies se não encontrou no redirect
-    if (!jsessionId) {
-      const setCookieHeader = response.headers.get('set-cookie');
-      if (setCookieHeader && setCookieHeader.includes('JSESSIONID=')) {
-        const jsessionMatch = setCookieHeader.match(/JSESSIONID=([^;]+)/);
-        if (jsessionMatch) {
-          jsessionId = jsessionMatch[1];
-          console.log('✅ [CLIENT-AUTH] jsessionId extraído do cookie');
-        }
-      }
+    const data = await response.json();
+    console.log('📊 [PRAGMATIC-CLIENT] Resposta do proxy:', { 
+      success: data.success, 
+      hasJsessionId: !!data.jsessionId,
+      hasPragmaticUserId: !!data.pragmaticUserId 
+    });
+
+    if (data.success && data.jsessionId) {
+      console.log('✅ [PRAGMATIC-CLIENT] jsessionId gerado (APENAS IP real preservado)');
+      return { 
+        jsessionId: data.jsessionId, 
+        pragmaticUserId: data.pragmaticUserId || null 
+      };
     }
 
-    return { jsessionId, pragmaticUserId };
+    console.error('❌ [PRAGMATIC-CLIENT] jsessionId não encontrado na resposta do proxy');
+    return { jsessionId: null, pragmaticUserId: null };
     
   } catch (error) {
-    console.error('❌ [CLIENT-AUTH] Erro ao gerar jsessionId:', error);
+    console.error('❌ [PRAGMATIC-CLIENT] Erro ao gerar jsessionId via proxy:', error);
     return { jsessionId: null, pragmaticUserId: null };
   }
 }

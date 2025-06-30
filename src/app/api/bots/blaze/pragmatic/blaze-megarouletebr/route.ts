@@ -461,6 +461,8 @@ async function validateClientTokens(userId: string, tokens: { ppToken: string; j
 }
 
 // ✅ Função de backup - autenticação server-side quando client-side falha
+// ❌ FUNÇÃO DESABILITADA - Autenticação server-side removida no modo client-side only
+/*
 async function performBackupAuthentication(userId: string, userFingerprint?: any, clientIP?: string): Promise<{ success: boolean; data?: AuthResult; error?: string }> {
   try {
     console.log('🔐 [BACKUP-AUTH] Autenticação server-side como backup...');
@@ -560,6 +562,7 @@ async function performBackupAuthentication(userId: string, userFingerprint?: any
     };
   }
 }
+*/
 
 // ✅ NOVO: Função local para gerar ppToken (cópia da Edge Function)
 async function generatePpTokenLocal(blazeToken: string): Promise<string | null> {
@@ -967,21 +970,10 @@ async function renewSession(userId: string): Promise<boolean> {
     addWebSocketLog(userId, '🔄 Renovando sessão automaticamente...', 'info');
     session.renewalAttempts++;
 
-    // Fazer nova autenticação
-    const authResult = await performBackupAuthentication(userId);
-    if (!authResult.success) {
-      addWebSocketLog(userId, `❌ Falha na renovação: ${authResult.error}`, 'error');
-      return false;
-    }
-
-    // Atualizar dados da sessão
-    session.jsessionId = authResult.data!.jsessionId;
-    session.ppToken = authResult.data!.ppToken;
-    session.pragmaticUserId = authResult.data!.userId;
-    session.lastRenewal = Date.now();
-    session.renewalAttempts = 0; // Reset contador após sucesso
-
-    addWebSocketLog(userId, '✅ Sessão renovada com sucesso', 'success');
+    // ❌ DESABILITADO: Renovação automática foi removida no modo client-side only
+    addWebSocketLog(userId, '❌ Renovação automática não disponível no modo client-side only', 'error');
+    addWebSocketLog(userId, '💡 Para continuar, execute nova autenticação no /config', 'info');
+    return false;
 
     // Reconectar WebSocket com nova sessão
     const config = {
@@ -1050,23 +1042,20 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
     stopAllConnections(userId, false);
     resetReconnectionControl(userId);
     
-    // 🔐 Etapa 1: Validar tokens do client-side ou fazer autenticação
-    let authResult;
-    if (authTokens && authTokens.ppToken && authTokens.jsessionId) {
-      addWebSocketLog(userId, '🔐 Usando tokens do client-side (IP real do usuário)...', 'info');
-      authResult = await validateClientTokens(userId, authTokens);
-    } else if (forceClientSideAuth) {
-      // ✅ NOVO: Se forceClientSideAuth é true, falhar em vez de usar fallback
-      addWebSocketLog(userId, '❌ Tokens client-side obrigatórios mas não fornecidos', 'error');
+    // 🔐 Etapa 1: APENAS autenticação client-side (IP real do usuário)
+    
+    if (!authTokens || !authTokens.ppToken || !authTokens.jsessionId) {
+      addWebSocketLog(userId, '❌ Tokens client-side obrigatórios não fornecidos', 'error');
+      addWebSocketLog(userId, '💡 Certifique-se de que a autenticação client-side foi executada no browser', 'info');
       return NextResponse.json({
         success: false,
-        error: 'Autenticação client-side obrigatória. Tokens não fornecidos.',
+        error: 'Tokens de autenticação client-side são obrigatórios. Execute a autenticação no browser primeiro.',
         needsClientAuth: true
       });
-    } else {
-      addWebSocketLog(userId, '🔐 Tokens não fornecidos - usando autenticação server-side...', 'info');
-      authResult = await performBackupAuthentication(userId, userFingerprint, clientIP);
     }
+
+    addWebSocketLog(userId, '🔐 Usando APENAS tokens do client-side (IP real do usuário)...', 'info');
+    const authResult = await validateClientTokens(userId, authTokens);
     if (!authResult.success) {
       let errorMsg = `Falha na autenticação: ${authResult.error}`;
       let needsTokenUpdate = false;
@@ -1283,25 +1272,10 @@ async function reconnectWithNewTokens(userId: string, userIP?: string, userFinge
   try {
     addWebSocketLog(userId, `🔑 Gerando novos tokens para reconexão...`, 'info');
     
-    // Gerar novos ppToken e jsessionId via Edge Function
-    const authResult = await performBackupAuthentication(userId, userFingerprint, userIP);
-    
-    if (!authResult.success || !authResult.data) {
-      addWebSocketLog(userId, `❌ Falha ao gerar novos tokens: ${authResult.error}`, 'error');
-      return;
-    }
-    
-    addWebSocketLog(userId, `✅ Novos tokens gerados com sucesso`, 'success');
-    
-    // Novo config com tokens atualizados
-    const newConfig = {
-      jsessionId: authResult.data.jsessionId,
-      pragmaticUserId: authResult.data.userId,
-      tableId: 'mrbras531mrbr532'
-    };
-    
-    // Reconectar com novos tokens
-    startWebSocketConnection(userId, newConfig, undefined, userIP, userFingerprint);
+    // ❌ DESABILITADO: Reconexão automática removida no modo client-side only  
+    addWebSocketLog(userId, `❌ Reconexão automática não disponível no modo client-side only`, 'error');
+    addWebSocketLog(userId, `💡 Para reconectar, execute nova autenticação no /config`, 'info');
+    updateConnectionStatus(userId, false, 'Reconexão não disponível - execute nova autenticação');
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -1514,21 +1488,10 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             setTimeout(async () => {
               addWebSocketLog(userId, `🔑 Gerando novos tokens para switch de servidor...`, 'info');
               
-              // Gerar novos tokens para novo servidor
-              const authResult = await performBackupAuthentication(userId, userFingerprint, userIP);
-              
-              if (!authResult.success || !authResult.data) {
-                addWebSocketLog(userId, `❌ Falha ao gerar tokens para novo servidor: ${authResult.error}`, 'error');
-                return;
-              }
-              
-              const newConfig = {
-                jsessionId: authResult.data.jsessionId,
-                pragmaticUserId: authResult.data.userId,
-                tableId: 'mrbras531mrbr532'
-              };
-              
-              startWebSocketConnection(userId, newConfig, newWsAddress, userIP, userFingerprint);
+              // ❌ DESABILITADO: Switch de servidor removido no modo client-side only
+              addWebSocketLog(userId, `❌ Switch de servidor não disponível no modo client-side only`, 'error');
+              addWebSocketLog(userId, `💡 Para continuar, execute nova autenticação no /config`, 'info');
+              updateConnectionStatus(userId, false, 'Switch de servidor não disponível - execute nova autenticação');
             }, 1000);
             
             return; // Sair da função para evitar processar outras mensagens

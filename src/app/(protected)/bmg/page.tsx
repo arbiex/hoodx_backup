@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Play, Square, RefreshCw, Zap, Key, Settings } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
-  import InlineAlert from '@/components/ui/inline-alert';
-  import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
+import InlineAlert from '@/components/ui/inline-alert';
+import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
+import { useClientAuth } from '@/hooks/useClientAuth';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -20,6 +21,9 @@ export default function BMG() {
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ✅ NOVO: Hook de autenticação client-side
+  const clientAuth = useClientAuth();
 
   // Estados para WebSocket logs
   const [websocketLogs, setWebsocketLogs] = useState<Array<{ 
@@ -256,7 +260,35 @@ export default function BMG() {
       // ✅ NOVO: Capturar dados completos do usuário
       const userInfo = getUserInfo();
       
+      setOperationStatus('AUTENTICANDO...');
+
+      // ✅ ETAPA 1: Autenticação client-side OBRIGATÓRIA (IP real do usuário)
+      console.log('🔐 [BMG] Fazendo autenticação com IP real do usuário...');
+      console.log('⚠️ [BMG] IMPORTANTE: Apenas autenticação client-side será usada');
+      
+      const authSuccess = await clientAuth.authenticate();
+      
+      if (!authSuccess || !clientAuth.authTokens) {
+        const errorMsg = clientAuth.error || 'Falha na autenticação client-side';
+        console.error('❌ [BMG]', errorMsg);
+        console.log('💡 [BMG] Dica: Verifique se seu token da Blaze está válido em /config');
+        
+        let displayMessage = errorMsg;
+        if (errorMsg.includes('Token da Blaze não encontrado')) {
+          displayMessage = 'Token da Blaze não configurado. Clique no botão de configuração acima.';
+        }
+        
+        setOperationError(displayMessage);
+        setOperationStatus('ERRO_AUTENTICAÇÃO');
+        return;
+      }
+
+      console.log('✅ [BMG] Autenticação client-side completa!');
+      
       setOperationStatus('CONECTANDO...');
+
+      // ✅ ETAPA 2: Conectar APENAS com tokens client-side (sem fallback)
+      console.log('📡 [BMG] Conectando usando tokens client-side (IP preservado)...');
 
       // Conectar ao WebSocket
       const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
@@ -266,6 +298,14 @@ export default function BMG() {
           userId: user.id,
           action: 'bet-connect',
           tipValue, // Passar o valor do tip para a API
+          // ✅ FORÇAR uso de tokens client-side
+          authTokens: {
+            ppToken: clientAuth.authTokens.ppToken,
+            jsessionId: clientAuth.authTokens.jsessionId,
+            pragmaticUserId: clientAuth.authTokens.pragmaticUserId
+          },
+          // ✅ Flag para evitar fallback server-side
+          forceClientSideAuth: true,
           // ✅ NOVO: Enviar dados do usuário para repasse à Pragmatic
           userInfo: {
             ...userInfo,
@@ -538,12 +578,7 @@ export default function BMG() {
     .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color) // Trocar cores
     .join('');
 
-  // 🐛 DEBUG: Log para verificar cálculos
-  console.log('🔍 DEBUG BMG:');
-  console.log('lastFiveResults:', lastFiveResults.map(r => r.color).join(' '));
-  console.log('após reverse:', lastFiveResults.slice().reverse().map(r => r.color).join(' '));
-  console.log('currentPattern:', currentPattern);
-  console.log('operationState?.pattern:', operationState?.pattern);
+  // ✅ Debug removido para evitar re-renders infinitos
 
   // Pattern para exibição no ESTADO_OPERAÇÃO - vem da API quando operação está ativa
   const displayPattern = operationState?.pattern || currentPattern;

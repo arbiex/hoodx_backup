@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useClientAuth } from './useClientAuth';
+import { authenticateViaBrowser } from '../lib/browser-auth';
 
 // Tipos
 interface AuthData {
@@ -421,23 +422,54 @@ export function useMegaRouletteBlaze() {
         throw new Error('Usuário não autenticado');
       }
 
-      // Etapa 1: Autenticação client-side OBRIGATÓRIA (IP real do usuário)
-      addLog('🔐 Fazendo autenticação com IP real do usuário...');
-      addLog('⚠️ IMPORTANTE: Apenas autenticação client-side será usada');
+      // Etapa 1: Buscar token da Blaze
+      addLog('🔍 Buscando token da Blaze...');
       
-      const authSuccess = await clientAuth.authenticate();
+      const tokenResponse = await fetch('/api/user/blaze-token');
+      const tokenData = await tokenResponse.json();
       
-      if (!authSuccess || !clientAuth.authTokens) {
-        const errorMsg = clientAuth.error || 'Falha na autenticação client-side';
-        addLog(`❌ ${errorMsg}`);
-        addLog('💡 Dica: Verifique se seu token da Blaze está válido em /config');
-        throw new Error(errorMsg);
+      if (!tokenData.success || !tokenData.token) {
+        throw new Error('Token da Blaze não encontrado. Configure em /config');
       }
+      
+      addLog('✅ Token da Blaze encontrado');
+      
+      // Etapa 2: Autenticação via IFRAME (contorna CORS + preserva IP real)
+      addLog('🌐 Executando autenticação via iframe (IP real preservado)...');
+      addLog('📱 IMPORTANTE: Sem proxies server-side - 100% client-side');
+      
+      const iframeAuthResult = await authenticateViaBrowser(tokenData.token);
+      
+      if (!iframeAuthResult.success || !iframeAuthResult.data) {
+        // Fallback para proxy interno se iframe falhar
+        addLog('⚠️ Iframe falhou, tentando via proxy interno...');
+        
+        const authSuccess = await clientAuth.authenticate();
+        
+        if (!authSuccess || !clientAuth.authTokens) {
+          const errorMsg = clientAuth.error || 'Todas as tentativas de autenticação falharam';
+          addLog(`❌ ${errorMsg}`);
+          addLog('💡 Dica: Verifique se seu token da Blaze está válido em /config');
+          throw new Error(errorMsg);
+        }
+        
+        addLog('✅ Autenticação via proxy concluída');
+      } else {
+        addLog('✅ Autenticação via iframe concluída (IP real 100% preservado)!');
+      }
+      
+      // Determinar quais tokens usar
+      const tokensToUse = iframeAuthResult.success && iframeAuthResult.data 
+        ? iframeAuthResult.data 
+        : clientAuth.authTokens;
 
-      addLog('✅ Autenticação client-side completa!');
-
-      // Etapa 2: Conectar APENAS com tokens client-side (sem fallback)
-      addLog('📡 Conectando usando tokens client-side (IP preservado)...');
+      // Etapa 3: Conectar usando tokens (iframe ou proxy)
+      const authMethod = iframeAuthResult.success ? 'iframe (IP real 100%)' : 'proxy interno';
+      addLog(`📡 Conectando usando tokens via ${authMethod}...`);
+      
+      if (!tokensToUse) {
+        throw new Error('Nenhum token de autenticação disponível');
+      }
       
       const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr/route', {
         method: 'POST',
@@ -445,11 +477,11 @@ export function useMegaRouletteBlaze() {
         body: JSON.stringify({
           userId,
           action: 'bet-connect',
-          // ✅ FORÇAR uso de tokens client-side
+          // ✅ Usar tokens da fonte preferencial (iframe > proxy)
           authTokens: {
-            ppToken: clientAuth.authTokens.ppToken,
-            jsessionId: clientAuth.authTokens.jsessionId,
-            pragmaticUserId: clientAuth.authTokens.pragmaticUserId
+            ppToken: tokensToUse.ppToken,
+            jsessionId: tokensToUse.jsessionId,
+            pragmaticUserId: tokensToUse.pragmaticUserId || ''
           },
           // ✅ Flag para evitar fallback server-side
           forceClientSideAuth: true
@@ -465,9 +497,9 @@ export function useMegaRouletteBlaze() {
           casino: 'BLAZE',
           provider: 'PRAGMATIC_PLAY',
           game: 'MEGA_ROULETTE',
-          ppToken: clientAuth.authTokens.ppToken,
-          jsessionId: clientAuth.authTokens.jsessionId,
-          timestamp: clientAuth.authTokens.timestamp
+          ppToken: tokensToUse.ppToken,
+          jsessionId: tokensToUse.jsessionId,
+          timestamp: tokensToUse.timestamp
         };
 
         setState(prev => ({

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { useClientAuth } from './useClientAuth';
-import { authenticateViaBrowser } from '../lib/browser-auth';
+import { authenticateUserFrontend } from '../lib/frontend-auth';
 
 // Tipos
 interface AuthData {
@@ -72,8 +71,7 @@ export function useMegaRouletteBlaze() {
     lastHistoryUpdate: null,
   });
 
-  // Hook de autenticação client-side
-  const clientAuth = useClientAuth();
+  // Autenticação frontend direta - sem mais redirects!
 
   const addLog = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString('pt-BR');
@@ -434,38 +432,26 @@ export function useMegaRouletteBlaze() {
       
       addLog('✅ Token da Blaze encontrado');
       
-      // Etapa 2: Autenticação via IFRAME (contorna CORS + preserva IP real)
-      addLog('🌐 Executando autenticação via iframe (IP real preservado)...');
-      addLog('📱 IMPORTANTE: Sem proxies server-side - 100% client-side');
+      // Etapa 2: Autenticação Frontend (REPLICA EXATA DA EDGE FUNCTION)
+      addLog('🎯 Executando autenticação frontend (mesma lógica da Edge Function)...');
+      addLog('📱 IMPORTANTE: 100% no browser - IP real preservado');
       
-      const iframeAuthResult = await authenticateViaBrowser(tokenData.token);
+      const frontendAuthResult = await authenticateUserFrontend(tokenData.token);
       
-      if (!iframeAuthResult.success || !iframeAuthResult.data) {
-        // Fallback para proxy interno se iframe falhar
-        addLog('⚠️ Iframe falhou, tentando via proxy interno...');
-        
-        const authSuccess = await clientAuth.authenticate();
-        
-        if (!authSuccess || !clientAuth.authTokens) {
-          const errorMsg = clientAuth.error || 'Todas as tentativas de autenticação falharam';
-          addLog(`❌ ${errorMsg}`);
-          addLog('💡 Dica: Verifique se seu token da Blaze está válido em /config');
-          throw new Error(errorMsg);
-        }
-        
-        addLog('✅ Autenticação via proxy concluída');
-      } else {
-        addLog('✅ Autenticação via iframe concluída (IP real 100% preservado)!');
+      if (!frontendAuthResult.success || !frontendAuthResult.data) {
+        const errorMsg = frontendAuthResult.error || 'Falha na autenticação frontend';
+        addLog(`❌ ${errorMsg}`);
+        addLog('💡 Dica: Verifique se seu token da Blaze está válido em /config');
+        throw new Error(errorMsg);
       }
       
-      // Determinar quais tokens usar
-      const tokensToUse = iframeAuthResult.success && iframeAuthResult.data 
-        ? iframeAuthResult.data 
-        : clientAuth.authTokens;
+      addLog('✅ Autenticação frontend concluída (ppToken + jsessionId gerados)!');
+      
+      // Usar tokens da autenticação frontend
+      const tokensToUse = frontendAuthResult.data;
 
-      // Etapa 3: Conectar usando tokens (iframe ou proxy)
-      const authMethod = iframeAuthResult.success ? 'iframe (IP real 100%)' : 'proxy interno';
-      addLog(`📡 Conectando usando tokens via ${authMethod}...`);
+      // Etapa 3: Conectar usando tokens da autenticação frontend
+      addLog(`📡 Conectando usando tokens da autenticação frontend...`);
       
       if (!tokensToUse) {
         throw new Error('Nenhum token de autenticação disponível');
@@ -477,11 +463,11 @@ export function useMegaRouletteBlaze() {
         body: JSON.stringify({
           userId,
           action: 'bet-connect',
-          // ✅ Usar tokens da fonte preferencial (iframe > proxy)
+          // ✅ Usar tokens da autenticação frontend
           authTokens: {
             ppToken: tokensToUse.ppToken,
             jsessionId: tokensToUse.jsessionId,
-            pragmaticUserId: tokensToUse.pragmaticUserId || ''
+            pragmaticUserId: ''
           },
           // ✅ Flag para evitar fallback server-side
           forceClientSideAuth: true
@@ -534,7 +520,7 @@ export function useMegaRouletteBlaze() {
       }));
       addLog(`❌ Erro: ${errorMessage}`);
     }
-  }, [addLog, fetchBalance, startRealTimeMonitoring, clientAuth]);
+  }, [addLog, fetchBalance, startRealTimeMonitoring]);
 
   // Parar bot  
   const stopBot = useCallback(async () => {

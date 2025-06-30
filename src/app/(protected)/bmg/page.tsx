@@ -9,7 +9,7 @@ import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
 import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
-import { useClientAuth } from '@/hooks/useClientAuth';
+import { authenticateUserFrontend } from '@/lib/frontend-auth';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,8 +22,12 @@ export default function BMG() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ NOVO: Hook de autenticação client-side
-  const clientAuth = useClientAuth();
+  // ✅ NOVO: Estado para tokens de autenticação
+  const [authTokens, setAuthTokens] = useState<{
+    ppToken: string;
+    jsessionId: string;
+    pragmaticUserId?: string;
+  } | null>(null);
 
   // Estados para WebSocket logs
   const [websocketLogs, setWebsocketLogs] = useState<Array<{ 
@@ -262,33 +266,50 @@ export default function BMG() {
       
       setOperationStatus('AUTENTICANDO...');
 
-      // ✅ ETAPA 1: Autenticação client-side OBRIGATÓRIA (IP real do usuário)
-      console.log('🔐 [BMG] Fazendo autenticação com IP real do usuário...');
-      console.log('⚠️ [BMG] IMPORTANTE: Apenas autenticação client-side será usada');
+      // ✅ ETAPA 1: Buscar token da Blaze
+      console.log('🔐 [BMG] Buscando token da Blaze...');
       
-      const authSuccess = await clientAuth.authenticate();
+      const tokenResponse = await fetch(`/api/user/blaze-token?userId=${user.id}`);
+      const tokenData = await tokenResponse.json();
       
-      if (!authSuccess || !clientAuth.authTokens) {
-        const errorMsg = clientAuth.error || 'Falha na autenticação client-side';
-        console.error('❌ [BMG]', errorMsg);
-        console.log('💡 [BMG] Dica: Verifique se seu token da Blaze está válido em /config');
-        
-        let displayMessage = errorMsg;
-        if (errorMsg.includes('Token da Blaze não encontrado')) {
-          displayMessage = 'Token da Blaze não configurado. Clique no botão de configuração acima.';
-        }
-        
-        setOperationError(displayMessage);
+      if (!tokenData.success || !tokenData.token) {
+        setOperationError('Token da Blaze não configurado. Clique no botão de configuração acima.');
         setOperationStatus('ERRO_AUTENTICAÇÃO');
         return;
       }
-
-      console.log('✅ [BMG] Autenticação client-side completa!');
+      
+      console.log('✅ [BMG] Token da Blaze encontrado');
+      
+      // ✅ ETAPA 2: Autenticação frontend (replica Edge Function - IP real preservado)
+      console.log('🎯 [BMG] Executando autenticação frontend (IP real preservado)...');
+      console.log('📱 [BMG] IMPORTANTE: 100% no browser - mesma lógica da Edge Function');
+      
+      const frontendAuthResult = await authenticateUserFrontend(tokenData.token);
+      
+      if (!frontendAuthResult.success || !frontendAuthResult.data) {
+        const errorMsg = frontendAuthResult.error || 'Falha na autenticação frontend';
+        console.error('❌ [BMG]', errorMsg);
+        console.log('💡 [BMG] Dica: Verifique se seu token da Blaze está válido em /config');
+        
+        setOperationError(errorMsg);
+        setOperationStatus('ERRO_AUTENTICAÇÃO');
+        return;
+      }
+      
+      // Salvar tokens gerados
+      setAuthTokens(frontendAuthResult.data);
+      console.log('✅ [BMG] Autenticação frontend completa (ppToken + jsessionId gerados)!');
       
       setOperationStatus('CONECTANDO...');
 
-      // ✅ ETAPA 2: Conectar APENAS com tokens client-side (sem fallback)
-      console.log('📡 [BMG] Conectando usando tokens client-side (IP preservado)...');
+      // ✅ ETAPA 3: Conectar usando tokens da autenticação frontend
+      console.log('📡 [BMG] Conectando usando tokens da autenticação frontend...');
+
+      if (!authTokens) {
+        setOperationError('Tokens de autenticação não disponíveis');
+        setOperationStatus('ERRO');
+        return;
+      }
 
       // Conectar ao WebSocket
       const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
@@ -298,11 +319,11 @@ export default function BMG() {
           userId: user.id,
           action: 'bet-connect',
           tipValue, // Passar o valor do tip para a API
-          // ✅ FORÇAR uso de tokens client-side
+          // ✅ Usar tokens da autenticação frontend
           authTokens: {
-            ppToken: clientAuth.authTokens.ppToken,
-            jsessionId: clientAuth.authTokens.jsessionId,
-            pragmaticUserId: clientAuth.authTokens.pragmaticUserId
+            ppToken: authTokens.ppToken,
+            jsessionId: authTokens.jsessionId,
+            pragmaticUserId: authTokens.pragmaticUserId || ''
           },
           // ✅ Flag para evitar fallback server-side
           forceClientSideAuth: true,

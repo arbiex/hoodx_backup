@@ -28,8 +28,8 @@ export default function BMG() {
     type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' 
   }>>([]);
 
-  // Estados para últimos 10 resultados
-  const [lastTenResults, setLastTenResults] = useState<Array<{ 
+  // Estados para últimos 5 resultados
+  const [lastFiveResults, setLastFiveResults] = useState<Array<{ 
     number: number; 
       color: string;
     gameId: string; 
@@ -279,7 +279,23 @@ export default function BMG() {
       const result = await response.json();
 
       if (!result.success) {
-        setOperationError(`Erro na conexão WebSocket: ${result.error}`);
+        let errorMessage = `Erro na conexão WebSocket: ${result.error}`;
+        
+        // Tratamento específico para token expirado
+        if (result.needsTokenUpdate) {
+          errorMessage = result.error + ' Clique aqui para configurar.';
+          setAlertMessage({
+            type: 'error',
+            message: errorMessage
+          });
+          
+          // Auto redirect para config após 3 segundos
+          setTimeout(() => {
+            window.location.href = '/config';
+          }, 5000);
+        }
+        
+        setOperationError(errorMessage);
         setOperationStatus('ERRO');
         return;
       }
@@ -394,7 +410,7 @@ export default function BMG() {
           }
           
           setWebsocketLogs(result.data.logs || []);
-          setLastTenResults(result.data.lastTenResults || []);
+          setLastFiveResults(result.data.lastFiveResults || []);
           setConnectionStatus(result.data.connectionStatus || { connected: false, lastUpdate: Date.now() });
           setOperationActive(result.data.operationActive || false);
           setOperationState(result.data.operationState || null);
@@ -514,19 +530,18 @@ export default function BMG() {
   }, []);
 
   // NOVO: Controle inteligente do botão baseado no padrão E janela de apostas
-  const hasCompletePattern = lastTenResults.length >= 10;
+  const hasCompletePattern = lastFiveResults.length >= 5;
   const canStartOperation = hasCompletePattern && bettingWindow.isOpen && !operationActive;
   
-  // IMPORTANTE: Pattern para apostas = inverter ordem (recente→antigo para antigo→recente) + cores opostas
-  const currentPattern = lastTenResults
-    .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
-    .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color) // 2. Trocar cores
+  // IMPORTANTE: Pattern para apostas = apenas trocar cores (ordem cronológica: antigo→recente)
+  const currentPattern = lastFiveResults
+    .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color) // Trocar cores
     .join('');
 
   // 🐛 DEBUG: Log para verificar cálculos
   console.log('🔍 DEBUG BMG:');
-  console.log('lastTenResults:', lastTenResults.map(r => r.color).join(' '));
-  console.log('após reverse:', lastTenResults.slice().reverse().map(r => r.color).join(' '));
+  console.log('lastFiveResults:', lastFiveResults.map(r => r.color).join(' '));
+  console.log('após reverse:', lastFiveResults.slice().reverse().map(r => r.color).join(' '));
   console.log('currentPattern:', currentPattern);
   console.log('operationState?.pattern:', operationState?.pattern);
 
@@ -763,21 +778,21 @@ export default function BMG() {
                     </span>
                   </div>
                   
-                  {isOperating && (websocketLogs.length > 0 || lastTenResults.length > 0) && (
+                  {isOperating && (websocketLogs.length > 0 || lastFiveResults.length > 0) && (
                     <div className="text-xs font-mono text-gray-500">
-                      LOGS: {websocketLogs.length} | ÚLTIMOS_10: {lastTenResults.length}/10
+                      LOGS: {websocketLogs.length} | ÚLTIMOS_5: {lastFiveResults.length}/5
                     </div>
                   )}
                 </div>
 
-                {/* Últimos 10 Resultados */}
-                {lastTenResults.length > 0 && (
+                {/* Últimos 5 Resultados */}
+                {lastFiveResults.length > 0 && (
                   <div className="space-y-2">
-                    <div className="text-xs font-mono text-blue-400 font-semibold">🎯 ÚLTIMOS_10_RESULTADOS:</div>
+                    <div className="text-xs font-mono text-blue-400 font-semibold">🎯 ÚLTIMOS_5_RESULTADOS:</div>
                     <div className="flex gap-2 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg flex-wrap">
-                      {lastTenResults.slice().reverse().map((result: any, index: number) => {
-                        // Calcular posição cronológica: index 0 = posição 10 (mais recente), index 9 = posição 1 (mais antigo)
-                        const cronologicalPosition = lastTenResults.length - index;
+                      {lastFiveResults.slice().reverse().map((result: any, index: number) => {
+                        // Calcular posição cronológica: index 0 = posição 5 (mais recente), index 4 = posição 1 (mais antigo)
+                        const cronologicalPosition = lastFiveResults.length - index;
                         const baseClasses = "w-12 h-12 rounded-full flex flex-col items-center justify-center text-xs font-bold font-mono shadow-lg transition-all duration-300 hover:scale-110";
                         const colorClasses = result.color === 'R' 
                           ? 'bg-red-500 text-white shadow-red-500/50' 
@@ -794,9 +809,9 @@ export default function BMG() {
                           </div>
                         );
                       })}
-                      {lastTenResults.length < 10 && (
-                        Array.from({ length: 10 - lastTenResults.length }).map((_, index) => {
-                          const cronologicalPosition = 10 - lastTenResults.length - index;
+                      {lastFiveResults.length < 5 && (
+                        Array.from({ length: 5 - lastFiveResults.length }).map((_, index) => {
+                          const cronologicalPosition = 5 - lastFiveResults.length - index;
                           return (
                             <div
                               key={`empty-${index}`}
@@ -810,11 +825,11 @@ export default function BMG() {
                       )}
                     </div>
                     <div className="text-xs font-mono text-gray-400">
-                      Padrão para apostas: {currentPattern ? currentPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' ') : 'Aguardando...'} ({lastTenResults.length}/10 completo)
+                      Padrão para apostas: {currentPattern ? currentPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' ') : 'Aguardando...'} ({lastFiveResults.length}/5 completo)
                     </div>
-                    {lastTenResults.length >= 10 && (
+                    {lastFiveResults.length >= 5 && (
                       <div className="text-xs font-mono text-blue-300 bg-blue-500/10 p-2 rounded border border-blue-500/20">
-                        💡 Apostas contra padrão: {currentPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' → ')} (1=antigo → 10=recente)
+                        💡 Apostas contra padrão: {currentPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' → ')} (1=antigo → 5=recente)
                   </div>
                 )}
 
@@ -843,7 +858,7 @@ export default function BMG() {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-400">Nível Atual:</span>
-                        <span className="text-cyan-400">{operationState.level + 1}/10</span>
+                        <span className="text-cyan-400">{operationState.level + 1}/5</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-400">Martingale:</span>

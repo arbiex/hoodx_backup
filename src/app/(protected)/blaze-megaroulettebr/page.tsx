@@ -9,7 +9,7 @@ import { Play, Square, RefreshCw, Zap, Key, Settings } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
-  import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
+import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
 import CreditDisplay from '@/components/CreditDisplay';
 import { OperationsHistoryCard } from '@/components/OperationsHistoryCard';
 import { useSimpleOperationsHistory } from '@/hooks/useSimpleOperationsHistory';
@@ -36,7 +36,7 @@ export default function BlazeMegaRouletteBR() {
   // Estados para últimos 5 resultados
   const [lastFiveResults, setLastFiveResults] = useState<Array<{ 
     number: number; 
-      color: string;
+    color: string;
     gameId: string; 
     timestamp: number 
   }>>([]);
@@ -100,8 +100,6 @@ export default function BlazeMegaRouletteBR() {
     };
   } | null>(null);
 
-
-
   // Estados para modal de estratégia
   const [strategyModalOpen, setStrategyModalOpen] = useState(false);
   const [strategyLoading, setStrategyLoading] = useState(false);
@@ -114,8 +112,6 @@ export default function BlazeMegaRouletteBR() {
     currentGameId?: string;
     lastUpdate?: number;
   }>({ isOpen: false });
-
-
 
   const monitoringRef = useRef<boolean>(false);
   const operationRef = useRef<boolean>(false);
@@ -133,6 +129,44 @@ export default function BlazeMegaRouletteBR() {
   
   // NOVO: Hook simples para logs de apostas
   const bettingLogs = useBettingLogs();
+
+  // NOVO: Estados para dados reais do usuário
+  const [userFingerprint, setUserFingerprint] = useState<{
+    userAgent: string;
+    language: string;
+    languages: string[];
+    platform: string;
+    timezone: string;
+    screenResolution: string;
+    colorDepth: number;
+    pixelRatio: number;
+    cookieEnabled: boolean;
+    doNotTrack: string | null;
+    referrer: string;
+    viewport: string;
+    connectionType?: string;
+    hardwareConcurrency?: number;
+    webdriver: boolean | undefined;
+    maxTouchPoints: number;
+    vendor: string;
+    product: string;
+    oscpu: string;
+    buildID: string;
+    deviceMemory: number | undefined;
+    connectionDownlink: number | undefined;
+    connectionRtt: number | undefined;
+    connectionSaveData: boolean | undefined;
+    canvasFingerprint: string;
+    webglFingerprint: string;
+    fontFingerprint: string;
+    audioFingerprint: string;
+    performanceTiming: {
+      loadTime: number;
+      domReadyTime: number;
+      connectTime: number;
+      requestTime: number;
+    } | string;
+  } | null>(null);
 
   useEffect(() => {
     checkUser();
@@ -279,9 +313,224 @@ export default function BlazeMegaRouletteBR() {
     }
   };
 
+  // NOVO: Função para capturar fingerprint real do navegador
+  const captureUserFingerprint = useCallback(() => {
+    try {
+      // ✅ CORRIGIDO: Garantir que todos os dados sejam capturados corretamente
+      const fingerprint = {
+        userAgent: navigator.userAgent || 'unknown',
+        language: navigator.language || 'pt-BR',
+        languages: navigator.languages ? Array.from(navigator.languages) : [navigator.language || 'pt-BR'],
+        platform: navigator.platform || 'unknown',
+        timezone: (() => {
+          try {
+            return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
+          } catch {
+            return 'America/Sao_Paulo';
+          }
+        })(),
+        screenResolution: (() => {
+          try {
+            return `${screen.width}x${screen.height}` || '1920x1080';
+          } catch {
+            return '1920x1080';
+          }
+        })(),
+        colorDepth: screen.colorDepth || 24,
+        pixelRatio: window.devicePixelRatio || 1,
+        cookieEnabled: navigator.cookieEnabled !== undefined ? navigator.cookieEnabled : true,
+        doNotTrack: navigator.doNotTrack || null,
+        referrer: document.referrer || '',
+        viewport: `${window.innerWidth}x${window.innerHeight}` || '1920x1080',
+        connectionType: (navigator as any).connection?.effectiveType || 'unknown',
+        hardwareConcurrency: navigator.hardwareConcurrency || 4,
+        // ✅ NOVOS: Dados adicionais para disfarce mais realista
+        webdriver: (navigator as any).webdriver || false,
+        maxTouchPoints: navigator.maxTouchPoints || 0,
+        vendor: (navigator as any).vendor || 'Google Inc.',
+        product: (navigator as any).product || 'Gecko',
+        oscpu: (navigator as any).oscpu || 'unknown',
+        buildID: (navigator as any).buildID || 'unknown',
+        // Informações de memória (se disponível)
+        deviceMemory: (navigator as any).deviceMemory || 8,
+        // Informações de conexão detalhadas
+        connectionDownlink: (navigator as any).connection?.downlink || 10,
+        connectionRtt: (navigator as any).connection?.rtt || 100,
+        connectionSaveData: (navigator as any).connection?.saveData || false,
+        // ✅ SIMPLIFICADO: Fingerprints básicos (evitar problemas)
+        canvasFingerprint: (() => {
+          try {
+            return generateCanvasFingerprint();
+          } catch {
+            return 'unavailable';
+          }
+        })(),
+        webglFingerprint: (() => {
+          try {
+            return generateWebGLFingerprint();
+          } catch {
+            return 'unavailable';
+          }
+        })(),
+        fontFingerprint: (() => {
+          try {
+            return generateFontFingerprint();
+          } catch {
+            return 'basic-fonts';
+          }
+        })(),
+        audioFingerprint: (() => {
+          try {
+            return generateAudioFingerprint();
+          } catch {
+            return 'unavailable';
+          }
+        })(),
+        performanceTiming: (() => {
+          try {
+            return getPerformanceTiming();
+          } catch {
+            return 'unavailable';
+          }
+        })()
+      };
+      
+      setUserFingerprint(fingerprint);
+      console.log('🔍 Fingerprint completo capturado:', {
+        ...fingerprint,
+        // Log resumido para não poluir console
+        canvasFingerprint: fingerprint.canvasFingerprint.slice(0, 20) + '...',
+        webglFingerprint: fingerprint.webglFingerprint.slice(0, 30) + '...'
+      });
+      return fingerprint;
+    } catch (error) {
+      console.error('❌ Erro ao capturar fingerprint:', error);
+      // Retornar dados básicos mesmo em caso de erro
+      return {
+        userAgent: navigator.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        language: navigator.language || 'pt-BR',
+        platform: navigator.platform || 'MacIntel',
+        timezone: 'America/Sao_Paulo',
+        screenResolution: '1920x1080'
+      };
+    }
+     }, []);
+
+  // ✅ NOVO: Gerar Canvas fingerprint
+  const generateCanvasFingerprint = useCallback(() => {
+    try {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return 'unsupported';
+      
+      canvas.width = 280;
+      canvas.height = 60;
+      
+      ctx.textBaseline = 'top';
+      ctx.font = '14px Arial';
+      ctx.fillStyle = '#f60';
+      ctx.fillRect(125, 1, 62, 20);
+      ctx.fillStyle = '#069';
+      ctx.fillText('HoodX 🎰 Blaze', 2, 15);
+      ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+      ctx.fillText('Mega Roulette BR', 4, 45);
+      
+      return canvas.toDataURL().slice(-50); // Últimos 50 chars
+    } catch (error) {
+      return 'error';
+    }
+  }, []);
+
+  // ✅ NOVO: Gerar WebGL fingerprint
+  const generateWebGLFingerprint = useCallback(() => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return 'unsupported';
+      
+      const webgl = gl as WebGLRenderingContext;
+      const renderer = webgl.getParameter(webgl.RENDERER);
+      const vendor = webgl.getParameter(webgl.VENDOR);
+      
+      return `${vendor}|${renderer}`.slice(0, 100);
+    } catch (error) {
+      return 'error';
+    }
+  }, []);
+
+  // ✅ NOVO: Gerar Font fingerprint (sample)
+  const generateFontFingerprint = useCallback(() => {
+    try {
+      const fonts = ['Arial', 'Helvetica', 'Times', 'Courier', 'Verdana', 'Georgia', 'Palatino', 'Garamond', 'Comic Sans MS', 'Trebuchet MS', 'Arial Black', 'Impact'];
+      const availableFonts = fonts.filter(font => {
+        const span = document.createElement('span');
+        span.innerHTML = 'mmmmmmmmlli';
+        span.style.fontSize = '72px';
+        span.style.fontFamily = font;
+        document.body.appendChild(span);
+        const width = span.offsetWidth;
+        document.body.removeChild(span);
+        return width > 0;
+      });
+      return availableFonts.join(',').slice(0, 100);
+    } catch (error) {
+      return 'error';
+    }
+  }, []);
+
+  // ✅ NOVO: Gerar Audio fingerprint
+  const generateAudioFingerprint = useCallback(() => {
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const analyser = audioContext.createAnalyser();
+      const gain = audioContext.createGain();
+      
+      oscillator.type = 'triangle';
+      oscillator.frequency.setValueAtTime(10000, audioContext.currentTime);
+      
+      gain.gain.setValueAtTime(0, audioContext.currentTime);
+      oscillator.connect(analyser);
+      analyser.connect(gain);
+      gain.connect(audioContext.destination);
+      
+      oscillator.start(0);
+      oscillator.stop(audioContext.currentTime + 0.1);
+      
+      const frequencyData = new Float32Array(analyser.frequencyBinCount);
+      analyser.getFloatFrequencyData(frequencyData);
+      
+      return frequencyData.slice(0, 10).join(',').slice(0, 50);
+    } catch (error) {
+      return 'unsupported';
+    }
+  }, []);
+
+  // ✅ NOVO: Obter Performance timing
+  const getPerformanceTiming = useCallback(() => {
+    try {
+      if (!window.performance || !window.performance.timing) return 'unsupported';
+      
+      const timing = window.performance.timing;
+      return {
+        loadTime: timing.loadEventEnd - timing.navigationStart,
+        domReadyTime: timing.domContentLoadedEventEnd - timing.navigationStart,
+        connectTime: timing.connectEnd - timing.connectStart,
+        requestTime: timing.responseEnd - timing.requestStart
+      };
+    } catch (error) {
+      return 'error';
+    }
+  }, []);
+
+  // NOVO: Capturar fingerprint na inicialização
+  useEffect(() => {
+    captureUserFingerprint();
+  }, [captureUserFingerprint]);
+
   // Função para iniciar operação com tip específico
   const startOperation = async (tipValue: number) => {
-        setOperationLoading(true);
+    setOperationLoading(true);
     setOperationError(null);
     
     try {
@@ -291,29 +540,44 @@ export default function BlazeMegaRouletteBR() {
         return;
       }
 
-      userIdRef.current = user.id;
+      // Capturar dados atuais do navegador
+      const currentFingerprint = captureUserFingerprint();
       
-      // ✅ NOVO: Capturar dados completos do usuário
-      const userInfo = getUserInfo();
-      
-      setOperationStatus('CONECTANDO...');
+      // Adicionar headers reais do navegador
+      const realHeaders = {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': navigator.language + ',' + navigator.languages.slice(1, 3).join(',') + ';q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+        'User-Agent': navigator.userAgent,
+        'X-User-Timezone': currentFingerprint?.timezone,
+        'X-User-Resolution': currentFingerprint?.screenResolution,
+        'X-User-Language': navigator.language,
+        'X-User-Platform': navigator.platform
+      };
 
-      // Sistema simplificado - sem necessidade de gerenciar operações ativas
-
-      // Conectar ao WebSocket
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+             const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+         method: 'POST',
+         headers: {
+           'Content-Type': 'application/json'
+         },
         body: JSON.stringify({
           userId: user.id,
           action: 'bet-connect',
-          tipValue, // Passar o valor do tip para a API
-          // ✅ NOVO: Enviar dados do usuário para repasse à Pragmatic
-          userInfo: {
-            ...userInfo,
-            ip: userNetworkInfo.ip,
-            vpnDetected: userNetworkInfo.vpnDetected,
-            location: userNetworkInfo.location
+          tipValue: tipValue,
+          // Enviar fingerprint completo
+          userFingerprint: currentFingerprint,
+          clientHeaders: realHeaders,
+          clientMetadata: {
+            timestamp: Date.now(),
+            sessionId: crypto.getRandomValues(new Uint32Array(1))[0].toString(16),
+            browserFingerprint: currentFingerprint
           }
         })
       });

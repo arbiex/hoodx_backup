@@ -50,27 +50,30 @@ const websocketLogs: { [userId: string]: Array<{ timestamp: number; message: str
 const connectionStatus: { [userId: string]: { connected: boolean; error?: string; lastUpdate: number } } = {};
 
 // NOVO: Sistema dos últimos 10 resultados para padrão invertido
-const lastTenResults: { [userId: string]: Array<{ number: number; color: string; gameId: string; timestamp: number }> } = {};
+const lastFiveResults: { [userId: string]: Array<{ number: number; color: string; gameId: string; timestamp: number }> } = {};
 
-// NOVO: Estado da operação simplificada
+// NOVO: Estados para controle de padrões
 const operationState: { [userId: string]: {
   active: boolean; 
   currentPattern: string[];        // ['B', 'B', 'B', 'R', 'R'] - padrão sendo apostado
   currentLevel: number;            // 0-4 (qual aposta da sequência)
-  martingaleLevel: number;         // 0-4 (nível do martingale)
+  martingaleLevel: number;         // 0-9 (nível do martingale)
   waitingForResult: boolean;
   lastGameId?: string;
   strategy: {
-    sequences: number[];           // [1, 2, 4, 8, 16]
-    maxMartingale: number;        // 5
+    sequences: number[];           // [1.50, 3.00, 6.00, 12.00, 24.00, 48.00, 96.00, 192.00, 384.00, 768.00]
+    maxMartingale: number;        // 10
+    fixedProfit?: number;         // 1.50 (lucro fixo em qualquer nível)
   };
   stats: {
-  totalBets: number;
-  wins: number;
-  losses: number;
+    totalBets: number;
+    wins: number;
+    losses: number;
     profit: number;
-  startedAt: number;
+    startedAt: number;
   };
+  // ✅ NOVO: Controle de novo padrão
+  needsNewPattern: boolean;        // Se precisa aguardar novo padrão
 } } = {};
 
 // Controle de conexões WebSocket
@@ -113,15 +116,7 @@ const bettingWindowState: { [userId: string]: {
   lastUpdate: number;        // Timestamp da última atualização
 } } = {};
 
-// 🎭 NOVO: Estatísticas de humanização
-const humanizationStats: { [userId: string]: {
-  totalBets: number;         // Total de apostas feitas
-  humanizedBets: number;     // Apostas que receberam ruído
-  totalNoise: number;        // Soma total do ruído aplicado
-  lastNoiseApplied: number;  // Último ruído aplicado
-} } = {};
-
-// 🎭 Sistema de humanização simplificado (apenas ruído nas apostas)
+// Sistema de humanização removido
 
 // 📊 NOVO: Controle de sessões ativas
 const activeSessions: { [userId: string]: {
@@ -132,82 +127,14 @@ const activeSessions: { [userId: string]: {
   martingaleResets: number;   // Contador de resets do martingale
 } } = {};
 
-// Função para calcular sequência de martingale baseada no tip - 10 níveis
-function calculateMartingaleSequence(tipValue: number): number[] {
-  const sequence: number[] = [];
-  
-  // Nível 1: 1 tip
-  sequence.push(tipValue);
-  
-  // Níveis 2-10: (anterior × 2) + (2 × tip)
-  for (let level = 2; level <= 10; level++) {
-    const previousValue = sequence[level - 2];
-    const newValue = (previousValue * 2) + (2 * tipValue);
-    sequence.push(newValue);
-  }
-  
-  return sequence;
-}
+// Estratégia Martingale 1.5 - valores fixos
+// Sequência M1-M10: [1.50, 3.00, 6.00, 12.00, 24.00, 48.00, 96.00, 192.00, 384.00, 768.00]
+// Lucro fixo: R$ 1,50 em qualquer nível de vitória
+// Total máximo de investimento: R$ 1.534,50
 
-// 🎭 NOVO: Funções para humanização das apostas
-function shouldApplyNoise(): boolean {
-  // 5% a 15% de chance de aplicar ruído
-  const noiseChance = Math.random() * 100; // 0-100
-  const minChance = 5;  // 5%
-  const maxChance = 15; // 15%
-  const threshold = Math.random() * (maxChance - minChance) + minChance; // Entre 5% e 15%
-  
-  return noiseChance <= threshold;
-}
+// Funções de humanização removidas - usando valores originais do martingale
 
-function applyHumanNoise(originalAmount: number): { amount: number; noise: number } {
-  // Ruído de ±0.50 (múltiplo de 0.50)
-  const noiseDirection = Math.random() < 0.5 ? -1 : 1; // +1 ou -1
-  const noise = 0.50 * noiseDirection;
-  const newAmount = Math.max(0.50, originalAmount + noise); // Mínimo R$ 0,50
-  
-  return {
-    amount: parseFloat(newAmount.toFixed(2)),
-    noise: noise
-  };
-}
-
-function updateMartingaleWithNoise(userId: string, appliedNoise: number) {
-  const operation = operationState[userId];
-  if (!operation) return;
-  
-  // Propagar o ruído para os próximos níveis
-  for (let i = operation.currentLevel + 1; i < operation.strategy.sequences.length; i++) {
-    operation.strategy.sequences[i] += appliedNoise;
-    operation.strategy.sequences[i] = Math.max(0.50, parseFloat(operation.strategy.sequences[i].toFixed(2)));
-  }
-  
-  // Log da propagação
-  if (appliedNoise !== 0) {
-    addWebSocketLog(userId, `🎭 Ruído de R$ ${appliedNoise.toFixed(2)} propagado para próximos níveis`, 'info');
-  }
-}
-
-function updateHumanizationStats(userId: string, wasHumanized: boolean, appliedNoise: number = 0) {
-  // Inicializar estatísticas se não existir
-  if (!humanizationStats[userId]) {
-    humanizationStats[userId] = {
-      totalBets: 0,
-      humanizedBets: 0,
-      totalNoise: 0,
-      lastNoiseApplied: 0
-    };
-  }
-  
-  const stats = humanizationStats[userId];
-  stats.totalBets++;
-  
-  if (wasHumanized) {
-    stats.humanizedBets++;
-    stats.totalNoise += appliedNoise;
-    stats.lastNoiseApplied = appliedNoise;
-  }
-}
+// Estatísticas de humanização removidas
 
 // 🕶️ NOVO: Funções do sistema de disfarce
 // 🎭 Funções de humanização mantidas (sistema simplificado)
@@ -299,7 +226,7 @@ async function finalizeBettingSession(userId: string, endReason: string): Promis
   try {
     const session = activeSessions[userId];
     const operation = operationState[userId];
-    const humanization = humanizationStats[userId];
+    // Humanização removida
     
     if (!session || !operation) return;
     
@@ -312,13 +239,13 @@ async function finalizeBettingSession(userId: string, endReason: string): Promis
       total_bets: operation.stats.totalBets,
       total_wins: operation.stats.wins,
       total_losses: operation.stats.losses,
-      total_wagered: operation.stats.totalBets > 0 ? (operation.stats.totalBets * operation.strategy.sequences[0]) : 0, // Estimativa
-      total_winnings: operation.stats.profit + (operation.stats.totalBets * operation.strategy.sequences[0]), // Estimativa
+      total_wagered: operation.stats.totalBets > 0 ? (operation.stats.totalBets * (operation.strategy?.sequences?.[0] || 1.50)) : 0, // Estimativa
+      total_winnings: operation.stats.profit + (operation.stats.totalBets * (operation.strategy?.sequences?.[0] || 1.50)), // Estimativa
       net_profit: operation.stats.profit,
       max_martingale_level: Math.max(1, operation.martingaleLevel || 0),
       martingale_resets: session.martingaleResets,
-      humanized_bets: humanization?.humanizedBets || 0,
-      total_noise_applied: humanization?.totalNoise || 0,
+      humanized_bets: 0, // Humanização removida
+      total_noise_applied: 0, // Humanização removida
               // Campos de disfarce removidos - sistema simplificado
       betting_pattern: operation.currentPattern?.join('') || null,
       session_status: 'completed' as const,
@@ -353,24 +280,32 @@ async function finalizeBettingSession(userId: string, endReason: string): Promis
 
 
 
-// Estratégias Martingale disponíveis (valor padrão)
+// Estratégia Martingale 1.5 - Lucro fixo de R$ 1,50 em qualquer nível
 const MARTINGALE_STRATEGIES = {
-  "moderate": {
-    sequences: [0.50, 2.00, 5.00, 11.00, 23.00], // Progressão Martingale personalizada
-    maxMartingale: 5
+  "1.5": {
+    sequences: [1.50, 3.00, 6.00, 12.00, 24.00, 48.00, 96.00, 192.00, 384.00, 768.00], // Progressão com lucro fixo R$ 1,50
+    maxMartingale: 10,
+    fixedProfit: 1.50
   }
 };
 
 // Função principal POST
 export async function POST(request: NextRequest) {
   try {
-    // ✅ NOVO: Capturar IP real do usuário
+    // ✅ MELHORADO: Capturar dados completos do cliente
     const clientIP = 
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
       request.headers.get('x-real-ip') ||
       request.headers.get('cf-connecting-ip') ||
       request.headers.get('x-client-ip') ||
       'unknown';
+
+    // ✅ NOVO: Capturar headers reais do navegador
+    const clientUserAgent = request.headers.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+    const clientLanguage = request.headers.get('accept-language') || 'pt-BR,pt;q=0.9,en;q=0.8';
+    const clientAccept = request.headers.get('accept') || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
+    const clientAcceptEncoding = request.headers.get('accept-encoding') || 'gzip, deflate, br';
+    const clientReferer = request.headers.get('referer') || 'https://blaze.bet.br/';
 
     let requestBody;
     try {
@@ -382,7 +317,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const { userId, action = 'bet-connect', tipValue } = requestBody;
+    const { userId, action = 'bet-connect', tipValue, userFingerprint, clientHeaders, clientMetadata, authTokens } = requestBody;
 
     if (!userId) {
       return NextResponse.json({
@@ -391,13 +326,35 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-
-    // DEBUG: Estado atual removido
+    // ✅ Log apenas uma vez os dados capturados (só na primeira conexão)
+    if (action === 'bet-connect') {
+      addWebSocketLog(userId, `🔍 Dados reais capturados (primeira conexão):`, 'info');
+      addWebSocketLog(userId, `📱 User-Agent: ${userFingerprint?.userAgent || clientUserAgent}`, 'info');
+      addWebSocketLog(userId, `🌍 IP: ${clientIP}`, 'info');
+      addWebSocketLog(userId, `🗣️ Idioma: ${userFingerprint?.language || clientLanguage}`, 'info');
+      if (userFingerprint?.platform) addWebSocketLog(userId, `🖥️ Plataforma: ${userFingerprint.platform}`, 'info');
+      if (userFingerprint?.screenResolution) addWebSocketLog(userId, `📺 Resolução: ${userFingerprint.screenResolution}`, 'info');
+      if (userFingerprint?.timezone) addWebSocketLog(userId, `🕐 Timezone: ${userFingerprint.timezone}`, 'info');
+    }
 
     // Ações disponíveis
     switch (action) {
       case 'bet-connect':
-        return await connectToBettingGame(userId, tipValue, clientIP);
+        return await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
+          userAgent: userFingerprint?.userAgent || clientUserAgent,
+          language: clientLanguage,
+          accept: clientAccept,
+          acceptEncoding: clientAcceptEncoding,
+          referer: clientReferer,
+          // Dados adicionais do navegador
+          platform: userFingerprint?.platform,
+          timezone: userFingerprint?.timezone,
+          screenResolution: userFingerprint?.screenResolution,
+          colorDepth: userFingerprint?.colorDepth,
+          pixelRatio: userFingerprint?.pixelRatio,
+          hardwareConcurrency: userFingerprint?.hardwareConcurrency,
+          connectionType: userFingerprint?.connectionType
+        }, authTokens);
       
       case 'start-operation':
         return await startSimpleOperation(userId);
@@ -438,19 +395,19 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Função de autenticação usando edge function
-async function performAuthentication(userId: string): Promise<{ success: boolean; data?: AuthResult; error?: string }> {
+// ✅ Função para validar tokens recebidos do client-side
+async function validateClientTokens(userId: string, tokens: { ppToken: string; jsessionId: string; pragmaticUserId: string }): Promise<{ success: boolean; data?: AuthResult; error?: string }> {
   try {
+    console.log('🔐 [AUTH] Validando tokens recebidos do client-side...');
     
     let actualUserId = userId;
     
     // Se userId é um email, buscar UUID primeiro
     if (userId.includes('@')) {
-      
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
-    );
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+      );
 
       const { data: usersList, error: usersError } = await supabase.auth.admin.listUsers();
       
@@ -473,61 +430,283 @@ async function performAuthentication(userId: string): Promise<{ success: boolean
       actualUserId = foundUser.id;
     }
 
-    // Chamar edge function para autenticação
-    const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/blaze-megaroulettebr`;
-    
-    const requestBody = {
-      action: 'authenticate',
-      user_id: actualUserId,
-      timestamp: Date.now()
-    };
-    
-    const requestHeaders = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY}`,
-      'Cache-Control': 'no-cache'
-    };
-    
-    const response = await fetch(edgeFunctionUrl, {
-      method: 'POST',
-      headers: requestHeaders,
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        return {
-          success: false,
-          error: `Erro na edge function: ${response.status} - ${errorText}`
-      };
-    }
-
-    const result = await response.json();
-    
-    if (!result.success) {
+    // Validar se tokens estão presentes
+    if (!tokens.ppToken || !tokens.jsessionId) {
       return {
         success: false,
-        error: result.error || 'Erro na autenticação via edge function'
+        error: 'Tokens de autenticação incompletos'
       };
     }
 
+    console.log('✅ [AUTH] Tokens client-side validados com sucesso');
 
     return {
       success: true,
       data: {
         userId: actualUserId,
         originalUserId: userId,
-        ppToken: result.data.ppToken,
-        jsessionId: result.data.jsessionId,
-        timestamp: result.data.timestamp || new Date().toISOString()
+        ppToken: tokens.ppToken,
+        jsessionId: tokens.jsessionId,
+        timestamp: new Date().toISOString()
       }
     };
 
   } catch (error) {
     return {
       success: false,
-      error: `Erro interno na autenticação: ${error instanceof Error ? error.message : 'Erro desconhecido'}`
+      error: `Erro interno na validação: ${error instanceof Error ? error.message : 'Erro desconhecido'}`
     };
+  }
+}
+
+// ✅ Função de backup - autenticação server-side quando client-side falha
+async function performBackupAuthentication(userId: string, userFingerprint?: any, clientIP?: string): Promise<{ success: boolean; data?: AuthResult; error?: string }> {
+  try {
+    console.log('🔐 [BACKUP-AUTH] Autenticação server-side como backup...');
+    
+    let actualUserId = userId;
+    
+    // Se userId é um email, buscar UUID primeiro
+    if (userId.includes('@')) {
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+      );
+
+      const { data: usersList, error: usersError } = await supabase.auth.admin.listUsers();
+      
+      if (usersError) {
+        return {
+          success: false,
+          error: 'Erro ao buscar usuário no sistema'
+        };
+      }
+
+      const foundUser = usersList.users.find(user => user.email === userId);
+      
+      if (!foundUser?.id) {
+        return {
+          success: false,
+          error: 'Usuário não encontrado no sistema'
+        };
+      }
+
+      actualUserId = foundUser.id;
+    }
+
+    // Buscar token da Blaze do usuário
+    const supabaseClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    const { data: tokenData, error: tokenError } = await supabaseClient
+      .from('user_tokens')
+      .select('token')
+      .eq('casino_code', 'BLAZE')
+      .eq('user_id', actualUserId)
+      .eq('is_active', true)
+      .single();
+
+    if (tokenError || !tokenData?.token) {
+      console.error('❌ [BACKUP-AUTH] Token não encontrado:', tokenError);
+      return {
+        success: false,
+        error: 'Token da Blaze não encontrado para este usuário'
+      };
+    }
+
+    console.log('✅ [BACKUP-AUTH] Token encontrado, gerando ppToken...');
+    const blazeToken = tokenData.token;
+    
+    // Gerar ppToken
+    const ppToken = await generatePpTokenLocal(blazeToken);
+    if (!ppToken) {
+      return {
+        success: false,
+        error: 'Erro ao gerar ppToken - possível problema com token da Blaze'
+      };
+    }
+
+    console.log('✅ [BACKUP-AUTH] ppToken gerado, gerando jsessionId...');
+    
+    // Gerar jsessionId
+    const jsessionId = await generateJsessionIdLocal(ppToken);
+    if (!jsessionId) {
+      return {
+        success: false,
+        error: 'Erro ao gerar jsessionId - possível problema com Pragmatic Play'
+      };
+    }
+
+    console.log('✅ [BACKUP-AUTH] Autenticação server-side completa');
+
+    return {
+      success: true,
+      data: {
+        userId: actualUserId,
+        originalUserId: userId,
+        ppToken: ppToken,
+        jsessionId: jsessionId,
+        timestamp: new Date().toISOString()
+      }
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      error: `Erro interno na autenticação backup: ${error instanceof Error ? error.message : 'Erro desconhecido'}`
+    };
+  }
+}
+
+// ✅ NOVO: Função local para gerar ppToken (cópia da Edge Function)
+async function generatePpTokenLocal(blazeToken: string): Promise<string | null> {
+  try {
+    if (!blazeToken) {
+      return null;
+    }
+
+    const blazeUrl = 'mega-roulette---brazilian';
+    const response = await fetch(`https://blaze.bet.br/api/games/${blazeUrl}/play`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${blazeToken}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Origin': 'https://blaze.bet.br',
+        'Referer': 'https://blaze.bet.br/',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+      },
+      body: JSON.stringify({
+        selected_currency_type: 'BRL'
+      })
+    });
+
+    if (!response.ok) {
+      console.error('❌ [AUTH] Erro na requisição ppToken:', response.status, response.statusText);
+      return null;
+    }
+
+    const data = await response.json();
+    if (data.url && data.url.includes('playGame.do')) {
+      const tokenMatch = data.url.match(/token%3D([^%]+)/);
+      if (tokenMatch) {
+        console.log('✅ [AUTH] ppToken gerado com sucesso');
+        return tokenMatch[1];
+      }
+    }
+
+    console.error('❌ [AUTH] ppToken não encontrado na resposta');
+    return null;
+  } catch (error) {
+    console.error('❌ [AUTH] Erro ao gerar ppToken:', error);
+    return null;
+  }
+}
+
+// ✅ NOVO: Função local para gerar jsessionId (cópia da Edge Function)
+async function generateJsessionIdLocal(ppToken: string): Promise<string | null> {
+  try {
+    console.log('⏳ [AUTH] Aguardando 2 segundos antes de gerar jsessionId...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    if (!ppToken) {
+      console.error('❌ [AUTH] ppToken não fornecido');
+      return null;
+    }
+
+    const PRAGMATIC_CONFIG = {
+      gameSymbol: '287',
+      environmentID: '247',
+      userEnvId: '247',
+      ppCasinoId: '6376',
+      secureLogin: 'sfws_blazecombrsw',
+      stylename: 'sfws_blazecombrsw'
+    };
+
+    const extraData = {
+      lobbyUrl: 'https://blaze.bet.br',
+      requestCountryCode: 'BR',
+      cashierUrl: 'https://blaze.bet.br/?modal=cashier&type=deposit',
+      language: 'pt',
+      currency: 'BRL',
+      technology: 'H5',
+      platform: 'WEB'
+    };
+
+    const params = new URLSearchParams({
+      environmentID: PRAGMATIC_CONFIG.environmentID,
+      gameid: PRAGMATIC_CONFIG.gameSymbol,
+      secureLogin: PRAGMATIC_CONFIG.secureLogin,
+      requestCountryCode: 'BR',
+      userEnvId: PRAGMATIC_CONFIG.userEnvId,
+      ppCasinoId: PRAGMATIC_CONFIG.ppCasinoId,
+      ppGame: PRAGMATIC_CONFIG.gameSymbol,
+      ppToken: ppToken,
+      ppExtraData: btoa(JSON.stringify(extraData)),
+      isGameUrlApiCalled: 'true',
+      stylename: PRAGMATIC_CONFIG.stylename
+    });
+
+    const gameUrl = `https://games.pragmaticplaylive.net/api/secure/GameLaunch?${params}`;
+    console.log('🌐 [AUTH] Fazendo requisição para Pragmatic Play...');
+
+    // Timeout de 10 segundos
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    try {
+      const response = await fetch(gameUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'
+        },
+        redirect: 'manual',
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+      console.log('📊 [AUTH] Status da resposta Pragmatic:', response.status);
+
+      // Verificar redirect (302)
+      if (response.status === 302) {
+        const location = response.headers.get('location');
+        console.log('🔄 [AUTH] Redirect detectado');
+        if (location && location.includes('JSESSIONID=')) {
+          const jsessionMatch = location.match(/JSESSIONID=([^&]+)/);
+          if (jsessionMatch) {
+            console.log('✅ [AUTH] jsessionId extraído do redirect');
+            return jsessionMatch[1];
+          }
+        }
+      }
+
+      // Verificar set-cookie header
+      const setCookieHeader = response.headers.get('set-cookie');
+      if (setCookieHeader && setCookieHeader.includes('JSESSIONID=')) {
+        const jsessionMatch = setCookieHeader.match(/JSESSIONID=([^;]+)/);
+        if (jsessionMatch) {
+          console.log('✅ [AUTH] jsessionId extraído do cookie');
+          return jsessionMatch[1];
+        }
+      }
+
+      console.error('❌ [AUTH] jsessionId não encontrado na resposta');
+      return null;
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+        console.error('❌ [AUTH] Timeout na requisição para Pragmatic Play');
+        return null;
+      }
+      throw fetchError;
+    }
+  } catch (error) {
+    console.error('❌ [AUTH] Erro ao gerar jsessionId:', error);
+    return null;
   }
 }
 
@@ -573,159 +752,200 @@ function processGameResult(userId: string, gameId: string, number: number, color
     return;
   }
   
-  // Adiciona aos últimos 10 resultados
-  if (!lastTenResults[userId]) {
-    lastTenResults[userId] = [];
+  // Adiciona aos últimos 5 resultados
+  if (!lastFiveResults[userId]) {
+    lastFiveResults[userId] = [];
   }
   
-  lastTenResults[userId].push({
+  lastFiveResults[userId].push({
     number,
     color: colorCode,
     gameId,
     timestamp: Date.now()
   });
   
-  // Mantém apenas os últimos 10
-  if (lastTenResults[userId].length > 10) {
-    lastTenResults[userId].shift();
+  // Mantém apenas os últimos 5
+  if (lastFiveResults[userId].length > 5) {
+    lastFiveResults[userId].shift();
   }
   
-  addWebSocketLog(userId, `🎲 Resultado: ${number} ${color} | Últimos 10: ${lastTenResults[userId].map((r: any) => r.color).join('')}`, 'game');
+  addWebSocketLog(userId, `🎲 Resultado: ${number} ${color} | Últimos 5: ${lastFiveResults[userId].map((r: any) => r.color).join('')}`, 'game');
   
-  // Se operação ativa, processa aposta
+  // Se operação ativa, processa aposta PRIMEIRO
   if (operationState[userId]?.active) {
     processOperationResult(userId, colorCode);
-  } else {
-    // ✅ NOVO: Reativar automaticamente se operação estava pausada e agora tem padrão
-    if (operationState[userId] && !operationState[userId].active && lastTenResults[userId].length >= 10) {
-      addWebSocketLog(userId, `🔄 REATIVAÇÃO AUTOMÁTICA: Padrão disponível detectado`, 'success');
-      
-      operationState[userId].active = true;
-      // 🔄 APOSTA CONTRA PADRÃO: Inverter ordem (recente→antigo para antigo→recente) + cores opostas
-      operationState[userId].currentPattern = lastTenResults[userId]
-        .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
-        .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color); // 2. Trocar cores
-      operationState[userId].currentLevel = 0;
-      operationState[userId].martingaleLevel = 0;
-      operationState[userId].waitingForResult = false;
-      
-      const newPattern = operationState[userId].currentPattern.join('');
-      addWebSocketLog(userId, `🚀 NOVO PADRÃO AUTOMÁTICO: ${newPattern}`, 'success');
-      addWebSocketLog(userId, `📋 Sequência a seguir: ${newPattern.split('').map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
+  }
+  
+  // ✅ NOVO: Verificar se está aguardando novo padrão (após processar resultado)
+  if (operationState[userId]?.needsNewPattern) {
+    // 🚀 IMEDIATO: Pega os últimos 5 do histórico (INCLUINDO o atual - primeira aposta)
+    if (lastFiveResults[userId].length >= 5) {
+      const results = lastFiveResults[userId];
+      if (isValidPattern(results)) {
+        addWebSocketLog(userId, `🎯 NOVO PADRÃO VÁLIDO detectado usando últimos 5`, 'success');
+        createNewPattern(userId);
+      } else {
+        const historicPattern = results.map((r: any) => r.color).join('');
+        const reds = results.filter((r: any) => r.color === 'R').length;
+        const blacks = results.filter((r: any) => r.color === 'B').length;
+        addWebSocketLog(userId, `⏳ Padrão ${historicPattern} (${blacks}P + ${reds}V) inválido - Aguardando próximo resultado...`, 'info');
+      }
+    } else {
+      addWebSocketLog(userId, `⏳ Aguardando mais resultados para formar padrão (${lastFiveResults[userId].length}/5)`, 'info');
     }
+    return; // Não processa mais nada enquanto aguarda padrão
+  }
+  
+  // ✅ REATIVAÇÃO: apenas se não está aguardando novo padrão E padrão é válido
+  if (operationState[userId] && !operationState[userId].active && !operationState[userId].needsNewPattern && lastFiveResults[userId].length >= 5) {
+    const results = lastFiveResults[userId];
+    if (isValidPattern(results)) {
+      addWebSocketLog(userId, `🔄 REATIVAÇÃO: Padrão válido detectado`, 'success');
+      createNewPattern(userId);
+    } else {
+      const historicPattern = results.map((r: any) => r.color).join('');
+      const reds = results.filter((r: any) => r.color === 'R').length;
+      const blacks = results.filter((r: any) => r.color === 'B').length;
+      addWebSocketLog(userId, `⏳ REATIVAÇÃO: Padrão ${historicPattern} (${blacks}P + ${reds}V) não atende critérios - Aguardando...`, 'info');
+    }
+  }
+}
+
+// ✅ FUNÇÃO PARA VALIDAR PADRÃO (mínimo 2 de cada cor)
+function isValidPattern(results: any[]): boolean {
+  if (results.length !== 5) return false;
+  
+  const reds = results.filter((r: any) => r.color === 'R').length;
+  const blacks = results.filter((r: any) => r.color === 'B').length;
+  
+  // Deve ter pelo menos 2 vermelhos E pelo menos 2 pretos
+  return reds >= 2 && blacks >= 2;
+}
+
+// ✅ NOVO: Função dedicada para criar novo padrão (com validação)
+function createNewPattern(userId: string) {
+  const operation = operationState[userId];
+  if (!operation) return;
+  
+  const results = lastFiveResults[userId] || [];
+  
+  if (results.length >= 5) {
+    // ✅ VALIDAR PADRÃO ANTES DE USAR
+    if (!isValidPattern(results)) {
+      const historicPattern = results.map((r: any) => r.color).join('');
+      const reds = results.filter((r: any) => r.color === 'R').length;
+      const blacks = results.filter((r: any) => r.color === 'B').length;
+      
+      addWebSocketLog(userId, `❌ Padrão rejeitado: ${historicPattern} (${blacks}P + ${reds}V) - Aguardando padrão válido...`, 'info');
+      
+      // Não ativa operação, apenas aguarda próximo resultado
+      operation.active = false;
+      operation.needsNewPattern = false;
+      return;
+    }
+    
+    // ✅ PADRÃO VÁLIDO: Inverter cores e iniciar operação
+    operation.currentPattern = results
+      .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color);
+    
+    operation.currentLevel = 0;
+    operation.martingaleLevel = 0;
+    operation.waitingForResult = false;
+    operation.active = true;
+    operation.needsNewPattern = false;
+    
+    const historicPattern = results.map((r: any) => r.color).join('');
+    const finalPattern = operation.currentPattern.join('');
+    const reds = results.filter((r: any) => r.color === 'R').length;
+    const blacks = results.filter((r: any) => r.color === 'B').length;
+    
+    addWebSocketLog(userId, `✅ Padrão aceito: ${historicPattern} (${blacks}P + ${reds}V) → 🎯 CONTRA-PADRÃO: ${finalPattern}`, 'success');
+    addWebSocketLog(userId, `📋 Sequência de apostas: ${finalPattern.split('').map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
+  } else {
+    addWebSocketLog(userId, `⏳ Aguardando mais resultados para formar padrão (${results.length}/5)`, 'info');
+    operation.active = false;
+    operation.needsNewPattern = false;
   }
 }
 
 // NOVO: Função para processar resultado da operação
 function processOperationResult(userId: string, resultColor: string) {
   const operation = operationState[userId];
-  if (!operation || !operation.active) return;
+  if (!operation || !operation.active || !operation.strategy?.sequences) {
+    addWebSocketLog(userId, '❌ Estado da operação inválido para processar resultado', 'error');
+    return;
+  }
 
-  const expectedColor = operation.currentPattern[operation.currentLevel];
+  // ✅ NOVA LÓGICA: Usa módulo para repetir padrão nos níveis 6-10
+  const patternIndex = operation.currentLevel % 5; // 0-4, depois repete
+  const expectedColor = operation.currentPattern[patternIndex];
   // ✅ ZERO SEMPRE CONTA COMO DERROTA - só ganha se for exatamente a cor apostada
   const isWin = (resultColor === expectedColor && resultColor !== 'green');
   
   operation.stats.totalBets++;
   operation.waitingForResult = false; // ✅ SEMPRE libera para próxima aposta
   
-      if (isWin) {
-      // ✅ GANHOU - Avança para próximo nível do padrão
-      operation.stats.wins++;
-      
-      // Usar valor apostado atual para calcular lucro (martingale atual)
-      const betAmount = operation.strategy.sequences[operation.martingaleLevel] || 0.50;
-      operation.stats.profit += betAmount;
-      
-      operation.currentLevel++; // ✅ AVANÇA NÍVEL
-      operation.martingaleLevel = 0; // ✅ RESETA MARTINGALE
-      
-      const expectedColorName = COLOR_NAMES[expectedColor] || expectedColor;
-      const resultColorName = COLOR_NAMES[resultColor] || resultColor;
-      
-      addWebSocketLog(userId, `✅ VITÓRIA Nível ${operation.currentLevel}! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName}`, 'success');
-      
-      if (operation.currentLevel >= 10) {
-        // Completou toda sequência!
-        addWebSocketLog(userId, `🎉 SEQUÊNCIA COMPLETA! Padrão invertido ${operation.currentPattern.join('')} finalizado com sucesso!`, 'success');
-        
-        resetOperationForNewPattern(userId);
-        return; // Para aqui, não continua apostando
-    } else {
-        // Próximo nível da sequência
-        const nextBet = operation.currentPattern[operation.currentLevel];
-        const nextBetName = COLOR_NAMES[nextBet] || nextBet;
-        addWebSocketLog(userId, `➡️ Próximo nível ${operation.currentLevel + 1}: ${nextBetName} (${nextBet})`, 'info');
-        // ✅ Continua ativo para próxima aposta
-      }
-      
-    } else {
-      // ❌ PERDEU - Avança no martingale
-      operation.stats.losses++;
-      
-      const betAmount = operation.strategy.sequences[operation.martingaleLevel] || 0.50;
-      operation.stats.profit -= betAmount;
-      
-      const expectedColorName = COLOR_NAMES[expectedColor] || expectedColor;
-      const resultColorName = COLOR_NAMES[resultColor] || resultColor;
-      
-      const defeatReason = resultColor === 'green' ? '(ZERO)' : `(${resultColorName})`;
-      
-      // ✅ AVANÇA NO MARTINGALE
-      operation.martingaleLevel++;
-      
-      if (operation.martingaleLevel >= 10) {
-        // ❌ PERDEU M10 - Para e pega novo padrão
-        addWebSocketLog(userId, `❌ DERROTA M10! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName} ${defeatReason}`, 'error');
-        addWebSocketLog(userId, `🛑 MARTINGALE M10 PERDIDO - Buscando novo padrão`, 'error');
-        
-        resetOperationForNewPattern(userId);
-      } else {
-        // ❌ PERDEU M1-M9 - Continua no mesmo nível com martingale
-        const nextMartingale = operation.martingaleLevel + 1;
-        addWebSocketLog(userId, `❌ DERROTA M${operation.martingaleLevel}! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName} ${defeatReason}`, 'error');
-        addWebSocketLog(userId, `🔄 Próxima aposta: M${nextMartingale} no mesmo nível ${operation.currentLevel + 1} (${expectedColorName})`, 'info');
-        
-        // ✅ Continua ativo para próxima aposta no mesmo nível
-      }
-    }
-}
-
-// NOVO: Reset para novo padrão - OPERAÇÃO CONTÍNUA
-function resetOperationForNewPattern(userId: string) {
-  if (!operationState[userId]) return;
+  // ✅ Determinar qual ciclo do padrão está executando
+  const cycle = Math.floor(operation.currentLevel / 5) + 1; // 1º ciclo (1-5) ou 2º ciclo (6-10)
+  const positionInCycle = (operation.currentLevel % 5) + 1; // Posição 1-5 dentro do ciclo
   
-  // 📊 NOVO: Contar reset do martingale para estatísticas
-  const session = activeSessions[userId];
-  if (session) {
-    session.martingaleResets++;
-  }
-  
-  // ✅ OPERAÇÃO CONTÍNUA - busca automaticamente próximo padrão
-  const results = lastTenResults[userId] || [];
-  
-  if (results.length >= 10) {
-    // Tem padrão disponível - continua automaticamente
-    // 🔄 APOSTA CONTRA PADRÃO: Inverter ordem (recente→antigo para antigo→recente) + cores opostas
-    operationState[userId].currentPattern = results
-      .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
-      .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color); // 2. Trocar cores
-    operationState[userId].currentLevel = 0;
-    operationState[userId].martingaleLevel = 0;
-    operationState[userId].waitingForResult = false;
-    // ✅ MANTÉM active = true para continuar operando
+  if (isWin) {
+    // ✅ GANHOU - SEMPRE busca novo padrão
+    operation.stats.wins++;
     
-    const newPattern = operationState[userId].currentPattern.join('');
-    addWebSocketLog(userId, `🔄 NOVO PADRÃO AUTOMÁTICO: ${newPattern}`, 'success');
-    addWebSocketLog(userId, `📋 Próxima sequência: ${newPattern.split('').map((c, i) => `${i+1}°${c}`).join(' → ')}`, 'info');
+    const betAmount = operation.strategy?.sequences?.[operation.martingaleLevel] || 1.50;
+    operation.stats.profit += betAmount;
+    
+    const expectedColorName = COLOR_NAMES[expectedColor] || expectedColor;
+    const resultColorName = COLOR_NAMES[resultColor] || resultColor;
+    
+    addWebSocketLog(userId, `✅ VITÓRIA M${operation.martingaleLevel + 1}! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName}`, 'success');
+    addWebSocketLog(userId, `🎉 VITÓRIA no ${cycle}º ciclo (posição ${positionInCycle}) - Aguardando novo padrão...`, 'success');
+    
+    // ✅ QUALQUER VITÓRIA = NOVO PADRÃO
+    operation.needsNewPattern = true;
+    operation.active = false;
+    
   } else {
-    // Não tem padrão suficiente - para e aguarda
-    operationState[userId].active = false;
-    operationState[userId].currentPattern = [];
-    operationState[userId].currentLevel = 0;
-    operationState[userId].martingaleLevel = 0;
-    operationState[userId].waitingForResult = false;
+    // ❌ PERDEU - Avança nível do padrão E martingale simultaneamente
+    operation.stats.losses++;
     
-    addWebSocketLog(userId, `⏳ Aguardando novos resultados para continuar (${results.length}/10)`, 'info');
+    const betAmount = operation.strategy?.sequences?.[operation.martingaleLevel] || 1.50;
+    operation.stats.profit -= betAmount;
+    
+    const expectedColorName = COLOR_NAMES[expectedColor] || expectedColor;
+    const resultColorName = COLOR_NAMES[resultColor] || resultColor;
+    
+    const defeatReason = resultColor === 'green' ? '(ZERO)' : `(${resultColorName})`;
+    
+    addWebSocketLog(userId, `❌ DERROTA M${operation.martingaleLevel + 1}! Apostou ${expectedColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName} ${defeatReason}`, 'error');
+    
+    // ✅ AVANÇA TANTO O NÍVEL DO PADRÃO QUANTO O MARTINGALE
+    operation.currentLevel++;
+    operation.martingaleLevel++;
+    
+    // ✅ NOVA LÓGICA: Só para no M10 (máximo da sequência)
+    if (operation.martingaleLevel >= 10) {
+      addWebSocketLog(userId, `🛑 MARTINGALE M10 PERDIDO - Aguardando novo padrão`, 'error');
+      addWebSocketLog(userId, `💰 Sequência M1-M10 completada - Buscando novo padrão`, 'error');
+      
+      operation.needsNewPattern = true;
+      operation.active = false;
+    } else {
+      // ✅ Continua no próximo nível com próximo martingale
+      const nextPatternIndex = operation.currentLevel % 5;
+      const nextColor = operation.currentPattern[nextPatternIndex];
+      const nextColorName = COLOR_NAMES[nextColor] || nextColor;
+      const nextCycle = Math.floor(operation.currentLevel / 5) + 1;
+      const nextPositionInCycle = (operation.currentLevel % 5) + 1;
+      
+             // ✅ Log especial quando muda de ciclo (do nível 5 para 6)
+       if (operation.currentLevel === 5) {
+         addWebSocketLog(userId, `🔄 INICIANDO 2º CICLO - Repetindo mesmo padrão nos níveis M6-M10`, 'info');
+       }
+       
+       addWebSocketLog(userId, `🔄 Próxima aposta: M${operation.martingaleLevel + 1} no ${nextCycle}º ciclo posição ${nextPositionInCycle} (${nextColorName})`, 'info');
+    }
   }
 }
 
@@ -747,7 +967,7 @@ async function renewSession(userId: string): Promise<boolean> {
     session.renewalAttempts++;
 
     // Fazer nova autenticação
-    const authResult = await performAuthentication(userId);
+    const authResult = await performBackupAuthentication(userId);
     if (!authResult.success) {
       addWebSocketLog(userId, `❌ Falha na renovação: ${authResult.error}`, 'error');
       return false;
@@ -821,7 +1041,7 @@ function setupAutoRenewal(userId: string) {
 }
     
 // NOVO: Conectar ao WebSocket
-async function connectToBettingGame(userId: string, tipValue?: number, clientIP?: string) {
+async function connectToBettingGame(userId: string, tipValue?: number, clientIP?: string, userFingerprint?: any, clientHeaders?: any, authTokens?: { ppToken: string; jsessionId: string; pragmaticUserId: string }) {
   try {
     addWebSocketLog(userId, '🔗 Iniciando conexão...', 'info');
     
@@ -829,15 +1049,32 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
     stopAllConnections(userId, false);
     resetReconnectionControl(userId);
     
-    // Autenticar
-    const authResult = await performAuthentication(userId);
+    // 🔐 Etapa 1: Validar tokens do client-side ou fazer autenticação
+    let authResult;
+    if (authTokens && authTokens.ppToken && authTokens.jsessionId) {
+      addWebSocketLog(userId, '🔐 Usando tokens do client-side (IP real do usuário)...', 'info');
+      authResult = await validateClientTokens(userId, authTokens);
+    } else {
+      addWebSocketLog(userId, '🔐 Tokens não fornecidos - usando autenticação server-side...', 'info');
+      authResult = await performBackupAuthentication(userId, userFingerprint, clientIP);
+    }
     if (!authResult.success) {
-      const errorMsg = `Falha na autenticação: ${authResult.error}`;
+      let errorMsg = `Falha na autenticação: ${authResult.error}`;
+      let needsTokenUpdate = false;
+      
+      // Melhorar mensagem para token expirado
+      if (authResult.error?.includes('ppToken') || authResult.error?.includes('token da Blaze')) {
+        errorMsg = 'Token da Blaze expirado. Acesse /config para atualizar seu token.';
+        needsTokenUpdate = true;
+      }
+      
       addWebSocketLog(userId, errorMsg, 'error');
       updateConnectionStatus(userId, false, errorMsg);
       return NextResponse.json({
         success: false,
-        error: errorMsg
+        error: errorMsg,
+        needsTokenUpdate,
+        redirectTo: needsTokenUpdate ? '/config' : undefined
       });
     }
 
@@ -854,21 +1091,27 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       maxRenewalAttempts: 3
     };
 
-    // Calcular estratégia baseada no tip selecionado
-    const calculatedSequence = tipValue ? calculateMartingaleSequence(tipValue) : MARTINGALE_STRATEGIES.moderate.sequences;
+    // Usar estratégia fixa 1.5 - não precisa mais de tip selecionado
+    // ✅ CORREÇÃO: Definir inline para evitar problemas de escopo no Fly.io
+    const strategy = {
+      sequences: [1.50, 3.00, 6.00, 12.00, 24.00, 48.00, 96.00, 192.00, 384.00, 768.00],
+      maxMartingale: 10,
+      fixedProfit: 1.50
+    };
+    const calculatedSequence = strategy.sequences;
     
-    addWebSocketLog(userId, `🎯 Tip selecionado: ${tipValue || 'padrão'} - Sequência: [${calculatedSequence.map(v => v.toFixed(2)).join(', ')}]`, 'info');
+    addWebSocketLog(userId, `🎯 Estratégia 1.5 - Sequência: [${calculatedSequence.map((v: number) => v.toFixed(2)).join(', ')}]`, 'info');
 
     // Sistema de disfarce removido - controle manual pelo usuário
     
     // 📊 NOVO: Criar nova sessão de apostas
     try {
-      await createBettingSession(userId, tipValue || 1.0, clientIP, 'HoodX Bot v1.0');
+      await createBettingSession(userId, tipValue || 1.0, clientIP, clientHeaders?.userAgent || 'HoodX Bot v1.0');
     } catch (error) {
     }
     
     // Inicializar estados
-    lastTenResults[userId] = [];
+    lastFiveResults[userId] = [];
     resultCollectionEnabled[userId] = false; // Só habilita após primeiro "apostas fechadas"
     operationState[userId] = {
       active: false,
@@ -878,7 +1121,8 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       waitingForResult: false,
       strategy: {
         sequences: calculatedSequence,
-        maxMartingale: 5
+        maxMartingale: 10,
+        fixedProfit: 1.50
       },
       stats: {
         totalBets: 0,
@@ -886,7 +1130,9 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
         losses: 0,
         profit: 0,
         startedAt: Date.now()
-      }
+      },
+      // ✅ NOVO: Controle de novo padrão
+      needsNewPattern: false
     };
     
     // Iniciar conexão WebSocket
@@ -896,7 +1142,7 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       tableId: 'mrbras531mrbr532'
     };
 
-    startWebSocketConnection(userId, config, undefined, clientIP);
+    startWebSocketConnection(userId, config, undefined, clientIP, userFingerprint);
 
     addWebSocketLog(userId, 'WebSocket iniciado para coleta de dados', 'success');
       
@@ -924,13 +1170,13 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
 // NOVO: Iniciar operação simplificada
 async function startSimpleOperation(userId: string) {
   try {
-    // Verificar se tem 10 resultados
-    const results = lastTenResults[userId] || [];
+    // Verificar se tem 5 resultados
+    const results = lastFiveResults[userId] || [];
     
-    if (results.length < 10) {
+    if (results.length < 5) {
       return NextResponse.json({
         success: false,
-        error: `Aguarde 10 resultados para iniciar (atual: ${results.length}/10)`
+        error: `Aguarde 5 resultados para iniciar (atual: ${results.length}/5)`
       });
     }
     
@@ -938,10 +1184,9 @@ async function startSimpleOperation(userId: string) {
     operationState[userId] = {
       ...operationState[userId],
       active: true,
-      // 🔄 APOSTA CONTRA PADRÃO: Inverter ordem (recente→antigo para antigo→recente) + cores opostas
+      // 🔄 APOSTA CONTRA PADRÃO: Apenas trocar cores (ordem cronológica: antigo→recente)
       currentPattern: results
-        .slice().reverse()  // 1. Inverter ordem: recente→antigo para antigo→recente
-        .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color), // 2. Trocar cores
+        .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color), // Trocar cores
       currentLevel: 0,
       martingaleLevel: 0,
       waitingForResult: false
@@ -1024,8 +1269,39 @@ async function stopSimpleOperation(userId: string) {
   }
 }
 
+// ✅ NOVA FUNÇÃO: Reconectar com novos tokens (resolve expiração)
+async function reconnectWithNewTokens(userId: string, userIP?: string, userFingerprint?: any) {
+  try {
+    addWebSocketLog(userId, `🔑 Gerando novos tokens para reconexão...`, 'info');
+    
+    // Gerar novos ppToken e jsessionId via Edge Function
+    const authResult = await performBackupAuthentication(userId, userFingerprint, userIP);
+    
+    if (!authResult.success || !authResult.data) {
+      addWebSocketLog(userId, `❌ Falha ao gerar novos tokens: ${authResult.error}`, 'error');
+      return;
+    }
+    
+    addWebSocketLog(userId, `✅ Novos tokens gerados com sucesso`, 'success');
+    
+    // Novo config com tokens atualizados
+    const newConfig = {
+      jsessionId: authResult.data.jsessionId,
+      pragmaticUserId: authResult.data.userId,
+      tableId: 'mrbras531mrbr532'
+    };
+    
+    // Reconectar com novos tokens
+    startWebSocketConnection(userId, newConfig, undefined, userIP, userFingerprint);
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+    addWebSocketLog(userId, `❌ Erro ao gerar novos tokens: ${errorMessage}`, 'error');
+  }
+}
+
 // NOVO: Iniciar conexão WebSocket simplificada
-function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string }, customServerUrl?: string, userIP?: string) {
+function startWebSocketConnection(userId: string, config: { jsessionId: string; pragmaticUserId: string; tableId: string }, customServerUrl?: string, userIP?: string, userFingerprint?: any) {
   try {
     // Inicializar controle de reconexão se não existir
     if (!reconnectionControl[userId]) {
@@ -1062,22 +1338,52 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
       addWebSocketLog(userId, `🌐 IP do usuário detectado: ${userIP}`, 'info');
     }
     
+    // ✅ MELHORADO: Headers completamente realistas usando dados do usuário
+    const realHeaders = {
+      // Headers básicos da Pragmatic
+      'Origin': 'https://client.pragmaticplaylive.net',
+      'User-Agent': userFingerprint?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept-Language': userFingerprint?.language || 'pt-BR,pt;q=0.9,en;q=0.8',
+      'Sec-WebSocket-Version': '13',
+      'Sec-WebSocket-Protocol': 'chat',
+      
+      // Headers realistas do navegador
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      'Sec-Fetch-Mode': 'websocket',
+      'Sec-Fetch-Site': 'cross-site',
+      
+      // Headers de IP (múltiplos para garantir que chegue)
+      ...(userIP && userIP !== 'unknown' && {
+        'X-Forwarded-For': userIP,
+        'X-Real-IP': userIP,
+        'X-Client-IP': userIP,
+        'CF-Connecting-IP': userIP,
+        'True-Client-IP': userIP,
+        'X-Original-IP': userIP
+      }),
+      
+      // Headers personalizados com dados reais do navegador
+      ...(userFingerprint?.timezone && { 'X-User-Timezone': userFingerprint.timezone }),
+      ...(userFingerprint?.platform && { 'X-User-Platform': userFingerprint.platform }),
+      ...(userFingerprint?.screenResolution && { 'X-User-Screen': userFingerprint.screenResolution }),
+      ...(userFingerprint?.colorDepth && { 'X-User-ColorDepth': userFingerprint.colorDepth.toString() }),
+      ...(userFingerprint?.hardwareConcurrency && { 'X-User-Cores': userFingerprint.hardwareConcurrency.toString() }),
+      ...(userFingerprint?.connectionType && { 'X-User-Connection': userFingerprint.connectionType })
+    };
+    
+    // ✅ Log headers apenas na primeira conexão (não em reconexões)
+    if (!activeWebSockets[userId]) {
+      addWebSocketLog(userId, `🌐 Headers enviados para Pragmatic (primeira conexão):`, 'info');
+      addWebSocketLog(userId, `📱 User-Agent: ${realHeaders['User-Agent']}`, 'info');
+      addWebSocketLog(userId, `🌍 IP Headers: ${userIP ? 'Enviado' : 'Indisponível'}`, 'info');
+      addWebSocketLog(userId, `🗣️ Idioma: ${realHeaders['Accept-Language']}`, 'info');
+      if (userFingerprint?.timezone) addWebSocketLog(userId, `🕐 Timezone: ${userFingerprint.timezone}`, 'info');
+      if (userFingerprint?.platform) addWebSocketLog(userId, `🖥️ Plataforma: ${userFingerprint.platform}`, 'info');
+    }
+
     const ws = new WebSocket(wsUrl, {
-      headers: {
-        // Headers corretos conforme API de referência
-        'Origin': 'https://client.pragmaticplaylive.net',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        'Sec-WebSocket-Version': '13',
-        'Sec-WebSocket-Protocol': 'chat',
-        // ✅ NOVO: Headers para repassar IP real do usuário
-        ...(userIP && {
-          'X-Forwarded-For': userIP,
-          'X-Real-IP': userIP,
-          'X-Client-IP': userIP,
-          'CF-Connecting-IP': userIP, // Cloudflare format
-          'True-Client-IP': userIP    // Akamai format
-        })
-      }
+      headers: realHeaders
     });
 
     let connectionHealthy = true;
@@ -1142,6 +1448,28 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           addWebSocketLog(userId, `📨 Mensagem recebida: ${message.substring(0, 100)}...`, 'info');
         }
 
+        // ✅ NOVA DETECÇÃO: Sessão offline = tokens expirados
+        if (message.includes('<session>offline</session>')) {
+          addWebSocketLog(userId, `🔑 Sessão offline detectada - tokens expiraram`, 'error');
+          addWebSocketLog(userId, `🔄 Gerando novos tokens automaticamente...`, 'info');
+          
+          // Limpar ping interval
+          if (pingInterval) {
+            clearInterval(pingInterval);
+            pingInterval = null;
+          }
+          
+          // Fechar conexão atual
+          ws.close();
+          
+          // Gerar novos tokens e reconectar
+          setTimeout(async () => {
+            await reconnectWithNewTokens(userId, userIP, userFingerprint);
+          }, 2000); // Aguardar 2 segundos antes de reconectar
+          
+          return; // Sair da função
+        }
+
         // Processar pong
       if (message.includes('<pong')) {
           lastPong = Date.now();
@@ -1173,9 +1501,25 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             // Fechar conexão atual
             ws.close();
             
-            // Reconectar ao novo servidor após delay
-            setTimeout(() => {
-              startWebSocketConnection(userId, config, newWsAddress, userIP);
+            // ✅ CORREÇÃO: Switch de servidor também precisa de novos tokens
+            setTimeout(async () => {
+              addWebSocketLog(userId, `🔑 Gerando novos tokens para switch de servidor...`, 'info');
+              
+              // Gerar novos tokens para novo servidor
+              const authResult = await performBackupAuthentication(userId, userFingerprint, userIP);
+              
+              if (!authResult.success || !authResult.data) {
+                addWebSocketLog(userId, `❌ Falha ao gerar tokens para novo servidor: ${authResult.error}`, 'error');
+                return;
+              }
+              
+              const newConfig = {
+                jsessionId: authResult.data.jsessionId,
+                pragmaticUserId: authResult.data.userId,
+                tableId: 'mrbras531mrbr532'
+              };
+              
+              startWebSocketConnection(userId, newConfig, newWsAddress, userIP, userFingerprint);
             }, 1000);
             
             return; // Sair da função para evitar processar outras mensagens
@@ -1302,8 +1646,9 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
       const control = reconnectionControl[userId];
         if (control && control.attempts < control.maxAttempts) {
           addWebSocketLog(userId, `🔄 Tentando reconectar em ${control.backoffDelay}ms...`, 'info');
-              setTimeout(() => {
-            startWebSocketConnection(userId, config);
+              setTimeout(async () => {
+            // ✅ CORREÇÃO: Gerar novos tokens a cada reconexão pois eles expiram
+            await reconnectWithNewTokens(userId, userIP, userFingerprint);
           }, control.backoffDelay);
           
           // Aumentar delay para próxima tentativa
@@ -1431,11 +1776,16 @@ function createWebSocketFrame(message: string): Buffer {
 // NOVO: Executar aposta simples com humanização
 async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   const operation = operationState[userId];
-  if (!operation || !operation.active) return;
+  if (!operation || !operation.active || !operation.strategy?.sequences) {
+    addWebSocketLog(userId, '❌ Estado da operação inválido ou incompleto', 'error');
+    return;
+  }
   
-  const expectedColor = operation.currentPattern[operation.currentLevel];
+  // ✅ NOVA LÓGICA: Usa módulo para repetir padrão nos níveis 6-10
+  const patternIndex = operation.currentLevel % 5; // 0-4, depois repete
+  const expectedColor = operation.currentPattern[patternIndex];
   // ✅ USAR VALOR DO MARTINGALE ATUAL (M1, M2, M3...)
-  const betAmount = operation.strategy.sequences[operation.martingaleLevel]; // Valor do martingale atual
+  const betAmount = operation.strategy?.sequences?.[operation.martingaleLevel] || 1.50; // Valor do martingale atual
   const betCode = COLOR_TO_BET_CODE[expectedColor];
   const colorName = COLOR_NAMES[expectedColor];
   
@@ -1444,28 +1794,8 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     return;
   }
 
-  // 🎭 HUMANIZAÇÃO: Aplicar ruído aleatório
-  let finalBetAmount = betAmount;
-  let appliedNoise = 0;
-  let isHumanized = false;
-  
-  if (shouldApplyNoise()) {
-    const noiseResult = applyHumanNoise(betAmount);
-    finalBetAmount = noiseResult.amount;
-    appliedNoise = noiseResult.noise;
-    isHumanized = true;
-    
-    // Atualizar o valor na sequência atual
-    operation.strategy.sequences[operation.currentLevel] = finalBetAmount;
-    
-    // Propagar ruído para próximos níveis
-    updateMartingaleWithNoise(userId, appliedNoise);
-    
-    addWebSocketLog(userId, `🎭 HUMANIZAÇÃO: R$ ${betAmount.toFixed(2)} → R$ ${finalBetAmount.toFixed(2)} (${appliedNoise > 0 ? '+' : ''}${appliedNoise.toFixed(2)})`, 'info');
-  }
-
-  // Atualizar estatísticas de humanização
-  updateHumanizationStats(userId, isHumanized, appliedNoise);
+  // Usar valor original do martingale sem humanização
+  const finalBetAmount = betAmount;
 
   try {
     // Gerar timestamp para identificação única
@@ -1491,9 +1821,11 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     operation.waitingForResult = true;
     operation.lastGameId = gameId;
     
-    // Log da aposta com indicação de humanização
-    const humanTag = isHumanized ? ' 🎭' : '';
-    addWebSocketLog(userId, `🎯 APOSTA NÍVEL ${operation.currentLevel + 1} M${operation.martingaleLevel + 1}: ${colorName} (${expectedColor}) R$ ${finalBetAmount.toFixed(2)}${humanTag} → Game ${gameId}`, 'success');
+    // ✅ Log da aposta com informações dos ciclos
+    const cycle = Math.floor(operation.currentLevel / 5) + 1;
+    const positionInCycle = (operation.currentLevel % 5) + 1;
+    
+    addWebSocketLog(userId, `🎯 APOSTA ${cycle}º CICLO POSIÇÃO ${positionInCycle} M${operation.martingaleLevel + 1}: ${colorName} (${expectedColor}) R$ ${finalBetAmount.toFixed(2)} → Game ${gameId}`, 'success');
     addWebSocketLog(userId, `🔧 Nível: ${operation.currentLevel + 1}/10 | Martingale: M${operation.martingaleLevel + 1}/10 | Padrão: ${operation.currentPattern.join('')}`, 'info');
     
     // TODO: Debitar créditos quando necessário
@@ -1603,13 +1935,13 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true) {
 async function getWebSocketLogs(userId: string) {
   try {
     const logs = websocketLogs[userId] || [];
-    const results = lastTenResults[userId] || [];
+    const results = lastFiveResults[userId] || [];
     const status = connectionStatus[userId] || { connected: false, lastUpdate: Date.now() };
     const operation = operationState[userId];
 
     // NOVO: Verificar se pode iniciar operação (padrão completo + janela de apostas aberta)
     const bettingWindow = bettingWindowState[userId];
-    const hasCompletePattern = results.length >= 10;
+    const hasCompletePattern = results.length >= 5;
     const bettingWindowOpen = bettingWindow?.isOpen || false;
     const canStartOperation = hasCompletePattern && bettingWindowOpen && !operation?.active;
 
@@ -1618,7 +1950,7 @@ async function getWebSocketLogs(userId: string) {
       data: {
         logs,
         connectionStatus: status,
-        lastTenResults: results,
+        lastFiveResults: results,
         operationActive: operation?.active || false,
         operationState: operation ? {
           pattern: operation.currentPattern.join(''),
@@ -1649,15 +1981,8 @@ async function getWebSocketLogs(userId: string) {
           timeSinceLastRenewal: Date.now() - sessionControl[userId].lastRenewal,
           nextRenewalIn: renewalTimers[userId] ? 'Ativo' : 'Inativo'
         } : null,
-        // 🎭 NOVO: Estatísticas de humanização
-        humanizationStats: humanizationStats[userId] ? {
-          totalBets: humanizationStats[userId].totalBets,
-          humanizedBets: humanizationStats[userId].humanizedBets,
-          humanizationRate: humanizationStats[userId].totalBets > 0 ? 
-            parseFloat(((humanizationStats[userId].humanizedBets / humanizationStats[userId].totalBets) * 100).toFixed(1)) : 0,
-          totalNoise: parseFloat(humanizationStats[userId].totalNoise.toFixed(2)),
-          lastNoiseApplied: parseFloat(humanizationStats[userId].lastNoiseApplied.toFixed(2))
-        } : null,
+        // Estatísticas de humanização removidas
+        humanizationStats: null,
         // Sistema de disfarce removido - dados simplificados
         disguiseStats: null
       }
@@ -1743,7 +2068,7 @@ async function resetOperationReport(userId: string) {
 async function getConnectionStatus(userId: string) {
   try {
     const status = connectionStatus[userId] || { connected: false, lastUpdate: Date.now() };
-    const results = lastTenResults[userId] || [];
+    const results = lastFiveResults[userId] || [];
     const operation = operationState[userId];
 
     return NextResponse.json({

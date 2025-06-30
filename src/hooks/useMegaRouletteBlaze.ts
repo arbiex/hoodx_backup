@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { useClientAuth } from './useClientAuth';
 
 // Tipos
 interface AuthData {
@@ -69,6 +70,9 @@ export function useMegaRouletteBlaze() {
     historyLoading: false,
     lastHistoryUpdate: null,
   });
+
+  // Hook de autenticação client-side
+  const clientAuth = useClientAuth();
 
   const addLog = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString('pt-BR');
@@ -417,13 +421,28 @@ export function useMegaRouletteBlaze() {
         throw new Error('Usuário não autenticado');
       }
 
-      // Fazer requisição para conectar o bot
-      const response = await fetch('/api/bots/blaze/pragmatic/mega-roulette', {
+      // Etapa 1: Autenticação client-side (IP real do usuário)
+      addLog('🔐 Fazendo autenticação com IP real do usuário...');
+      const authSuccess = await clientAuth.authenticate();
+      
+      if (!authSuccess || !clientAuth.authTokens) {
+        throw new Error(clientAuth.error || 'Falha na autenticação client-side');
+      }
+
+      addLog('✅ Autenticação client-side completa!');
+
+      // Etapa 2: Conectar com tokens client-side
+      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr/route', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
-          action: 'connect'
+          action: 'bet-connect',
+          authTokens: {
+            ppToken: clientAuth.authTokens.ppToken,
+            jsessionId: clientAuth.authTokens.jsessionId,
+            pragmaticUserId: clientAuth.authTokens.pragmaticUserId
+          }
         })
       });
 
@@ -432,13 +451,13 @@ export function useMegaRouletteBlaze() {
       if (data.success) {
         // Atualizar estado com dados de autenticação
         const authData: AuthData = {
-          userId: data.data.userId,
+          userId: data.data?.userId || userId,
           casino: 'BLAZE',
           provider: 'PRAGMATIC_PLAY',
-          game: data.data.game,
-          ppToken: data.data.auth?.ppToken,
-          jsessionId: data.data.auth?.jsessionId,
-          timestamp: data.data.timestamp
+          game: 'MEGA_ROULETTE',
+          ppToken: clientAuth.authTokens.ppToken,
+          jsessionId: clientAuth.authTokens.jsessionId,
+          timestamp: clientAuth.authTokens.timestamp
         };
 
         setState(prev => ({
@@ -450,10 +469,11 @@ export function useMegaRouletteBlaze() {
         }));
 
         addLog('✅ Bot conectado com sucesso');
-        addLog(`🎰 Jogo: ${data.data.game}`);
+        addLog('🎰 Jogo: Mega Roulette Brasileiro');
+        addLog('📱 Usando IP real do usuário (client-side)');
         
-        if (data.data.liveHistory?.status === 'active') {
-          addLog('📊 Histórico em tempo real ativo');
+        if (data.data?.connected) {
+          addLog('📊 WebSocket conectado - pronto para apostas');
         }
 
         // Buscar saldo e histórico iniciais
@@ -472,7 +492,7 @@ export function useMegaRouletteBlaze() {
       }));
       addLog(`❌ Erro: ${errorMessage}`);
     }
-  }, [addLog, fetchBalance, startRealTimeMonitoring]);
+  }, [addLog, fetchBalance, startRealTimeMonitoring, clientAuth]);
 
   // Parar bot  
   const stopBot = useCallback(async () => {

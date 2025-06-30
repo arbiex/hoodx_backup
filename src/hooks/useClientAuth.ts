@@ -2,6 +2,55 @@ import { useState, useCallback } from 'react';
 import { authenticateClientSide, getUserBlazeToken } from '@/lib/blaze-auth';
 import { authenticateViaBrowser } from '@/lib/browser-auth';
 
+// Autenticação via popup (zero CORS)
+async function authenticateViaPopup(blazeToken: string): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    console.log('🪟 [POPUP-AUTH] Iniciando autenticação via popup...');
+    
+    // Criar popup simples que redireciona para Blaze
+    const popup = window.open(
+      `https://blaze.bet.br/api/games/mega-roulette---brazilian/play`,
+      '_blank',
+      'width=600,height=500,scrollbars=yes,resizable=yes'
+    );
+    
+    if (!popup) {
+      throw new Error('Popup bloqueada pelo navegador');
+    }
+    
+    // Aguardar popup fechar ou timeout
+    return new Promise((resolve) => {
+      let resolved = false;
+      
+      const checkClosed = setInterval(() => {
+        if (popup.closed && !resolved) {
+          resolved = true;
+          clearInterval(checkClosed);
+          console.log('🪟 [POPUP-AUTH] Popup fechada - usando fallback');
+          resolve({ success: false, error: 'Popup fechada - tentando método alternativo' });
+        }
+      }, 1000);
+      
+      // Timeout de 10 segundos
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          clearInterval(checkClosed);
+          if (!popup.closed) {
+            popup.close();
+          }
+          console.log('🪟 [POPUP-AUTH] Timeout - usando fallback');
+          resolve({ success: false, error: 'Timeout - tentando método alternativo' });
+        }
+      }, 10000);
+    });
+    
+  } catch (error) {
+    console.error('❌ [POPUP-AUTH] Erro:', error);
+    return { success: false, error: 'Erro na popup - tentando método alternativo' };
+  }
+}
+
 interface AuthTokens {
   ppToken: string;
   jsessionId: string;
@@ -50,26 +99,42 @@ export function useClientAuth(): UseClientAuthReturn {
         return false;
       }
 
-      // Etapa 2: Tentar autenticação via IFRAME primeiro (100% client-side)
-      console.log('🌐 [CLIENT-AUTH] Tentando autenticação via iframe (IP real 100%)...');
-      const iframeResult = await authenticateViaBrowser(tokenResult.token);
+      // Etapa 2: Tentar múltiplas estratégias (popup > iframe > proxy)
+      console.log('🚀 [CLIENT-AUTH] Testando múltiplas estratégias de autenticação...');
       
       let authResult;
+      let usedStrategy = 'proxy';
       
-      if (iframeResult.success && iframeResult.data) {
-        console.log('✅ [CLIENT-AUTH] Iframe bem-sucedida (IP real preservado)');
-        authResult = iframeResult;
+      // Estratégia 1: Popup (zero CORS, IP real)
+      console.log('🪟 [CLIENT-AUTH] Estratégia 1: Popup window...');
+      const popupResult = await authenticateViaPopup(tokenResult.token);
+      
+      if (popupResult.success && popupResult.data) {
+        console.log('✅ [CLIENT-AUTH] Popup bem-sucedida (zero CORS)');
+        authResult = popupResult;
+        usedStrategy = 'popup';
       } else {
-        console.log('⚠️ [CLIENT-AUTH] Iframe falhou, tentando proxy interno...');
-        console.log('🔄 [CLIENT-AUTH] Fazendo autenticação via proxy...');
+        // Estratégia 2: Iframe
+        console.log('🌐 [CLIENT-AUTH] Estratégia 2: Iframe...');
+        const iframeResult = await authenticateViaBrowser(tokenResult.token);
         
-        authResult = await authenticateClientSide(tokenResult.token);
-        
-        console.log('📊 [CLIENT-AUTH] Resultado autenticação proxy:', { 
-          success: authResult.success, 
-          hasData: !!authResult.data,
-          error: authResult.error 
-        });
+        if (iframeResult.success && iframeResult.data) {
+          console.log('✅ [CLIENT-AUTH] Iframe bem-sucedida');
+          authResult = iframeResult;
+          usedStrategy = 'iframe';
+        } else {
+          // Estratégia 3: Proxy interno (último recurso)
+          console.log('🔄 [CLIENT-AUTH] Estratégia 3: Proxy interno (último recurso)...');
+          
+          authResult = await authenticateClientSide(tokenResult.token);
+          usedStrategy = 'proxy';
+          
+          console.log('📊 [CLIENT-AUTH] Resultado proxy:', { 
+            success: authResult.success, 
+            hasData: !!authResult.data,
+            error: authResult.error 
+          });
+        }
       }
       
       if (!authResult.success || !authResult.data) {
@@ -81,7 +146,14 @@ export function useClientAuth(): UseClientAuthReturn {
       }
 
       // Sucesso!
-      const authMethod = iframeResult.success ? 'iframe (IP real 100%)' : 'proxy interno';
+      const strategyNames = {
+        popup: 'popup (zero CORS)',
+        iframe: 'iframe',
+        proxy: 'proxy interno'
+      };
+      
+      const authMethod = strategyNames[usedStrategy as keyof typeof strategyNames];
+      
       console.log(`✅ [CLIENT-AUTH] Tokens gerados via ${authMethod}:`, {
         ppToken: authResult.data.ppToken ? 'OK' : 'MISSING',
         jsessionId: authResult.data.jsessionId ? 'OK' : 'MISSING',

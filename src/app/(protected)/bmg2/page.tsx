@@ -182,6 +182,167 @@ const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'
   );
 };
 
+// 💰 Componente de Gráfico de Lucro
+const ProfitChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'; timestamp: number; value: number }> }) => {
+  const maxPoints = 50; // Máximo de pontos visíveis
+  const visibleHistory = betHistory.slice(-maxPoints);
+  
+  if (visibleHistory.length === 0) {
+    return (
+      <Card className="bg-gray-900/50 border-yellow-500/30">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-yellow-400" />
+            <CardTitle className="text-sm font-mono text-yellow-400">
+              GRÁFICO_LUCRO
+            </CardTitle>
+          </div>
+          <CardDescription className="text-xs font-mono text-gray-400">
+            Histórico de lucro/prejuízo em tempo real
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="h-40 flex items-center justify-center border border-gray-700/50 rounded-lg">
+            <span className="text-xs font-mono text-gray-500">Aguardando apostas...</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+  
+  const chartWidth = 400;
+  const chartHeight = 120;
+  const padding = 20;
+  
+  // Calcular lucro acumulado para cada ponto
+  let accumulatedProfit = 0;
+  const points = visibleHistory.map((bet, index) => {
+    // Para vitória: lucro = valor apostado (ganha o valor de volta)
+    // Para derrota: prejuízo = -valor apostado (perde o valor)
+    const betProfit = bet.type === 'win' ? bet.value : -bet.value;
+    accumulatedProfit += betProfit;
+    
+    return {
+      x: (index / Math.max(visibleHistory.length - 1, 1)) * (chartWidth - 2 * padding) + padding,
+      y: chartHeight / 2 - (accumulatedProfit * 0.5), // Escala menor para valores em reais
+      accumulatedProfit,
+      betProfit,
+      ...bet
+    };
+  });
+  
+  // Calcular limites para centralizar o gráfico
+  const minY = Math.min(...points.map(p => p.y));
+  const maxY = Math.max(...points.map(p => p.y));
+  const centerY = (minY + maxY) / 2;
+  const adjustedPoints = points.map(p => ({
+    ...p,
+    y: p.y - centerY + chartHeight / 2
+  }));
+  
+  // Criar path da linha
+  const pathData = adjustedPoints.reduce((path, point, index) => {
+    return path + (index === 0 ? `M ${point.x} ${point.y}` : ` L ${point.x} ${point.y}`);
+  }, '');
+  
+  const currentProfit = points[points.length - 1]?.accumulatedProfit || 0;
+  const totalInvested = betHistory.reduce((sum, bet) => sum + bet.value, 0);
+  const totalWon = betHistory.filter(b => b.type === 'win').reduce((sum, bet) => sum + bet.value, 0);
+  const totalLost = betHistory.filter(b => b.type === 'loss').reduce((sum, bet) => sum + bet.value, 0);
+  
+  return (
+    <Card className="bg-gray-900/50 border-yellow-500/30">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-yellow-400" />
+          <CardTitle className="text-sm font-mono text-yellow-400">
+            GRÁFICO_LUCRO
+          </CardTitle>
+        </div>
+        <CardDescription className="text-xs font-mono text-gray-400">
+          Histórico de lucro/prejuízo em tempo real
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="relative">
+          {/* SVG do gráfico */}
+          <svg width={chartWidth} height={chartHeight} className="border border-gray-700/50 rounded-lg bg-gray-800/30">
+            {/* Linha central de referência (R$ 0) */}
+            <line 
+              x1={padding} 
+              y1={chartHeight / 2} 
+              x2={chartWidth - padding} 
+              y2={chartHeight / 2}
+              stroke="#4B5563" 
+              strokeDasharray="2,2" 
+              strokeWidth="1"
+            />
+            
+            {/* Linha do gráfico */}
+            {adjustedPoints.length > 1 && (
+              <path
+                d={pathData}
+                fill="none"
+                stroke={currentProfit >= 0 ? "#EAB308" : "#EF4444"}
+                strokeWidth="2"
+                className="drop-shadow-sm"
+              />
+            )}
+            
+            {/* Pontos */}
+            {adjustedPoints.map((point, index) => (
+                             <circle
+                 key={index}
+                 cx={point.x}
+                 cy={point.y}
+                 r="3"
+                 fill={point.type === 'win' ? "#EAB308" : "#EF4444"}
+                 stroke={point.type === 'win' ? "#CA8A04" : "#7F1D1D"}
+                 strokeWidth="1"
+                 className="drop-shadow-sm"
+               />
+            ))}
+            
+            {/* Valor atual */}
+            {adjustedPoints.length > 0 && (
+              <text
+                x={adjustedPoints[adjustedPoints.length - 1].x + 10}
+                y={adjustedPoints[adjustedPoints.length - 1].y + 5}
+                fill={currentProfit >= 0 ? "#EAB308" : "#EF4444"}
+                fontSize="12"
+                fontFamily="monospace"
+                fontWeight="bold"
+              >
+                R$ {currentProfit > 0 ? '+' : ''}{currentProfit.toFixed(2)}
+              </text>
+            )}
+          </svg>
+        </div>
+        
+        {/* Estatísticas */}
+        <div className="mt-3 pt-3 border-t border-gray-700/50">
+          <div className="grid grid-cols-3 gap-4 text-xs font-mono">
+            <div className="text-center">
+              <div className="text-yellow-400 font-bold">R$ {totalWon.toFixed(2)}</div>
+              <div className="text-gray-400">Ganhos</div>
+            </div>
+            <div className="text-center">
+              <div className="text-red-400 font-bold">R$ {totalLost.toFixed(2)}</div>
+              <div className="text-gray-400">Perdas</div>
+            </div>
+            <div className="text-center">
+              <div className={`font-bold ${currentProfit >= 0 ? 'text-yellow-400' : 'text-red-400'}`}>
+                R$ {currentProfit > 0 ? '+' : ''}{currentProfit.toFixed(2)}
+              </div>
+              <div className="text-gray-400">Lucro</div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 // 📊 Componente de Gráfico de Martingale
 const MartingaleChart = ({ martingaleUsage }: { martingaleUsage: number[] }) => {
   const maxUsage = Math.max(...martingaleUsage, 1);
@@ -1222,6 +1383,9 @@ export default function BMG() {
           
           {/* 📈 Gráfico de Linha de Apostas */}
           <BetLineChart betHistory={betHistory} />
+          
+          {/* 💰 Gráfico de Lucro */}
+          <ProfitChart betHistory={betHistory} />
           
           {/* 📊 Gráfico de Consumo de Martingale */}
           <MartingaleChart martingaleUsage={martingaleUsage} />

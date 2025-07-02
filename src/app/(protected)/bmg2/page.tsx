@@ -656,6 +656,24 @@ export default function BMG() {
     setBetHistory([]);
   };
 
+  // 🔄 NOVA FUNÇÃO: Reset completo de todos os gráficos para nova sessão
+  const resetAllGraphs = async () => {
+    // Resetar gráficos locais
+    resetMartingaleStats();
+    resetBetHistory();
+    
+    // Resetar relatório no backend
+    await resetOperationReport();
+    
+    // Limpar estados locais
+    setWebsocketLogs([]);
+    setOperationReport(null);
+    setOperationState(null);
+    setLastSevenResults([]);
+    
+    console.log('📊 Todos os gráficos foram zerados para nova sessão');
+  };
+
   // 📈 NOVA FUNÇÃO: Processar logs para identificar vitórias e derrotas
   const processBetResults = (logs: any[]) => {
     // Procurar por logs específicos de vitória e derrota do backend
@@ -973,11 +991,8 @@ export default function BMG() {
       monitoringRef.current = true;
       startMonitoring();
       
-      // 📊 NOVO: Resetar estatísticas de martingale para nova operação
-      resetMartingaleStats();
-      
-      // 📈 NOVO: Resetar histórico de apostas para nova operação
-      resetBetHistory();
+      // 📊 NOVO: Reset completo de todos os gráficos para nova sessão
+      await resetAllGraphs();
 
     } catch (error) {
       setOperationError('Erro inesperado na conexão');
@@ -1028,12 +1043,15 @@ export default function BMG() {
           setIsOperating(false);
           operationRef.current = false;
           setOperationStatus('DESCONECTADO');
-        setOperationError(null);
+          setOperationError(null);
           setOperationActive(false);
           
           // Parar monitoramento
           monitoringRef.current = false;
           setError(null);
+          
+          // 🔄 NOVO: Manter dados dos gráficos ao parar (não resetar aqui)
+          // Os gráficos mantêm o histórico até iniciar nova operação
           
           setOperationSuccess('Operação encerrada com sucesso');
           setTimeout(() => setOperationSuccess(null), 3000);

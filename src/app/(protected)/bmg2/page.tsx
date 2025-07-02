@@ -29,6 +29,9 @@ const supabase = createClient(
 
 // 📈 Componente de Gráfico de Linha de Apostas
 const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'; timestamp: number; value: number }> }) => {
+  const [tooltip, setTooltip] = useState<{ visible: boolean; x: number; y: number; content: string }>({ 
+    visible: false, x: 0, y: 0, content: '' 
+  });
   const maxPoints = 50; // Máximo de pontos visíveis
   const visibleHistory = betHistory.slice(-maxPoints);
   
@@ -138,7 +141,17 @@ const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'
                 fill={point.type === 'win' ? "#10B981" : "#EF4444"}
                 stroke={point.type === 'win' ? "#065F46" : "#7F1D1D"}
                 strokeWidth="1"
-                className="drop-shadow-sm"
+                className="drop-shadow-sm cursor-pointer hover:r-4 transition-all"
+                onMouseEnter={(e) => {
+                  const rect = (e.target as SVGElement).getBoundingClientRect();
+                  setTooltip({
+                    visible: true,
+                    x: rect.left + window.scrollX,
+                    y: rect.top + window.scrollY - 10,
+                    content: `${point.type === 'win' ? 'Vitória' : 'Derrota'} | Aposta: R$ ${point.value.toFixed(2)} | Saldo: ${point.accumulated > 0 ? '+' : ''}${point.accumulated} | ${new Date(point.timestamp).toLocaleTimeString('pt-BR')}`
+                  });
+                }}
+                onMouseLeave={() => setTooltip(prev => ({ ...prev, visible: false }))}
               />
             ))}
             
@@ -156,6 +169,20 @@ const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'
               </text>
             )}
           </svg>
+          
+          {/* Tooltip */}
+          {tooltip.visible && (
+            <div 
+              className="fixed z-50 bg-gray-800 text-white px-2 py-1 rounded shadow-lg text-xs font-mono border border-gray-600 pointer-events-none"
+              style={{ 
+                left: `${tooltip.x}px`, 
+                top: `${tooltip.y}px`,
+                transform: 'translate(-50%, -100%)'
+              }}
+            >
+              {tooltip.content}
+            </div>
+          )}
         </div>
         
         {/* Estatísticas */}
@@ -184,6 +211,9 @@ const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'
 
 // 💰 Componente de Gráfico de Lucro
 const ProfitChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'; timestamp: number; value: number }> }) => {
+  const [tooltip, setTooltip] = useState<{ visible: boolean; x: number; y: number; content: string }>({ 
+    visible: false, x: 0, y: 0, content: '' 
+  });
   const maxPoints = 50; // Máximo de pontos visíveis
   const visibleHistory = betHistory.slice(-maxPoints);
   
@@ -289,18 +319,28 @@ const ProfitChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss';
               />
             )}
             
-            {/* Pontos */}
+                        {/* Pontos */}
             {adjustedPoints.map((point, index) => (
-                             <circle
-                 key={index}
-                 cx={point.x}
-                 cy={point.y}
-                 r="3"
-                 fill={point.type === 'win' ? "#EAB308" : "#EF4444"}
-                 stroke={point.type === 'win' ? "#CA8A04" : "#7F1D1D"}
-                 strokeWidth="1"
-                 className="drop-shadow-sm"
-               />
+              <circle
+                key={index}
+                cx={point.x}
+                cy={point.y}
+                r="3"
+                fill={point.type === 'win' ? "#EAB308" : "#EF4444"}
+                stroke={point.type === 'win' ? "#CA8A04" : "#7F1D1D"}
+                strokeWidth="1"
+                className="drop-shadow-sm cursor-pointer hover:r-4 transition-all"
+                onMouseEnter={(e) => {
+                  const rect = (e.target as SVGElement).getBoundingClientRect();
+                  setTooltip({
+                    visible: true,
+                    x: rect.left + window.scrollX,
+                    y: rect.top + window.scrollY - 10,
+                    content: `${point.type === 'win' ? 'Vitória' : 'Derrota'} | Aposta: R$ ${point.value.toFixed(2)} | ${point.type === 'win' ? 'Ganho' : 'Perda'}: R$ ${point.betProfit > 0 ? '+' : ''}${point.betProfit.toFixed(2)} | Lucro Total: R$ ${point.accumulatedProfit > 0 ? '+' : ''}${point.accumulatedProfit.toFixed(2)} | ${new Date(point.timestamp).toLocaleTimeString('pt-BR')}`
+                  });
+                }}
+                onMouseLeave={() => setTooltip(prev => ({ ...prev, visible: false }))}
+              />
             ))}
             
             {/* Valor atual */}
@@ -317,6 +357,20 @@ const ProfitChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss';
               </text>
             )}
           </svg>
+          
+          {/* Tooltip */}
+          {tooltip.visible && (
+            <div 
+              className="fixed z-50 bg-gray-800 text-white px-2 py-1 rounded shadow-lg text-xs font-mono border border-gray-600 pointer-events-none"
+              style={{ 
+                left: `${tooltip.x}px`, 
+                top: `${tooltip.y}px`,
+                transform: 'translate(-50%, -100%)'
+              }}
+            >
+              {tooltip.content}
+            </div>
+          )}
         </div>
         
         {/* Estatísticas */}
@@ -345,6 +399,9 @@ const ProfitChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss';
 
 // 📊 Componente de Gráfico de Martingale
 const MartingaleChart = ({ martingaleUsage }: { martingaleUsage: number[] }) => {
+  const [tooltip, setTooltip] = useState<{ visible: boolean; x: number; y: number; content: string }>({ 
+    visible: false, x: 0, y: 0, content: '' 
+  });
   const maxUsage = Math.max(...martingaleUsage, 1);
   
   return (
@@ -371,10 +428,20 @@ const MartingaleChart = ({ martingaleUsage }: { martingaleUsage: number[] }) => 
                 {/* Barra */}
                 <div className="w-full bg-gray-800 rounded-sm relative overflow-hidden" style={{ height: '120px' }}>
                   <div 
-                    className={`w-full absolute bottom-0 rounded-sm transition-all duration-500 ${
+                    className={`w-full absolute bottom-0 rounded-sm transition-all duration-500 cursor-pointer hover:opacity-80 ${
                       usage > 0 ? 'bg-gradient-to-t from-purple-600 to-purple-400' : 'bg-gray-700'
                     }`}
                     style={{ height: `${height}%` }}
+                    onMouseEnter={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setTooltip({
+                        visible: true,
+                        x: rect.left + rect.width / 2 + window.scrollX,
+                        y: rect.top + window.scrollY - 10,
+                        content: `Martingale M${level} | Usado: ${usage} ${usage === 1 ? 'vez' : 'vezes'} | ${((usage / martingaleUsage.reduce((sum, count) => sum + count, 0)) * 100).toFixed(1)}%`
+                      });
+                    }}
+                    onMouseLeave={() => setTooltip(prev => ({ ...prev, visible: false }))}
                   />
                   {/* Valor no topo da barra */}
                   {usage > 0 && (
@@ -407,6 +474,20 @@ const MartingaleChart = ({ martingaleUsage }: { martingaleUsage: number[] }) => 
           </div>
         </div>
       </CardContent>
+      
+      {/* Tooltip */}
+      {tooltip.visible && (
+        <div 
+          className="fixed z-50 bg-gray-800 text-white px-2 py-1 rounded shadow-lg text-xs font-mono border border-gray-600 pointer-events-none"
+          style={{ 
+            left: `${tooltip.x}px`, 
+            top: `${tooltip.y}px`,
+            transform: 'translate(-50%, -100%)'
+          }}
+        >
+          {tooltip.content}
+        </div>
+      )}
     </Card>
   );
 };

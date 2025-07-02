@@ -16,7 +16,7 @@ export const PrefetchManager = () => {
       link.crossOrigin = 'anonymous'
       document.head.appendChild(link)
       
-      console.log('🚀 Critical resources preloaded')
+
     }
 
     preloadCriticalResources()

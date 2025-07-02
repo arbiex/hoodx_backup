@@ -1,5 +1,14 @@
 'use client'
 
+/**
+ * 🧪 MODAL ATUALIZADO PARA BMG2
+ * 
+ * Modal de seleção de stake atualizado com os novos valores de martingale:
+ * - Nova sequência M1-M10: [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50]
+ * - Multiplicadores: 1x(R$20), 3x(R$60), 6x(R$120), 10x(R$200)
+ * - Bancas ideais ajustadas: 200, 600, 1200, 2000
+ */
+
 import Modal from '@/components/ui/modal'
 import { useState } from 'react'
 
@@ -10,8 +19,10 @@ interface MartingaleSequence {
 
 interface StrategyInfo {
   tip: number
+  multiplier: number
   sequence: MartingaleSequence[]
   bancaIdeal: number
+  totalInvestment: number
 }
 
 interface BlazeMegaRouletteStrategyModalProps {
@@ -27,62 +38,76 @@ export default function BlazeMegaRouletteStrategyModal({
   onConfirm, 
   loading = false 
 }: BlazeMegaRouletteStrategyModalProps) {
-  const [selectedTip, setSelectedTip] = useState<number | null>(1.5)
+  const [selectedMultiplier, setSelectedMultiplier] = useState<number>(1)
 
-  // Valor fixo para estratégia 1.5
-  const tipOptions = [1.5]
+  // Multiplicadores disponíveis - VALORES ATUALIZADOS BMG2
+  const multiplierOptions = [
+    { value: 1, baseValue: 20.00 },
+    { value: 3, baseValue: 60.00 },
+    { value: 6, baseValue: 120.00 },
+    { value: 10, baseValue: 200.00 }
+  ]
 
-  // Estratégia 1.5 com valores fixos e lucro constante
-  const getStrategy15 = (): StrategyInfo => {
-    // Sequência M1-M10 com lucro fixo de R$ 1,50
-    const sequence: MartingaleSequence[] = [
-      { level: 1, value: 1.50 },
-      { level: 2, value: 3.00 },
-      { level: 3, value: 6.00 },
-      { level: 4, value: 12.00 },
-      { level: 5, value: 24.00 },
-      { level: 6, value: 48.00 },
-      { level: 7, value: 96.00 },
-      { level: 8, value: 192.00 },
-      { level: 9, value: 384.00 },
-      { level: 10, value: 768.00 }
-    ]
+  // Nova sequência base M1-M10 - VALORES ATUALIZADOS BMG2
+  const baseSequence = [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50]
 
-    // Banca ideal: soma total dos valores
-    const somaTotal = sequence.reduce((sum, item) => sum + item.value, 0)
-    const bancaIdeal = Math.ceil(somaTotal) // R$ 1.535,00 (arredondado)
+  // Gerar estratégia com multiplicador
+  const getStrategy = (multiplier: number): StrategyInfo => {
+    const sequence: MartingaleSequence[] = baseSequence.map((value, index) => ({
+      level: index + 1,
+      value: value * multiplier
+    }))
+
+         const totalInvestment = sequence.reduce((sum, item) => sum + item.value, 0)
+     // Banca ideal com valores ajustados para nova sequência BMG2
+     const bancaIdeal = multiplier === 1 ? 200 : 
+                       multiplier === 3 ? 600 :
+                       multiplier === 6 ? 1200 :
+                       multiplier === 10 ? 2000 :
+                       Math.ceil(totalInvestment * 2.5)
 
     return {
-      tip: 1.5,
+      tip: 20.00 * multiplier, // Valor inicial M1 * multiplicador
+      multiplier,
       sequence,
-      bancaIdeal
+      bancaIdeal,
+      totalInvestment
     }
   }
 
   const handleConfirm = () => {
-    if (selectedTip) {
-  
-      onConfirm(selectedTip)
+    if (selectedMultiplier) {
+      const strategy = getStrategy(selectedMultiplier)
+      onConfirm(strategy.tip)
     }
   }
 
-  const getStrategyColor = (tipValue: number) => {
-    if (tipValue === 1.5) return 'green'
-    return 'gray'
+  const getStrategyColor = (multiplier: number) => {
+    switch (multiplier) {
+      case 1: return 'green'
+      case 3: return 'blue'
+      case 6: return 'purple'
+      case 10: return 'orange'
+      default: return 'gray'
+    }
   }
 
-  const getRiskLevel = (tipValue: number) => {
-    if (tipValue === 1.5) return 'Lucro fixo R$ 1,50'
-    return 'Estratégia desconhecida'
+  const getRiskLevel = (multiplier: number) => {
+    const option = multiplierOptions.find(opt => opt.value === multiplier)
+    const riskLabel = multiplier === 1 ? 'Conservadora' :
+                     multiplier === 3 ? 'Moderada' :
+                     multiplier === 6 ? 'Agressiva' :
+                     multiplier === 10 ? 'Máxima' : 'Desconhecida'
+    return option ? `${riskLabel}: R$ ${option.baseValue.toFixed(2)}` : 'Estratégia desconhecida'
   }
 
-  const selectedStrategyData = selectedTip ? getStrategy15() : null
+  const selectedStrategyData = selectedMultiplier ? getStrategy(selectedMultiplier) : null
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="SELECIONAR_ESTRATÉGIA"
+      title="SELECIONAR_STAKE"
       description="Escolha o valor da aposta inicial"
       type="info"
       size="sm"
@@ -91,7 +116,7 @@ export default function BlazeMegaRouletteStrategyModal({
           label: 'CONFIRMAR',
           onClick: handleConfirm,
           loading: loading,
-          disabled: !selectedTip
+          disabled: !selectedMultiplier
         },
         secondary: {
           label: 'CANCELAR',
@@ -100,67 +125,35 @@ export default function BlazeMegaRouletteStrategyModal({
       }}
     >
       <div className="space-y-4">
-        {/* Botão de estratégia única */}
+        {/* Botões de multiplicadores */}
         <div>
-          <div className="text-xs font-mono text-gray-400 mb-2">ESTRATÉGIA_DISPONÍVEL:</div>
-          <div className="flex justify-center">
-            <button
-              onClick={() => setSelectedTip(1.5)}
-              className={`p-4 rounded-lg border transition-all duration-200 text-center min-w-[200px] ${
-                selectedTip === 1.5
-                  ? 'border-green-500 bg-green-500/10 text-green-400'
-                  : 'border-gray-600 hover:border-gray-500 text-gray-300 hover:text-gray-200'
-              }`}
-            >
-              <div className="text-lg font-mono font-bold">
-                1.5
-              </div>
-              <div className="text-xs font-mono text-gray-400">
-                Lucro fixo R$ 1,50
-              </div>
-            </button>
+          <div className="grid grid-cols-2 gap-3">
+            {multiplierOptions.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setSelectedMultiplier(option.value)}
+                className={`p-4 rounded-lg border transition-all duration-200 text-center ${
+                  selectedMultiplier === option.value
+                    ? `border-${getStrategyColor(option.value)}-500 bg-${getStrategyColor(option.value)}-500/10 text-${getStrategyColor(option.value)}-400`
+                    : 'border-gray-600 hover:border-gray-500 text-gray-300 hover:text-gray-200'
+                }`}
+              >
+                <div className="text-lg font-mono font-bold">
+                  R$ {option.baseValue.toFixed(2)}
+                </div>
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Preview da estratégia selecionada */}
-        {selectedTip && selectedStrategyData && (
+        {selectedMultiplier && selectedStrategyData && (
           <div className="space-y-3">
             <div className="p-4 bg-gray-800/30 border border-gray-600 rounded-lg">
-              <div className="text-center mb-4">
+              <div className="text-center">
                 <div className="text-sm font-mono text-gray-400 mb-1">BANCA_IDEAL:</div>
-                <div className={`text-xl font-mono font-bold text-${getStrategyColor(selectedTip)}-400`}>
+                <div className={`text-xl font-mono font-bold text-${getStrategyColor(selectedMultiplier)}-400`}>
                   R$ {selectedStrategyData.bancaIdeal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </div>
-                <div className="text-xs font-mono text-gray-500">
-                  {getRiskLevel(selectedTip)} • 10 níveis de martingale
-                </div>
-              </div>
-
-              {/* Informações sobre lucro fixo */}
-              <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-                <div className="text-center">
-                  <div className="text-sm font-mono text-green-400 font-bold mb-1">
-                    LUCRO GARANTIDO
-                  </div>
-                  <div className="text-lg font-mono font-bold text-green-400">
-                    R$ 1,50
-                  </div>
-                  <div className="text-xs font-mono text-gray-400 mt-1">
-                    em qualquer nível de acerto (M1 até M10)
-                  </div>
-                </div>
-              </div>
-
-              {/* Sequência de valores */}
-              <div className="mt-3">
-                <div className="text-xs font-mono text-gray-400 mb-2">SEQUÊNCIA_MARTINGALE:</div>
-                <div className="grid grid-cols-5 gap-2 text-xs font-mono">
-                  {selectedStrategyData.sequence.map((item) => (
-                    <div key={item.level} className="text-center p-2 bg-gray-700/30 rounded border border-gray-600/30">
-                      <div className="text-gray-400">M{item.level}</div>
-                      <div className="text-green-400 font-bold">R$ {item.value.toFixed(2)}</div>
-                    </div>
-                  ))}
                 </div>
               </div>
             </div>

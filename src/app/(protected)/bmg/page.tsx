@@ -9,7 +9,9 @@ import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
 import BlazeMegaRouletteStrategyModal from '@/components/BlazeMegaRouletteStrategyModal';
-import { authenticateUserFrontend } from '@/lib/frontend-auth';
+import CreditDisplay from '@/components/CreditDisplay';
+
+import OperationsCard from '@/components/OperationsCard';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,8 +38,8 @@ export default function BMG() {
     type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' 
   }>>([]);
 
-  // Estados para últimos 5 resultados
-  const [lastFiveResults, setLastFiveResults] = useState<Array<{ 
+  // Estados para últimos 7 resultados (nova estratégia)
+  const [lastSevenResults, setLastSevenResults] = useState<Array<{ 
     number: number; 
       color: string;
     gameId: string; 
@@ -103,39 +105,7 @@ export default function BMG() {
     };
   } | null>(null);
 
-  // 📊 NOVO: Estados para histórico de sessões
-  const [sessionsHistory, setSessionsHistory] = useState<{
-    sessions: Array<{
-      id: string;
-      session_id: string;
-      started_at: string;
-      ended_at?: string;
-      total_bets: number;
-      total_wins: number;
-      total_losses: number;
-      net_profit: number;
-      win_rate: number;
-      session_status: string;
-      end_reason?: string;
-      betting_pattern?: string;
-      tip_value: number;
-      duration_seconds?: number;
-    }>;
-    totals: {
-      totalSessions: number;
-      totalBets: number;
-      totalWins: number;
-      totalLosses: number;
-      totalProfit: number;
-      overallWinRate: number;
-    };
-    currentSession?: {
-      sessionId: string;
-      startedAt: string;
-      isActive: boolean;
-    };
-  } | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
+
 
   // Estados para modal de estratégia
   const [strategyModalOpen, setStrategyModalOpen] = useState(false);
@@ -153,12 +123,37 @@ export default function BMG() {
   const operationRef = useRef<boolean>(false);
   const userIdRef = useRef<string>('');
 
-  const [userNetworkInfo, setUserNetworkInfo] = useState({
-    ip: 'Detectando...',
-    vpnDetected: false,
-    vpnStatus: 'Verificando...',
-    location: 'Detectando...'
-  });
+  // ✅ NOVO: Estado para controlar quando é seguro parar
+  const [canSafelyStop, setCanSafelyStop] = useState(true);
+
+  // 🎯 FUNÇÃO INTELIGENTE: Determina quando é seguro parar a operação
+  const checkCanSafelyStop = () => {
+    if (!isOperating || !operationActive) {
+      setCanSafelyStop(true);
+      return;
+    }
+
+    // ❌ NÃO pode parar durante:
+    // - Aguardando resultado de aposta
+    // - No meio de sequência martingale
+    // - Janela de apostas aberta + bot vai apostar
+    if (operationState?.waitingForResult || 
+        (operationState && operationState.martingaleLevel > 0) ||
+        (bettingWindow?.isOpen && operationActive)) {
+      setCanSafelyStop(false);
+      return;
+    }
+
+    // ✅ Seguro para parar - momento entre operações
+    setCanSafelyStop(true);
+  };
+
+  // 🔄 Executar verificação sempre que estados mudarem
+  useEffect(() => {
+    checkCanSafelyStop();
+  }, [isOperating, operationActive, operationState, bettingWindow]);
+
+
 
   useEffect(() => {
     checkUser();
@@ -261,15 +256,20 @@ export default function BMG() {
 
       userIdRef.current = user.id;
       
-      // ✅ NOVO: Capturar dados completos do usuário
-      const userInfo = getUserInfo();
+
       
       setOperationStatus('AUTENTICANDO...');
 
       // ✅ ETAPA 1: Buscar token da Blaze
-      console.log('🔐 [BMG] Buscando token da Blaze...');
       
-      const tokenResponse = await fetch(`/api/user/blaze-token?userId=${user.id}`);
+      const tokenResponse = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          action: 'get-blaze-token'
+        })
+      });
       const tokenData = await tokenResponse.json();
       
       if (!tokenData.success || !tokenData.token) {
@@ -278,38 +278,59 @@ export default function BMG() {
         return;
       }
       
-      console.log('✅ [BMG] Token da Blaze encontrado');
+      // ✅ ETAPA 2: Gerar tokens via Supabase Edge Function (evita erro 451)
       
-      // ✅ ETAPA 2: Autenticação frontend (replica Edge Function - IP real preservado)
-      console.log('🎯 [BMG] Executando autenticação frontend (IP real preservado)...');
-      console.log('📱 [BMG] IMPORTANTE: 100% no browser - mesma lógica da Edge Function');
+      const realBrowserHeaders = {
+        'sec-ch-ua': (navigator as any).userAgentData?.brands?.map((brand: any) => 
+          `"${brand.brand}";v="${brand.version}"`).join(', ') || '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'sec-ch-ua-mobile': (navigator as any).userAgentData?.mobile ? '?1' : '?0',
+        'sec-ch-ua-platform': `"${(navigator as any).userAgentData?.platform || 'Windows'}"`,
+        'DNT': '1',
+        'Upgrade-Insecure-Requests': '1',
+        'Pragma': 'no-cache',
+        'Cache-Control': 'no-cache',
+        'X-Requested-With': 'XMLHttpRequest'
+      };
+
+      const authResponse = await fetch('https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA'
+        },
+        body: JSON.stringify({
+          action: 'generate-tokens',
+          blazeToken: tokenData.token,
+          userAgent: navigator.userAgent,
+          acceptLanguage: navigator.language,
+          selectedCurrencyType: 'BRL',
+          realBrowserHeaders: realBrowserHeaders
+        })
+      });
+
+      if (!authResponse.ok) {
+        const errorText = await authResponse.text();
+        setOperationError(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
+        setOperationStatus('ERRO_AUTENTICAÇÃO');
+        return;
+      }
+
+      const authResult = await authResponse.json();
       
-      const frontendAuthResult = await authenticateUserFrontend(tokenData.token);
-      
-      if (!frontendAuthResult.success || !frontendAuthResult.data) {
-        const errorMsg = frontendAuthResult.error || 'Falha na autenticação frontend';
-        console.error('❌ [BMG]', errorMsg);
-        console.log('💡 [BMG] Dica: Verifique se seu token da Blaze está válido em /config');
-        
+      if (!authResult.success || !authResult.data) {
+        const errorMsg = authResult.error || 'Falha na geração de tokens via Edge Function';
         setOperationError(errorMsg);
         setOperationStatus('ERRO_AUTENTICAÇÃO');
         return;
       }
-      
-      // Salvar tokens gerados
-      setAuthTokens(frontendAuthResult.data);
-      console.log('✅ [BMG] Autenticação frontend completa (ppToken + jsessionId gerados)!');
+
+      // Preparar dados de autenticação
+      const authData = authResult.data;
+      setAuthTokens(authData);
       
       setOperationStatus('CONECTANDO...');
 
-      // ✅ ETAPA 3: Conectar usando tokens da autenticação frontend
-      console.log('📡 [BMG] Conectando usando tokens da autenticação frontend...');
-
-      if (!authTokens) {
-        setOperationError('Tokens de autenticação não disponíveis');
-        setOperationStatus('ERRO');
-        return;
-      }
+      // ✅ ETAPA 4: Conectar usando tokens gerados via Edge Function
 
       // Conectar ao WebSocket
       const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
@@ -319,21 +340,25 @@ export default function BMG() {
           userId: user.id,
           action: 'bet-connect',
           tipValue, // Passar o valor do tip para a API
-          // ✅ Usar tokens da autenticação frontend
+          // ✅ Usar tokens gerados no client-side
           authTokens: {
-            ppToken: authTokens.ppToken,
-            jsessionId: authTokens.jsessionId,
-            pragmaticUserId: authTokens.pragmaticUserId || ''
+            ppToken: authData.ppToken,
+            jsessionId: authData.jsessionId,
+            pragmaticUserId: authData.pragmaticUserId
           },
-          // ✅ Flag para evitar fallback server-side
-          forceClientSideAuth: true,
           // ✅ NOVO: Enviar dados do usuário para repasse à Pragmatic
-          userInfo: {
-            ...userInfo,
-            ip: userNetworkInfo.ip,
-            vpnDetected: userNetworkInfo.vpnDetected,
-            location: userNetworkInfo.location
-          }
+          userFingerprint: {
+            userAgent: navigator.userAgent,
+            language: navigator.language,
+            platform: (navigator as any).userAgentData?.platform || navigator.platform,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            screenResolution: `${screen.width}x${screen.height}`,
+            colorDepth: screen.colorDepth,
+            pixelRatio: window.devicePixelRatio,
+            hardwareConcurrency: navigator.hardwareConcurrency,
+            connectionType: (navigator as any).connection?.effectiveType
+          },
+
         })
       });
 
@@ -471,7 +496,7 @@ export default function BMG() {
           }
           
           setWebsocketLogs(result.data.logs || []);
-          setLastFiveResults(result.data.lastFiveResults || []);
+          setLastSevenResults(result.data.lastSevenResults || []);
           setConnectionStatus(result.data.connectionStatus || { connected: false, lastUpdate: Date.now() });
           setOperationActive(result.data.operationActive || false);
           setOperationState(result.data.operationState || null);
@@ -531,31 +556,7 @@ export default function BMG() {
     }
   };
 
-  // 📊 NOVO: Buscar histórico de sessões
-  const fetchSessionsHistory = async () => {
-    try {
-      setHistoryLoading(true);
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-          action: 'get-sessions-history'
-        })
-      });
 
-      const result = await response.json();
-
-      if (result.success) {
-        setSessionsHistory(result.data);
-      } else {
-      }
-
-    } catch (error) {
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
 
   useEffect(() => {
     if (userIdRef.current && isOperating) {
@@ -565,23 +566,7 @@ export default function BMG() {
     }
   }, [isOperating]);
 
-  // 📊 NOVO: Carregar histórico inicial e atualizar quando necessário
-  useEffect(() => {
-    if (userIdRef.current) {
-      fetchSessionsHistory();
-    }
-  }, []); // Executar apenas uma vez após carregar o usuário
 
-  // 📊 NOVO: Atualizar histórico quando operação para
-  useEffect(() => {
-    if (userIdRef.current && !isOperating && operationRef.current) {
-      // Delay para garantir que a sessão foi finalizada no backend
-      setTimeout(() => {
-        fetchSessionsHistory();
-      }, 2000);
-    }
-    operationRef.current = isOperating;
-  }, [isOperating]);
 
   useEffect(() => {
     return () => {
@@ -591,146 +576,38 @@ export default function BMG() {
   }, []);
 
   // NOVO: Controle inteligente do botão baseado no padrão E janela de apostas
-  const hasCompletePattern = lastFiveResults.length >= 5;
+  const hasCompletePattern = lastSevenResults.length >= 7;
   const canStartOperation = hasCompletePattern && bettingWindow.isOpen && !operationActive;
   
-  // IMPORTANTE: Pattern para apostas = apenas trocar cores (ordem cronológica: antigo→recente)
-  const currentPattern = lastFiveResults
-    .map((r: any) => r.color === 'R' ? 'B' : r.color === 'B' ? 'R' : r.color) // Trocar cores
-    .join('');
+  // IMPORTANTE: Verificar se é padrão de repetição válido
+  const isValidRepetitionPattern = lastSevenResults.length >= 7 && 
+    lastSevenResults[5]?.color === lastSevenResults[0]?.color && 
+    lastSevenResults[6]?.color === lastSevenResults[1]?.color;
+  
+  // Função para inverter cores (adaptada ao formato R/B do backend)
+  const invertColor = (color: string): string => {
+    if (color === 'R' || color === 'red') return 'B';
+    if (color === 'B' || color === 'black') return 'R';
+    return color; // green/G permanece inalterado
+  };
+
+  // Padrão base para apostas (primeiros 5 resultados - CORES HISTÓRICAS)
+  const basePattern = lastSevenResults.slice(0, 5).map((r: any) => r.color);
+  
+  // ✅ NOVO: Padrão invertido que será apostado (CONTRA o histórico)
+  const bettingPattern = basePattern.map(invertColor);
+  
+  // Padrão atual para exibição - MOSTRA AS CORES QUE SERÃO APOSTADAS
+  const currentPattern = bettingPattern.join('');
 
   // ✅ Debug removido para evitar re-renders infinitos
 
   // Pattern para exibição no ESTADO_OPERAÇÃO - vem da API quando operação está ativa
   const displayPattern = operationState?.pattern || currentPattern;
 
-  // Adicionar função para capturar informações do usuário
-  function getUserInfo() {
-    const ua = navigator.userAgent;
-    
-    // Detectar sistema operacional
-    let platform = 'Unknown';
-    if (ua.includes('Windows')) platform = 'Windows';
-    else if (ua.includes('Macintosh') || ua.includes('Mac OS')) platform = 'macOS';
-    else if (ua.includes('Linux')) platform = 'Linux';
-    else if (ua.includes('Android')) platform = 'Android';
-    else if (ua.includes('iPhone') || ua.includes('iPad')) platform = 'iOS';
 
-    // Detectar navegador
-    let browser = 'Unknown';
-    if (ua.includes('Chrome') && !ua.includes('Edg')) browser = 'Chrome';
-    else if (ua.includes('Firefox')) browser = 'Firefox';
-    else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
-    else if (ua.includes('Edg')) browser = 'Edge';
-    else if (ua.includes('Opera')) browser = 'Opera';
 
-    // Detectar se é mobile
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
 
-    // Detectar timezone
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-    // Detectar idioma
-    const language = navigator.language || 'pt-BR';
-
-    // Screen info
-    const screenInfo = {
-      width: screen.width,
-      height: screen.height,
-      colorDepth: screen.colorDepth
-    };
-
-    return {
-      userAgent: ua,
-      platform,
-      browser,
-      isMobile,
-      timezone,
-      language,
-      screenInfo,
-      timestamp: new Date().toISOString()
-    };
-  }
-
-  // ✅ NOVO: Detectar informações de rede do usuário
-  useEffect(() => {
-    async function detectNetworkInfo() {
-      try {
-        // Detectar IP usando múltiplas APIs
-        const ipApis = [
-          'https://api.ipify.org?format=json',
-          'https://ipapi.co/json/',
-          'https://api.myip.com'
-        ];
-
-        let detectedIP = 'Não detectado';
-        let location = 'Não detectado';
-        let vpnDetected = false;
-
-        for (const api of ipApis) {
-          try {
-            const response = await fetch(api);
-            const data = await response.json();
-            
-            if (data.ip) {
-              detectedIP = data.ip;
-              
-              // Se a API retorna informações de localização
-              if (data.city && data.country) {
-                location = `${data.city}, ${data.country}`;
-              }
-              
-              // Verificação básica de VPN (algumas APIs fornecem isso)
-              if (data.proxy === true || data.vpn === true || data.hosting === true) {
-                vpnDetected = true;
-              }
-              
-              break; // Parar no primeiro sucesso
-            }
-          } catch (error) {
-            continue;
-          }
-        }
-
-        // Verificação adicional de VPN baseada em padrões de IP
-        const vpnPatterns = [
-          /^10\./, /^172\.(1[6-9]|2[0-9]|3[0-1])\./, /^192\.168\./,
-          /^169\.254\./, /^127\./, /^::1/, /^fc00:/, /^fe80:/
-        ];
-        
-        const isPrivateIP = vpnPatterns.some(pattern => pattern.test(detectedIP));
-        
-        setUserNetworkInfo({
-          ip: detectedIP,
-          vpnDetected: vpnDetected || isPrivateIP,
-          vpnStatus: vpnDetected ? 'DETECTADA' : (isPrivateIP ? 'POSSÍVEL' : 'NÃO DETECTADA'),
-          location
-        });
-
-        // Atualizar elementos na tela
-        const ipElement = document.getElementById('user-ip');
-        const vpnElement = document.getElementById('vpn-status');
-        
-        if (ipElement) ipElement.textContent = detectedIP;
-        if (vpnElement) {
-          vpnElement.textContent = vpnDetected ? 'DETECTADA' : (isPrivateIP ? 'POSSÍVEL' : 'NÃO DETECTADA');
-          vpnElement.className = `font-mono text-sm ${
-            vpnDetected ? 'text-red-400' : (isPrivateIP ? 'text-yellow-400' : 'text-green-400')
-          }`;
-        }
-
-      } catch (error) {
-        setUserNetworkInfo({
-          ip: 'Erro na detecção',
-          vpnDetected: false,
-          vpnStatus: 'Erro na verificação',
-          location: 'Erro na detecção'
-        });
-      }
-    }
-
-    detectNetworkInfo();
-  }, []);
 
   return (
     <div className="min-h-screen bg-black text-green-400 relative overflow-hidden">
@@ -802,14 +679,7 @@ export default function BMG() {
 
           {/* Card Operação */}
           <Card className="border-blue-500/30 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
-                ⚡ OPERAÇÃO_WEBSOCKET
-              </CardTitle>
-              <CardDescription className="text-gray-400 font-mono text-xs">
-                {`// Conexão WebSocket para apostas no MegaRoulette - Sistema Simplificado`}
-              </CardDescription>
-            </CardHeader>
+
             <CardContent>
               <div className="space-y-4">
                 
@@ -834,21 +704,21 @@ export default function BMG() {
                     </span>
                   </div>
                   
-                  {isOperating && (websocketLogs.length > 0 || lastFiveResults.length > 0) && (
+                  {isOperating && (websocketLogs.length > 0 || lastSevenResults.length > 0) && (
                     <div className="text-xs font-mono text-gray-500">
-                      LOGS: {websocketLogs.length} | ÚLTIMOS_5: {lastFiveResults.length}/5
+                      LOGS: {websocketLogs.length} | ÚLTIMOS_7: {lastSevenResults.length}/7
                     </div>
                   )}
                 </div>
 
-                {/* Últimos 5 Resultados */}
-                {lastFiveResults.length > 0 && (
+                {/* Últimos 7 Resultados */}
+                {lastSevenResults.length > 0 && (
                   <div className="space-y-2">
-                    <div className="text-xs font-mono text-blue-400 font-semibold">🎯 ÚLTIMOS_5_RESULTADOS:</div>
+
                     <div className="flex gap-2 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg flex-wrap">
-                      {lastFiveResults.slice().reverse().map((result: any, index: number) => {
-                        // Calcular posição cronológica: index 0 = posição 5 (mais recente), index 4 = posição 1 (mais antigo)
-                        const cronologicalPosition = lastFiveResults.length - index;
+                      {lastSevenResults.slice().reverse().map((result: any, index: number) => {
+                        // Calcular posição cronológica: index 0 = posição 7 (mais recente), index 6 = posição 1 (mais antigo)
+                        const cronologicalPosition = lastSevenResults.length - index;
                         const baseClasses = "w-12 h-12 rounded-full flex flex-col items-center justify-center text-xs font-bold font-mono shadow-lg transition-all duration-300 hover:scale-110";
                         const colorClasses = result.color === 'R' 
                           ? 'bg-red-500 text-white shadow-red-500/50' 
@@ -865,9 +735,9 @@ export default function BMG() {
                           </div>
                         );
                       })}
-                      {lastFiveResults.length < 5 && (
-                        Array.from({ length: 5 - lastFiveResults.length }).map((_, index) => {
-                          const cronologicalPosition = 5 - lastFiveResults.length - index;
+                      {lastSevenResults.length < 7 && (
+                        Array.from({ length: 7 - lastSevenResults.length }).map((_, index) => {
+                          const cronologicalPosition = 7 - lastSevenResults.length - index;
                           return (
                             <div
                               key={`empty-${index}`}
@@ -880,52 +750,33 @@ export default function BMG() {
                         })
                       )}
                     </div>
-                    <div className="text-xs font-mono text-gray-400">
-                      Padrão para apostas: {currentPattern ? currentPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' ') : 'Aguardando...'} ({lastFiveResults.length}/5 completo)
-                    </div>
-                    {lastFiveResults.length >= 5 && (
-                      <div className="text-xs font-mono text-blue-300 bg-blue-500/10 p-2 rounded border border-blue-500/20">
-                        💡 Apostas contra padrão: {currentPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' → ')} (1=antigo → 5=recente)
+
+                    {isValidRepetitionPattern && (
+                      <div className="text-xs font-mono text-green-300 bg-green-500/10 p-2 rounded border border-green-500/20">
+                        ✅ Padrão de repetição válido: Posições 1,2 repetiram em 6,7!
                   </div>
                 )}
 
-                    {/* NOVO: Estado da janela de apostas */}
-                    {isOperating && (
-                      <div className={`text-xs font-mono p-2 rounded border ${
-                        bettingWindow.isOpen 
-                          ? 'text-green-300 bg-green-500/10 border-green-500/20' 
-                          : 'text-orange-300 bg-orange-500/10 border-orange-500/20'
-                      }`}>
-                        🎰 Janela de apostas: {bettingWindow.isOpen ? 'ABERTA' : 'FECHADA'}
-                        {bettingWindow.currentGameId && ` | Jogo: ${bettingWindow.currentGameId}`}
-                      </div>
-                    )}
+
                   </div>
                 )}
 
                 {/* Estado da Operação */}
                 {operationState && (
                   <div className="space-y-2">
-                    <div className="text-xs font-mono text-cyan-400 font-semibold">🤖 ESTADO_OPERAÇÃO:</div>
+
                     <div className="p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg space-y-1 text-xs font-mono">
                       <div className="flex justify-between">
-                        <span className="text-gray-400">Padrão Ativo:</span>
+                        <span className="text-gray-400">Apostas:</span>
                         <span className="text-cyan-400">{displayPattern ? displayPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' ') : 'N/A'}</span>
                       </div>
+                      {lastSevenResults.length >= 5 && (
                       <div className="flex justify-between">
-                        <span className="text-gray-400">Nível Atual:</span>
-                        <span className="text-cyan-400">{operationState.level + 1}/5</span>
+                          <span className="text-gray-400">Histórico:</span>
+                          <span className="text-gray-500">{basePattern.map((cor, i) => `${i+1}:${cor}`).join(' ')}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Martingale:</span>
-                        <span className="text-cyan-400">{operationState.martingaleLevel}x</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Status:</span>
-                        <span className={operationState.waitingForResult ? 'text-yellow-400' : 'text-green-400'}>
-                          {operationState.waitingForResult ? 'AGUARDANDO_RESULTADO' : 'PRONTO'}
-                        </span>
-                      </div>
+                      )}
+
                     </div>
                   </div>
                 )}
@@ -933,9 +784,13 @@ export default function BMG() {
                 {/* Logs do WebSocket */}
                 {websocketLogs.length > 0 && (
                   <div className="space-y-2">
-                    <div className="text-xs font-mono text-blue-400 font-semibold">📋 LOGS_WEBSOCKET:</div>
+
                     <div className="max-h-64 overflow-y-auto p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1">
-                      {websocketLogs.slice(0, 20).map((log, index) => (
+                      {websocketLogs.filter(log => 
+                        !log.message.includes('🎰 Janela de apostas') && 
+                        !log.message.includes('Apostas abertas') && 
+                        !log.message.includes('Apostas fechadas')
+                      ).slice(0, 20).map((log, index) => (
                         <div key={`log-${index}-${log.timestamp}`} className="text-xs font-mono flex items-start gap-2">
                           <span className="text-gray-500 text-xs">
                             {new Date(log.timestamp).toLocaleTimeString('pt-BR')}
@@ -975,12 +830,18 @@ export default function BMG() {
                   {/* Botão Principal - Começar/Parar Apostas */}
                   <Button 
                     onClick={handleOperate}
-                    disabled={operationLoading || !isConfigured}
+                    disabled={
+                      operationLoading || 
+                      !isConfigured || 
+                      (isOperating && !canSafelyStop) // ✅ NOVO: Desabilita quando operando e não é seguro parar
+                    }
                     className={`w-full font-mono ${
                       isOperating 
-                        ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30' 
+                        ? canSafelyStop
+                          ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30' // Pode parar
+                          : 'bg-gray-500/20 border border-gray-500/50 text-gray-400 cursor-not-allowed' // Não pode parar
                         : 'bg-blue-500/20 border border-blue-500/50 text-blue-400 hover:bg-blue-500/30'
-                    }`}
+                    } transition-all duration-300`}
                     variant="outline"
                   >
                     {operationLoading ? (
@@ -993,361 +854,53 @@ export default function BMG() {
                     {operationLoading 
                       ? 'CONECTANDO...' 
                       : isOperating 
-                        ? 'PARAR DE APOSTAR' 
+                        ? canSafelyStop 
+                          ? 'PARAR DE APOSTAR'
+                          : 'AGUARDE PARA PARAR'
                         : 'COMEÇAR A APOSTAR'
                     }
                   </Button>
 
-
-                </div>
-
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Card Relatório de Operações */}
-          {operationReport && (
-            <Card className="border-cyan-500/30 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-cyan-400 font-mono">
-                  📊 RELATÓRIO_OPERAÇÕES
-                </CardTitle>
-                <CardDescription className="text-gray-400 font-mono text-xs">
-                  {`// Estatísticas das operações de apostas automáticas`}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  
-                                     {/* Resumo Principal */}
-                   <div className="grid grid-cols-3 gap-4">
-                     <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-lg text-center">
-                       <div className="text-2xl font-bold text-cyan-400 font-mono">
-                        {operationReport.summary.totalBets || 0}
-                       </div>
-                      <div className="text-xs text-gray-400 font-mono">APOSTAS</div>
-                     </div>
-                     
-                     <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-center">
-                       <div className="text-2xl font-bold text-blue-400 font-mono">
-                        {operationReport.summary.winRate || 0}%
-                       </div>
-                      <div className="text-xs text-gray-400 font-mono">TAXA_ACERTO</div>
-                     </div>
-                     
-                     <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-center">
-                      <div className={`text-2xl font-bold font-mono ${
-                        (operationReport.summary.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'
-                      }`}>
-                        R$ {(operationReport.summary.profit || 0).toFixed(2)}
-                       </div>
-                       <div className="text-xs text-gray-400 font-mono">LUCRO</div>
-                     </div>
-                   </div>
-
-                  {/* Detalhes */}
-                  <div className="grid grid-cols-2 gap-4 text-sm font-mono">
-                    <div className="space-y-2">
-                                             <div className="flex justify-between">
-                         <span className="text-gray-400">Vitórias:</span>
-                        <span className="text-green-400">{operationReport.summary.wins || 0}</span>
-                       </div>
-                       <div className="flex justify-between">
-                         <span className="text-gray-400">Derrotas:</span>
-                        <span className="text-red-400">{operationReport.summary.losses || 0}</span>
-                       </div>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Iniciado:</span>
-                        <span className="text-gray-300">
-                          {new Date(operationReport.summary.startedAt).toLocaleTimeString('pt-BR')}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Botão Reset */}
-                  <Button 
-                    onClick={resetOperationReport}
-                    className="w-full font-mono bg-gray-500/20 border border-gray-500/50 text-gray-400 hover:bg-gray-500/30"
-                    variant="outline"
-                  >
-                    RESET_RELATÓRIO
-                  </Button>
-
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* 📊 NOVO: Card Histórico de Sessões */}
-          <Card className="border-purple-500/30 backdrop-blur-sm">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-purple-400 font-mono">
-                    📊 HISTÓRICO_SESSÕES
-                  </CardTitle>
-                  <CardDescription className="text-gray-400 font-mono text-xs">
-                    {`// Registro completo de todas as sessões de apostas`}
-                  </CardDescription>
-                </div>
-                <Button 
-                  onClick={fetchSessionsHistory}
-                  disabled={historyLoading}
-                  className="font-mono bg-purple-500/20 border border-purple-500/50 text-purple-400 hover:bg-purple-500/30"
-                  variant="outline"
-                  size="sm"
-                >
-                  {historyLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  ATUALIZAR
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {historyLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <RefreshCw className="h-6 w-6 animate-spin text-purple-400" />
-                  <span className="ml-2 text-purple-400 font-mono">Carregando histórico...</span>
-                </div>
-              ) : sessionsHistory ? (
-                <div className="space-y-6">
-                  
-                  {/* Totais Gerais */}
-                  <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
-                    <h3 className="text-purple-400 font-mono font-bold mb-3">TOTAIS_GERAIS</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-purple-400 font-mono">
-                          {sessionsHistory.totals.totalSessions}
-                        </div>
-                        <div className="text-xs text-gray-400 font-mono">SESSÕES</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-blue-400 font-mono">
-                          {sessionsHistory.totals.totalBets}
-                        </div>
-                        <div className="text-xs text-gray-400 font-mono">APOSTAS</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-cyan-400 font-mono">
-                          {sessionsHistory.totals.overallWinRate.toFixed(1)}%
-                        </div>
-                        <div className="text-xs text-gray-400 font-mono">TAXA_ACERTO</div>
-                      </div>
-                      <div className="text-center">
-                        <div className={`text-2xl font-bold font-mono ${
-                          sessionsHistory.totals.totalProfit >= 0 ? 'text-green-400' : 'text-red-400'
+                  {/* ✅ ESTADO VISUAL SIMPLIFICADO */}
+                  {isOperating && (
+                    <div className={`p-2 rounded-lg ${
+                      canSafelyStop 
+                        ? 'bg-green-500/10 border border-green-500/30' 
+                        : 'bg-orange-500/10 border border-orange-500/30'
+                    }`}>
+                      <div className="flex items-center gap-2 justify-center">
+                        <div className={`w-2 h-2 rounded-full ${
+                          canSafelyStop 
+                            ? 'bg-green-400' 
+                            : 'bg-orange-400 animate-pulse'
+                        }`}></div>
+                        <span className={`text-xs font-mono ${
+                          canSafelyStop 
+                            ? 'text-green-400' 
+                            : 'text-orange-400'
                         }`}>
-                          R$ {sessionsHistory.totals.totalProfit.toFixed(2)}
-                        </div>
-                        <div className="text-xs text-gray-400 font-mono">LUCRO_TOTAL</div>
-                      </div>
-                    </div>
-                    
-                    {/* Estatísticas Adicionais */}
-                    <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-purple-500/20">
-                      <div className="text-center">
-                        <div className="text-lg font-bold text-green-400 font-mono">
-                          {sessionsHistory.totals.totalWins}
-                        </div>
-                        <div className="text-xs text-gray-400 font-mono">VITÓRIAS</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-lg font-bold text-red-400 font-mono">
-                          {sessionsHistory.totals.totalLosses}
-                        </div>
-                        <div className="text-xs text-gray-400 font-mono">DERROTAS</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Sessão Atual */}
-                  {sessionsHistory.currentSession && (
-                    <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
-                      <h3 className="text-green-400 font-mono font-bold mb-2">SESSÃO_ATIVA</h3>
-                      <div className="text-sm font-mono space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-gray-400">ID:</span>
-                          <span className="text-green-400">{sessionsHistory.currentSession.sessionId.split('_')[1]}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-400">Iniciada:</span>
-                          <span className="text-gray-300">
-                            {new Date(sessionsHistory.currentSession.startedAt).toLocaleString('pt-BR')}
-                          </span>
-                        </div>
+                          {canSafelyStop ? 'Seguro para parar' : 'Em operação'}
+                        </span>
                       </div>
                     </div>
                   )}
 
-                  {/* Lista de Sessões */}
-                  <div className="space-y-3">
-                    <h3 className="text-purple-400 font-mono font-bold">HISTÓRICO_RECENTE</h3>
-                    <div className="max-h-96 overflow-y-auto space-y-2">
-                      {sessionsHistory.sessions.length > 0 ? (
-                        sessionsHistory.sessions.slice(0, 20).map((session) => (
-                          <div 
-                            key={session.id} 
-                            className="p-3 bg-gray-800/30 border border-gray-700/50 rounded-lg hover:bg-gray-800/50 transition-colors"
-                          >
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="text-purple-400 font-mono text-sm">
-                                  #{session.session_id.split('_')[1]?.slice(0, 8)}
-                                </span>
-                                <span className={`px-2 py-1 rounded text-xs font-mono ${
-                                  session.session_status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                                  session.session_status === 'active' ? 'bg-blue-500/20 text-blue-400' :
-                                  'bg-red-500/20 text-red-400'
-                                }`}>
-                                  {session.session_status.toUpperCase()}
-                                </span>
-                                {session.betting_pattern && (
-                                  <span className="px-2 py-1 bg-cyan-500/20 text-cyan-400 rounded text-xs font-mono">
-                                    {session.betting_pattern}
-                                  </span>
-                                )}
-                              </div>
-                              <div className={`text-sm font-mono font-bold ${
-                                session.net_profit >= 0 ? 'text-green-400' : 'text-red-400'
-                              }`}>
-                                R$ {session.net_profit.toFixed(2)}
-                              </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-4 gap-4 text-xs font-mono">
-                              <div>
-                                <span className="text-gray-400">Apostas:</span>
-                                <span className="text-blue-400 ml-1">{session.total_bets}</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-400">Taxa:</span>
-                                <span className="text-cyan-400 ml-1">{session.win_rate?.toFixed(1) || 0}%</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-400">Tip:</span>
-                                <span className="text-yellow-400 ml-1">R$ {session.tip_value?.toFixed(2) || 0}</span>
-                              </div>
-                              <div>
-                                <span className="text-gray-400">Duração:</span>
-                                <span className="text-gray-300 ml-1">
-                                  {session.duration_seconds ? 
-                                    `${Math.floor(session.duration_seconds / 60)}min` : 
-                                    'N/A'
-                                  }
-                                </span>
-                              </div>
-                            </div>
-                            
-                            <div className="flex justify-between items-center mt-2 text-xs">
-                              <span className="text-gray-400 font-mono">
-                                {new Date(session.started_at).toLocaleString('pt-BR')}
-                              </span>
-                              {session.end_reason && (
-                                <span className="text-gray-500 font-mono">
-                                  {session.end_reason.replace('_', ' ')}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-center py-8 text-gray-400 font-mono">
-                          Nenhuma sessão encontrada
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  
                 </div>
-              ) : (
-                <div className="text-center py-8 text-gray-400 font-mono">
-                  Clique em &quot;ATUALIZAR&quot; para carregar o histórico
-                </div>
-              )}
+
+              </div>
             </CardContent>
           </Card>
 
-          {/* Nova seção: Dados Enviados para Pragmatic */}
-          <div className="bg-gradient-to-br from-gray-900/50 to-black/50 backdrop-blur-sm rounded-xl border border-gray-700/30 p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-500/20 rounded-lg">
-                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-blue-400">BMG_DADOS_PRAGMATIC</h3>
-            </div>
-            
-            <div className="text-sm text-gray-400 mb-4">
-              // Informações do seu dispositivo repassadas para os servidores da Pragmatic
-            </div>
 
-            <div className="space-y-3">
-              {/* IP do Usuário */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">IP_ORIGEM:</span>
-                <span className="text-green-400 font-mono text-sm" id="user-ip">{userNetworkInfo.ip}</span>
-              </div>
 
-              {/* Plataforma */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">PLATAFORMA:</span>
-                <span className="text-blue-400 font-mono text-sm" id="user-platform">{typeof window !== 'undefined' ? getUserInfo().platform : 'Loading...'}</span>
-              </div>
 
-              {/* Navegador */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">NAVEGADOR:</span>
-                <span className="text-purple-400 font-mono text-sm" id="user-browser">{typeof window !== 'undefined' ? getUserInfo().browser : 'Loading...'}</span>
-              </div>
 
-              {/* Dispositivo */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">DISPOSITIVO:</span>
-                <span className="text-yellow-400 font-mono text-sm" id="user-device">
-                  {typeof window !== 'undefined' ? (getUserInfo().isMobile ? 'MOBILE' : 'DESKTOP') : 'Loading...'}
-                </span>
-              </div>
 
-              {/* Timezone */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">TIMEZONE:</span>
-                <span className="text-cyan-400 font-mono text-sm" id="user-timezone">
-                  {typeof window !== 'undefined' ? getUserInfo().timezone : 'Loading...'}
-                </span>
-              </div>
 
-              {/* User Agent */}
-              <div className="p-3 bg-gray-800/30 rounded-lg">
-                <div className="text-gray-300 mb-2">USER_AGENT:</div>
-                <div className="text-orange-400 font-mono text-xs break-all bg-gray-900/50 p-2 rounded border-l-2 border-orange-400/30" id="user-agent">
-                  {typeof window !== 'undefined' ? getUserInfo().userAgent : 'Loading...'}
-                </div>
-              </div>
-
-              {/* Status VPN */}
-              <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                <span className="text-gray-300">VPN_DETECTADA:</span>
-                <span className="text-red-400 font-mono text-sm" id="vpn-status">{userNetworkInfo.vpnStatus}</span>
-              </div>
-            </div>
-
-            <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-              <div className="flex items-center gap-2 text-amber-400 text-sm">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-                <span className="font-medium">TRANSPARÊNCIA:</span>
-              </div>
-              <div className="text-amber-300/80 text-sm mt-1">
-                Estes são os dados exatos enviados aos servidores da Pragmatic. Seu IP real é repassado para evitar bloqueios.
-              </div>
-            </div>
-          </div>
+          {/* Novos Cards dos Componentes */}
+          <OperationsCard operationReport={operationReport} />
+          
+          <CreditDisplay />
 
         </div>
       </div>

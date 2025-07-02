@@ -1,3 +1,11 @@
+/**
+ * 🧪 BOTS2 - ROUTE - VERSÃO DE TESTES
+ * 
+ * Esta é uma cópia do endpoint principal original para testes
+ * de novas funcionalidades sem interferir no sistema em produção.
+ * 
+ * API: /api/bots2/blaze/pragmatic/blaze-megarouletebr
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import WebSocket from 'ws';
 import { createClient } from '@supabase/supabase-js';
@@ -51,7 +59,7 @@ const operationState: { [userId: string]: {
   waitingForResult: boolean;
   lastGameId?: string;
   strategy: {
-    sequences: number[];           // [1.50, 3.00, 6.00, 12.50, 25.50, 51.50, 103.50, 207.50, 415.50, 831.50]
+    sequences: number[];           // [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50] - Nova estrutura personalizada
     maxMartingale: number;        // 10
 
     cycleDistribution: {          // Distribuição dos M1-M10 pelos 3 ciclos
@@ -111,10 +119,33 @@ const bettingWindowState: { [userId: string]: {
   lastUpdate: number;        // Timestamp da última atualização
 } } = {};
 
+// 📊 NOVO: Rastreamento de uso de martingale por usuário
+const martingaleUsageStats: { [userId: string]: number[] } = {};
+
+// 📊 FUNÇÃO: Registrar uso de martingale
+function recordMartingaleUsage(userId: string, martingaleLevel: number) {
+  // Inicializar array se não existir
+  if (!martingaleUsageStats[userId]) {
+    martingaleUsageStats[userId] = new Array(10).fill(0);
+  }
+  
+  // Registrar uso (martingaleLevel já está 0-indexed)
+  if (martingaleLevel >= 0 && martingaleLevel < 10) {
+    martingaleUsageStats[userId][martingaleLevel]++;
+    addWebSocketLog(userId, `📊 Registrado uso M${martingaleLevel + 1} - Total: ${martingaleUsageStats[userId][martingaleLevel]}`, 'info');
+  }
+}
+
+// 📊 FUNÇÃO: Resetar estatísticas de martingale
+function resetMartingaleUsage(userId: string) {
+  martingaleUsageStats[userId] = new Array(10).fill(0);
+  addWebSocketLog(userId, `📊 Estatísticas de martingale resetadas`, 'info');
+}
+
 // Sistema de humanização removido
 
-// Estratégia Martingale fixa
-const MARTINGALE_SEQUENCES = [1.50, 3.00, 6.00, 12.50, 25.50, 51.50, 103.50, 207.50, 415.50, 831.50];
+// Estratégia Martingale personalizada - Nova estrutura
+const MARTINGALE_SEQUENCES = [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50];
 
 // Funções de sessão simplificadas (removidas - não essenciais)
 
@@ -900,20 +931,20 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
 
     // ✅ NOVO: Calcular sequência baseada no tipValue recebido
     const calculateSequence = (baseTip: number) => {
-      const baseSequence = [1.50, 3.00, 6.00, 12.50, 25.50, 51.50, 103.50, 207.50, 415.50, 831.50];
-      const multiplier = baseTip / 1.50; // Detectar multiplicador (1x, 3x, 6x, 10x)
+      const baseSequence = [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50];
+      const multiplier = baseTip / 20.00; // Detectar multiplicador (1x, 3x, 6x, 10x) - nova base R$ 20,00
       return baseSequence.map(value => value * multiplier);
     };
 
     const strategy = {
-      sequences: calculateSequence(tipValue || 1.50),
+      sequences: calculateSequence(tipValue || 20.00),
       maxMartingale: 10
     };
     const calculatedSequence = strategy.sequences;
     
-    const multiplier = (tipValue || 1.50) / 1.50;
+    const multiplier = (tipValue || 20.00) / 20.00;
     const multiplierLabel = multiplier === 1 ? '1x' : multiplier === 3 ? '3x' : multiplier === 6 ? '6x' : multiplier === 10 ? '10x' : `${multiplier}x`;
-    addWebSocketLog(userId, `🎯 Estratégia ${multiplierLabel} (R$ ${(tipValue || 1.50).toFixed(2)}) - Sequência: [${calculatedSequence.slice(0, 3).map((v: number) => v.toFixed(2)).join(', ')}...]`, 'info');
+    addWebSocketLog(userId, `🎯 Estratégia ${multiplierLabel} (R$ ${(tipValue || 20.00).toFixed(2)}) - Sequência: [${calculatedSequence.slice(0, 3).map((v: number) => v.toFixed(2)).join(', ')}...]`, 'info');
 
     // Sistema simplificado
     
@@ -1000,6 +1031,9 @@ async function startSimpleOperation(userId: string) {
         error: 'Padrão de repetição inválido. Aguarde um padrão [1,2,3,4,5,1,2] válido.'
       });
     }
+    
+    // 📊 NOVO: Resetar estatísticas de martingale para nova operação
+    resetMartingaleUsage(userId);
     
     // Inicializar operação com nova estratégia de 3 ciclos
     operationState[userId] = {
@@ -1725,6 +1759,9 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     const cycle = Math.floor(operation.currentLevel / 5) + 1;
     const positionInCycle = (operation.currentLevel % 5) + 1;
     
+    // 📊 NOVO: Registrar uso do martingale
+    recordMartingaleUsage(userId, operation.martingaleLevel);
+    
     addWebSocketLog(userId, `🎯 APOSTA ${cycle}º CICLO POSIÇÃO ${positionInCycle} M${operation.martingaleLevel + 1}: ${colorName} (${expectedColor}) R$ ${betAmount.toFixed(2)} → Game ${gameId}`, 'success');
     addWebSocketLog(userId, `🔧 Nível: ${operation.currentLevel + 1}/10 | Martingale: M${operation.martingaleLevel + 1}/10 | Apostando CONTRA: ${operation.basePattern.join('')}`, 'info');
     
@@ -1877,6 +1914,8 @@ async function getWebSocketLogs(userId: string) {
           currentGameId: bettingWindow?.currentGameId,
           lastUpdate: bettingWindow?.lastUpdate
         },
+        // 📊 NOVO: Estatísticas de uso de martingale
+        martingaleUsage: martingaleUsageStats[userId] || new Array(10).fill(0),
         // ✅ NOVO: Status da sessão para monitoramento
         sessionStatus: sessionControl[userId] ? {
           createdAt: sessionControl[userId].createdAt,

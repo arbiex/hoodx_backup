@@ -84,11 +84,28 @@ export function useNetwork() {
         return
       }
 
-      // Buscar dados da rede do usuário
-      const { data: networkData, error: networkError } = await supabase.rpc('get_user_network', {
-        p_user_id: user.id,
-        p_limit: 100,
-        p_offset: 0
+      // Verificar se o usuário é um agente ativo
+      const { data: agentData, error: agentError } = await supabase
+        .from('agents')
+        .select('agent_code, commission_rate, is_active')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single()
+
+      if (agentError && agentError.code !== 'PGRST116') {
+        console.error('Error checking agent status:', agentError)
+        setError('Erro ao verificar status de agente')
+        return
+      }
+
+      if (!agentData) {
+        setError('Usuário não é um agente ativo')
+        return
+      }
+
+      // Buscar dados da rede do agente usando a nova função
+      const { data: networkData, error: networkError } = await supabase.rpc('get_agent_network_stats', {
+        p_user_id: user.id
       })
       
 
@@ -99,82 +116,62 @@ export function useNetwork() {
         return
       }
 
-      if (networkData) {
+      if (networkData && !networkData.error) {
         try {
-          // Validar e limpar referral_url antes de definir
-          const validReferralUrl = networkData.referral_url && 
-                                   typeof networkData.referral_url === 'string' && 
-                                   networkData.referral_url.trim() && 
-                                   networkData.referral_url.startsWith('http') 
-                                   ? networkData.referral_url.trim() 
-                                   : null
-
-          // URL base da aplicação (usar variável de ambiente ou fallback)
+          // URL base da aplicação
           const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hoodx.ai'
-          const fallbackUrl = `${baseUrl}/invite?ref=${networkData.referral_code || ''}`
+          const referralUrl = `${baseUrl}/invite?ref=${agentData.agent_code}`
 
           const referralData = {
-            referral_code: networkData.referral_code || '',
-            referral_url: validReferralUrl || fallbackUrl
+            referral_code: agentData.agent_code,
+            referral_url: referralUrl
           }
 
-          const statsData = networkData.stats || {
-            total_referrals: 0,
-            active_referrals: 0,
-            total_commissions_generated: 0,
+          const statsData = {
+            total_referrals: networkData.total_referrals || 0,
+            active_referrals: networkData.total_referrals || 0,
+            total_commissions_generated: networkData.total_commissions || 0,
             max_level: 1
           }
-          
-          let nodesData = networkData.network || []
-          
-          // FALLBACK FORÇADO: Se stats mostram indicados mas network está vazio
-          if (statsData.total_referrals > 0 && nodesData.length === 0) {
-            nodesData = [
-              {
-                user_id: 'a8fcfa6e-7948-4f38-9dcf-8b2c43d33f69',
-                email: 'ibrrrrr@gmail.com',
-                level: 1,
-                status: 'active',
-                total_commissions: 0,
-                joined_date: '2025-06-26T20:47:57.072859+00:00',
-                referral_code: 'QJ9KCLJU'
-              },
-              {
-                user_id: '00b147d9-b563-4b8a-b132-96dd42011b10',
-                email: 'intelitechbrrrrr@gmail.com',
-                level: 1,
-                status: 'active',
-                total_commissions: 0,
-                joined_date: '2025-06-26T20:06:27.982115+00:00',
-                referral_code: 'PEACP8ZL'
-              },
-              {
-                user_id: 'de8aa205-318b-4890-8731-b2463185c885',
-                email: 'teste@hoidx.ai',
-                level: 1,
-                status: 'active',
-                total_commissions: 25,
-                joined_date: '2025-06-12T03:52:29.552899+00:00',
-                referral_code: 'ZVRDT16S'
-              }
-            ]
-          }
 
-          // Usar dados diretamente sem filtros desnecessários
-          const uniqueNodes = nodesData
+          // Buscar lista de indicados do agente
+          const { data: referralsData, error: referralsError } = await supabase
+            .from('user_referrals')
+            .select(`
+              user_id,
+              created_at,
+              auth.users!user_referrals_user_id_fkey(email)
+            `)
+            .eq('sponsor_id', user.id)
+
+          let nodesData: NetworkNode[] = []
+          if (referralsData && !referralsError) {
+            nodesData = referralsData.map((ref: any) => ({
+              user_id: ref.user_id,
+              email: ref.users?.email || 'Email não disponível',
+              level: 1,
+              status: 'active' as const,
+              total_commissions: 0,
+              joined_date: ref.created_at,
+              referral_code: agentData.agent_code
+            }))
+          }
 
           setReferralInfo(referralData)
           setNetworkStats(statsData)
-          setNetworkNodes(uniqueNodes)
+          setNetworkNodes(nodesData)
         } catch (dataError) {
           console.error('Error processing network data:', dataError)
           setError(`Error processing network data: ${dataError}`)
         }
       } else {
-        // Se networkData for null/undefined, definir valores padrão
+        // Se networkData tiver erro ou for null
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hoodx.ai'
+        const referralUrl = `${baseUrl}/invite?ref=${agentData.agent_code}`
+        
         setReferralInfo({
-          referral_code: '',
-          referral_url: 'https://hoodx.ai/invite?ref='
+          referral_code: agentData.agent_code,
+          referral_url: referralUrl
         })
         setNetworkStats({
           total_referrals: 0,
@@ -193,12 +190,36 @@ export function useNetwork() {
     }
   }, [])
 
-  // Buscar saldo de comissões
+  // Buscar saldo de comissões (apenas para agentes ativos)
   const loadCommissionBalance = useCallback(async () => {
     try {
       const { supabase } = await import('@/lib/supabase')
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+
+      // Verificar se é um agente ativo
+      const { data: agentData, error: agentError } = await supabase
+        .from('agents')
+        .select('is_active')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single()
+
+      if (agentError && agentError.code !== 'PGRST116') {
+        console.error('Error checking agent status:', agentError)
+        return
+      }
+
+      if (!agentData) {
+        // Se não é agente ativo, definir saldo zero
+        setCommissionBalance({
+          commission_balance: 0,
+          total_commission_earned: 0,
+          total_commission_withdrawn: 0,
+          last_withdrawal_at: null
+        })
+        return
+      }
 
       const { data, error } = await supabase
         .from('user_credits')

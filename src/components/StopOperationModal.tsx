@@ -13,7 +13,7 @@ interface StopOperationModalProps {
 export default function StopOperationModal({ isOpen, onClose, onConfirm, loading = false }: StopOperationModalProps) {
 
   const handleConfirm = () => {
-    console.log('🛑 [STOP-OPERATION] Confirmando parada da operação')
+
     onConfirm()
   }
 

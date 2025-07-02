@@ -20,7 +20,7 @@ function ConviteContent() {
         }
       } catch (error) {
         // Erro ou não logado, permanecer na página de convite
-        console.log('Usuário não logado, permanecendo na página de convite')
+
       }
     }
 

@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -180,5 +181,3 @@ export function usePagination(totalItems: number, itemsPerPage: number = 10) {
     getPageItems
   }
 }
-
-import { useState } from 'react' 

@@ -1,3 +1,11 @@
+/**
+ * 🧪 BOTS2 - BET - VERSÃO DE TESTES
+ * 
+ * Esta é uma cópia do sistema de apostas original para testes
+ * de novas funcionalidades sem interferir no sistema em produção.
+ * 
+ * API: /api/bots2/blaze/pragmatic/blaze-megarouletebr/bet
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getBaseUrl } from '@/lib/utils';
@@ -86,7 +94,7 @@ export async function POST(request: NextRequest) {
     if (!connectionCheckResult.success) {
       return NextResponse.json({
         success: false,
-        error: `Conexão não ativa: ${connectionCheckResult.error}. Use primeiro /api/bots/blaze/pragmatic/megaroulettebrazilian com action=bet-connect`
+        error: `Conexão não ativa: ${connectionCheckResult.error}. Use primeiro /api/bots2/blaze/pragmatic/blaze-megarouletebr com action=bet-connect`
       }, { status: 400 });
     }
 
@@ -118,7 +126,7 @@ export async function POST(request: NextRequest) {
 async function checkActiveConnection(userId: string): Promise<{ success: boolean; error?: string }> {
   try {
     // Chamar a API principal para verificar logs/status da conexão
-    const response = await fetch(`${getBaseUrl()}/api/bots/blaze/pragmatic/megaroulettebrazilian`, {
+    const response = await fetch(`${getBaseUrl()}/api/bots2/blaze/pragmatic/blaze-megarouletebr`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -210,7 +218,7 @@ async function placeBetViaActiveConnection(config: {
 
         try {
           // Buscar logs da conexão ativa
-          const response = await fetch(`${getBaseUrl()}/api/bots/blaze/pragmatic/megaroulettebrazilian`, {
+          const response = await fetch(`${getBaseUrl()}/api/bots2/blaze/pragmatic/blaze-megarouletebr`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -331,7 +339,7 @@ async function placeBetViaActiveConnection(config: {
           logs.push(`📤 Enviando aposta via conexão ativa...`);
 
           // Usar a funcionalidade de aposta da API principal
-          const response = await fetch(`${getBaseUrl()}/api/bots/blaze/pragmatic/megaroulettebrazilian`, {
+          const response = await fetch(`${getBaseUrl()}/api/bots2/blaze/pragmatic/blaze-megarouletebr`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -417,7 +425,7 @@ export async function GET(request: NextRequest) {
     version: '2.0.0',
     description: 'API de apostas que utiliza conexão WebSocket ativa mantida pela API principal (route.ts)',
     integration: {
-      requires: 'Conexão WebSocket ativa via /api/bots/blaze/pragmatic/megaroulettebrazilian (action=bet-connect)',
+      requires: 'Conexão WebSocket ativa via /api/bots2/blaze/pragmatic/blaze-megarouletebr (action=bet-connect)',
       benefits: [
         'Reutiliza conexão existente (mais eficiente)',
         'Não precisa reautenticar',
@@ -427,9 +435,9 @@ export async function GET(request: NextRequest) {
       ]
     },
     usage: {
-      step1: 'POST /api/bots/blaze/pragmatic/megaroulettebrazilian (action=bet-connect) - Estabelecer conexão',
-      step2: 'POST /api/bots/blaze/pragmatic/megaroulettebrazilian/bet - Fazer apostas usando conexão ativa',
-      endpoint: 'POST /api/bots/blaze/pragmatic/megaroulettebrazilian/bet',
+      step1: 'POST /api/bots2/blaze/pragmatic/blaze-megarouletebr (action=bet-connect) - Estabelecer conexão',
+      step2: 'POST /api/bots2/blaze/pragmatic/blaze-megarouletebr/bet - Fazer apostas usando conexão ativa',
+      endpoint: 'POST /api/bots2/blaze/pragmatic/blaze-megarouletebr/bet',
       body: {
         userId: 'string (obrigatório) - ID ou email do usuário',
         amount: 'number (obrigatório) - Valor da aposta (mínimo R$ 0,50)',

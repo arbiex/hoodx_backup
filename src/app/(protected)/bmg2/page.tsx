@@ -1,11 +1,19 @@
+/**
+ * 🧪 BMG2 - VERSÃO DE TESTES
+ * 
+ * Esta é uma cópia da página BMG original para testar novas funcionalidades
+ * sem interferir no sistema em produção.
+ * 
+ * API: /api/bots2/blaze/pragmatic/blaze-megarouletebr
+ * Página: /bmg2
+ */
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, Square, RefreshCw, Zap, Key, Settings } from 'lucide-react';
+import { Play, Square, RefreshCw, Zap, Key, Settings, BarChart3 } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
@@ -19,11 +27,241 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function BlazeMegaRouletteBR() {
+// 📈 Componente de Gráfico de Linha de Apostas
+const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'; timestamp: number; value: number }> }) => {
+  const maxPoints = 50; // Máximo de pontos visíveis
+  const visibleHistory = betHistory.slice(-maxPoints);
+  
+  if (visibleHistory.length === 0) {
+    return (
+      <Card className="bg-gray-900/50 border-blue-500/30">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-blue-400" />
+            <CardTitle className="text-sm font-mono text-blue-400">
+              GRÁFICO_APOSTAS
+            </CardTitle>
+          </div>
+          <CardDescription className="text-xs font-mono text-gray-400">
+            Histórico de vitórias e derrotas em tempo real
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="h-40 flex items-center justify-center border border-gray-700/50 rounded-lg">
+            <span className="text-xs font-mono text-gray-500">Aguardando apostas...</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+  
+  const chartWidth = 400;
+  const chartHeight = 120;
+  const padding = 20;
+  
+  // Calcular valor acumulado para cada ponto
+  let accumulated = 0;
+  const points = visibleHistory.map((bet, index) => {
+    accumulated += bet.type === 'win' ? 1 : -1;
+    return {
+      x: (index / Math.max(visibleHistory.length - 1, 1)) * (chartWidth - 2 * padding) + padding,
+      y: chartHeight / 2 - (accumulated * 8), // 8px por unidade de diferença
+      accumulated,
+      ...bet
+    };
+  });
+  
+  // Calcular limites para centralizar o gráfico
+  const minY = Math.min(...points.map(p => p.y));
+  const maxY = Math.max(...points.map(p => p.y));
+  const centerY = (minY + maxY) / 2;
+  const adjustedPoints = points.map(p => ({
+    ...p,
+    y: p.y - centerY + chartHeight / 2
+  }));
+  
+  // Criar path da linha
+  const pathData = adjustedPoints.reduce((path, point, index) => {
+    return path + (index === 0 ? `M ${point.x} ${point.y}` : ` L ${point.x} ${point.y}`);
+  }, '');
+  
+  const currentValue = points[points.length - 1]?.accumulated || 0;
+  const wins = betHistory.filter(b => b.type === 'win').length;
+  const losses = betHistory.filter(b => b.type === 'loss').length;
+  
+  return (
+    <Card className="bg-gray-900/50 border-blue-500/30">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-blue-400" />
+          <CardTitle className="text-sm font-mono text-blue-400">
+            GRÁFICO_APOSTAS
+          </CardTitle>
+        </div>
+        <CardDescription className="text-xs font-mono text-gray-400">
+          Histórico de vitórias e derrotas em tempo real
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="relative">
+          {/* SVG do gráfico */}
+          <svg width={chartWidth} height={chartHeight} className="border border-gray-700/50 rounded-lg bg-gray-800/30">
+            {/* Linha central de referência */}
+            <line 
+              x1={padding} 
+              y1={chartHeight / 2} 
+              x2={chartWidth - padding} 
+              y2={chartHeight / 2}
+              stroke="#4B5563" 
+              strokeDasharray="2,2" 
+              strokeWidth="1"
+            />
+            
+            {/* Linha do gráfico */}
+            {adjustedPoints.length > 1 && (
+              <path
+                d={pathData}
+                fill="none"
+                stroke={currentValue >= 0 ? "#10B981" : "#EF4444"}
+                strokeWidth="2"
+                className="drop-shadow-sm"
+              />
+            )}
+            
+            {/* Pontos */}
+            {adjustedPoints.map((point, index) => (
+              <circle
+                key={index}
+                cx={point.x}
+                cy={point.y}
+                r="3"
+                fill={point.type === 'win' ? "#10B981" : "#EF4444"}
+                stroke={point.type === 'win' ? "#065F46" : "#7F1D1D"}
+                strokeWidth="1"
+                className="drop-shadow-sm"
+              />
+            ))}
+            
+            {/* Valor atual */}
+            {adjustedPoints.length > 0 && (
+              <text
+                x={adjustedPoints[adjustedPoints.length - 1].x + 10}
+                y={adjustedPoints[adjustedPoints.length - 1].y + 5}
+                fill={currentValue >= 0 ? "#10B981" : "#EF4444"}
+                fontSize="12"
+                fontFamily="monospace"
+                fontWeight="bold"
+              >
+                {currentValue > 0 ? '+' : ''}{currentValue}
+              </text>
+            )}
+          </svg>
+        </div>
+        
+        {/* Estatísticas */}
+        <div className="mt-3 pt-3 border-t border-gray-700/50">
+          <div className="grid grid-cols-3 gap-4 text-xs font-mono">
+            <div className="text-center">
+              <div className="text-green-400 font-bold">{wins}</div>
+              <div className="text-gray-400">Vitórias</div>
+            </div>
+            <div className="text-center">
+              <div className="text-red-400 font-bold">{losses}</div>
+              <div className="text-gray-400">Derrotas</div>
+            </div>
+            <div className="text-center">
+              <div className={`font-bold ${currentValue >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {currentValue > 0 ? '+' : ''}{currentValue}
+              </div>
+              <div className="text-gray-400">Saldo</div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+// 📊 Componente de Gráfico de Martingale
+const MartingaleChart = ({ martingaleUsage }: { martingaleUsage: number[] }) => {
+  const maxUsage = Math.max(...martingaleUsage, 1);
+  
+  return (
+    <Card className="bg-gray-900/50 border-purple-500/30">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-purple-400" />
+          <CardTitle className="text-sm font-mono text-purple-400">
+            CONSUMO_MARTINGALE
+          </CardTitle>
+        </div>
+        <CardDescription className="text-xs font-mono text-gray-400">
+          Frequência de uso dos níveis M1-M10
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="flex items-end justify-between gap-1 h-32">
+          {martingaleUsage.map((usage, index) => {
+            const height = maxUsage > 0 ? (usage / maxUsage) * 100 : 0;
+            const level = index + 1;
+            
+            return (
+              <div key={level} className="flex flex-col items-center gap-1 flex-1">
+                {/* Barra */}
+                <div className="w-full bg-gray-800 rounded-sm relative overflow-hidden" style={{ height: '120px' }}>
+                  <div 
+                    className={`w-full absolute bottom-0 rounded-sm transition-all duration-500 ${
+                      usage > 0 ? 'bg-gradient-to-t from-purple-600 to-purple-400' : 'bg-gray-700'
+                    }`}
+                    style={{ height: `${height}%` }}
+                  />
+                  {/* Valor no topo da barra */}
+                  {usage > 0 && (
+                    <div className="absolute top-1 left-1/2 transform -translate-x-1/2">
+                      <span className="text-xs font-mono text-white font-bold">
+                        {usage}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Label */}
+                <span className="text-xs font-mono text-gray-400">
+                  M{level}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        
+        {/* Estatísticas resumidas */}
+        <div className="mt-3 pt-3 border-t border-gray-700/50">
+          <div className="flex justify-between text-xs font-mono">
+            <span className="text-gray-400">
+              Total: <span className="text-purple-400">{martingaleUsage.reduce((sum, count) => sum + count, 0)}</span>
+            </span>
+            <span className="text-gray-400">
+              Máx: <span className="text-purple-400">M{martingaleUsage.findIndex(count => count === maxUsage) + 1}</span>
+            </span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+export default function BMG() {
   // Estados básicos
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ✅ NOVO: Estado para tokens de autenticação
+  const [authTokens, setAuthTokens] = useState<{
+    ppToken: string;
+    jsessionId: string;
+    pragmaticUserId?: string;
+  } | null>(null);
 
   // Estados para WebSocket logs
   const [websocketLogs, setWebsocketLogs] = useState<Array<{ 
@@ -32,12 +270,24 @@ export default function BlazeMegaRouletteBR() {
     type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' 
   }>>([]);
 
-  // Estados para últimos 7 resultados (nova estratégia de repetição)
+  // Estados para últimos 7 resultados (nova estratégia)
   const [lastSevenResults, setLastSevenResults] = useState<Array<{ 
     number: number; 
-    color: string;
+      color: string;
     gameId: string; 
     timestamp: number 
+  }>>([]);
+
+  // 📊 NOVO: Estado para rastreamento de uso do martingale
+  const [martingaleUsage, setMartingaleUsage] = useState<number[]>(new Array(10).fill(0));
+
+  // 📈 NOVO: Estado para rastreamento do histórico de apostas
+  const [betHistory, setBetHistory] = useState<Array<{ 
+    type: 'win' | 'loss'; 
+    timestamp: number; 
+    value: number;
+    gameId?: string;
+    martingaleLevel?: number;
   }>>([]);
 
   // Estados da operação
@@ -102,7 +352,6 @@ export default function BlazeMegaRouletteBR() {
   // Estados para modal de estratégia
   const [strategyModalOpen, setStrategyModalOpen] = useState(false);
   const [strategyLoading, setStrategyLoading] = useState(false);
-  const [tutorialModalOpen, setTutorialModalOpen] = useState(false);
   const [selectedTipValue, setSelectedTipValue] = useState<number | null>(null);
 
   // NOVO: Estado da janela de apostas
@@ -116,72 +365,76 @@ export default function BlazeMegaRouletteBR() {
   const operationRef = useRef<boolean>(false);
   const userIdRef = useRef<string>('');
 
-  const [userNetworkInfo, setUserNetworkInfo] = useState({
-    ip: 'Detectando...',
-    vpnDetected: false,
-    vpnStatus: 'Verificando...',
-    location: 'Detectando...'
-  });
-
-
-
-  // NOVO: Estados para dados reais do usuário
-  const [userFingerprint, setUserFingerprint] = useState<{
-    userAgent: string;
-    language: string;
-    languages: string[];
-    platform: string;
-    timezone: string;
-    screenResolution: string;
-    colorDepth: number;
-    pixelRatio: number;
-    cookieEnabled: boolean;
-    doNotTrack: string | null;
-    referrer: string;
-    viewport: string;
-    connectionType?: string;
-    hardwareConcurrency?: number;
-    webdriver: boolean | undefined;
-    maxTouchPoints: number;
-    vendor: string;
-    product: string;
-    oscpu: string;
-    buildID: string;
-    deviceMemory: number | undefined;
-    connectionDownlink: number | undefined;
-    connectionRtt: number | undefined;
-    connectionSaveData: boolean | undefined;
-    canvasFingerprint: string;
-    webglFingerprint: string;
-    fontFingerprint: string;
-    audioFingerprint: string;
-    performanceTiming: {
-      loadTime: number;
-      domReadyTime: number;
-      connectTime: number;
-      requestTime: number;
-    } | string;
-  } | null>(null);
-
-  useEffect(() => {
-    checkUser();
-    checkBlazeConfiguration();
-  }, []);
-
-  // Removido: Sistema complexo de operações ativas removido
-
-  // ✅ NOVO: Sistema simples - controla dados da operação
-  const [lastSavedData, setLastSavedData] = useState<{
-    totalBets: number;
-    netProfit: number;
-  } | null>(null);
-  const [operationStarted, setOperationStarted] = useState(false);
-
   // ✅ NOVO: Estado para controlar quando é seguro parar
   const [canSafelyStop, setCanSafelyStop] = useState(true);
 
+  // 📊 FUNÇÃO SIMPLIFICADA: Agora os dados vêm diretamente da API
+  const processMartingaleLogs = (logs: any[]) => {
+    // Função mantida para compatibilidade, mas os dados principais vêm da API
+    // Pode ser usada para processamento adicional se necessário
+  };
+
+  // 🔄 NOVA FUNÇÃO: Resetar estatísticas de martingale quando operação iniciar
+  const resetMartingaleStats = () => {
+    setMartingaleUsage(new Array(10).fill(0));
+  };
+
+  // 🔄 NOVA FUNÇÃO: Resetar histórico de apostas
+  const resetBetHistory = () => {
+    setBetHistory([]);
+  };
+
+  // 📈 NOVA FUNÇÃO: Processar logs para identificar vitórias e derrotas
+  const processBetResults = (logs: any[]) => {
+    // Procurar por logs específicos de vitória e derrota do backend
+    const resultLogs = logs.filter(log => 
+      log.message.includes('✅ VITÓRIA M') || 
+      log.message.includes('❌ DERROTA M')
+    );
+
+    resultLogs.forEach(log => {
+      const isWin = log.message.includes('✅ VITÓRIA M');
+      const isLoss = log.message.includes('❌ DERROTA M');
+
+      if (isWin || isLoss) {
+        // Extrair informações específicas das mensagens do backend
+        // Exemplo: "✅ VITÓRIA M3! Apostou Vermelho R$ 21.00 → Veio Vermelho"
+        // Exemplo: "❌ DERROTA M2! Apostou Preto R$ 20.00 → Veio Vermelho"
+        
+        const gameIdMatch = log.message.match(/Game[:\s]+(\d+)/i);
+        const martingaleLevelMatch = log.message.match(/M(\d+)!/);
+        const valueMatch = log.message.match(/R\$\s*([\d,]+\.?\d*)/);
+        
+        // Criar identificador único baseado no timestamp e nível de martingale
+        const uniqueId = `${log.timestamp || Date.now()}-${martingaleLevelMatch?.[1] || 'unknown'}`;
+
+        const newBet = {
+          type: isWin ? 'win' as const : 'loss' as const,
+          timestamp: log.timestamp || Date.now(),
+          value: valueMatch ? parseFloat(valueMatch[1].replace(',', '')) : 0,
+          gameId: gameIdMatch ? gameIdMatch[1] : uniqueId,
+          martingaleLevel: martingaleLevelMatch ? parseInt(martingaleLevelMatch[1]) : undefined
+        };
+
+        // Verificar se já existe este resultado no histórico (evitar duplicatas)
+        setBetHistory(prev => {
+          const exists = prev.some(bet => 
+            Math.abs(bet.timestamp - newBet.timestamp) < 1000 && // Mesmo segundo
+            bet.martingaleLevel === newBet.martingaleLevel && // Mesmo nível
+            bet.type === newBet.type // Mesmo resultado
+          );
+          
+          if (!exists) {
+            return [...prev, newBet];
+          }
+          return prev;
+        });
+      }
+    });
+  };
+
   // 🎯 FUNÇÃO INTELIGENTE: Determina quando é seguro parar a operação
-  const checkCanSafelyStop = useCallback(() => {
+  const checkCanSafelyStop = () => {
     if (!isOperating || !operationActive) {
       setCanSafelyStop(true);
       return;
@@ -200,14 +453,17 @@ export default function BlazeMegaRouletteBR() {
 
     // ✅ Seguro para parar - momento entre operações
     setCanSafelyStop(true);
-  }, [isOperating, operationActive, operationState, bettingWindow]);
+  };
 
   // 🔄 Executar verificação sempre que estados mudarem
   useEffect(() => {
     checkCanSafelyStop();
-  }, [checkCanSafelyStop]);
+  }, [isOperating, operationActive, operationState, bettingWindow]);
 
-
+  useEffect(() => {
+    checkUser();
+    checkBlazeConfiguration();
+  }, []);
 
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -215,8 +471,7 @@ export default function BlazeMegaRouletteBR() {
       setUserEmail(user.email);
       userIdRef.current = user.id;
       
-
-      setTimeout(() => checkInitialServerStatus(), 500); // Delay pequeno para garantir que o estado seja atualizado
+      // DEBUG: Log detalhado do usuário removido
     }
   };
 
@@ -292,214 +547,6 @@ export default function BlazeMegaRouletteBR() {
     }
   };
 
-  // NOVO: Função para capturar fingerprint real do navegador
-  const captureUserFingerprint = useCallback(() => {
-    try {
-      // ✅ CORRIGIDO: Garantir que todos os dados sejam capturados corretamente
-      const fingerprint = {
-        userAgent: navigator.userAgent || 'unknown',
-        language: navigator.language || 'pt-BR',
-        languages: navigator.languages ? Array.from(navigator.languages) : [navigator.language || 'pt-BR'],
-        platform: navigator.platform || 'unknown',
-        timezone: (() => {
-          try {
-            return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
-          } catch {
-            return 'America/Sao_Paulo';
-          }
-        })(),
-        screenResolution: (() => {
-          try {
-            return `${screen.width}x${screen.height}` || '1920x1080';
-          } catch {
-            return '1920x1080';
-          }
-        })(),
-        colorDepth: screen.colorDepth || 24,
-        pixelRatio: window.devicePixelRatio || 1,
-        cookieEnabled: navigator.cookieEnabled !== undefined ? navigator.cookieEnabled : true,
-        doNotTrack: navigator.doNotTrack || null,
-        referrer: document.referrer || '',
-        viewport: `${window.innerWidth}x${window.innerHeight}` || '1920x1080',
-        connectionType: (navigator as any).connection?.effectiveType || 'unknown',
-        hardwareConcurrency: navigator.hardwareConcurrency || 4,
-        // ✅ NOVOS: Dados adicionais para disfarce mais realista
-        webdriver: (navigator as any).webdriver || false,
-        maxTouchPoints: navigator.maxTouchPoints || 0,
-        vendor: (navigator as any).vendor || 'Google Inc.',
-        product: (navigator as any).product || 'Gecko',
-        oscpu: (navigator as any).oscpu || 'unknown',
-        buildID: (navigator as any).buildID || 'unknown',
-        // Informações de memória (se disponível)
-        deviceMemory: (navigator as any).deviceMemory || 8,
-        // Informações de conexão detalhadas
-        connectionDownlink: (navigator as any).connection?.downlink || 10,
-        connectionRtt: (navigator as any).connection?.rtt || 100,
-        connectionSaveData: (navigator as any).connection?.saveData || false,
-        // ✅ SIMPLIFICADO: Fingerprints básicos (evitar problemas)
-        canvasFingerprint: (() => {
-          try {
-            return generateCanvasFingerprint();
-          } catch {
-            return 'unavailable';
-          }
-        })(),
-        webglFingerprint: (() => {
-          try {
-            return generateWebGLFingerprint();
-          } catch {
-            return 'unavailable';
-          }
-        })(),
-        fontFingerprint: (() => {
-          try {
-            return generateFontFingerprint();
-          } catch {
-            return 'basic-fonts';
-          }
-        })(),
-        audioFingerprint: (() => {
-          try {
-            return generateAudioFingerprint();
-          } catch {
-            return 'unavailable';
-          }
-        })(),
-        performanceTiming: (() => {
-          try {
-            return getPerformanceTiming();
-          } catch {
-            return 'unavailable';
-          }
-        })()
-      };
-      
-      setUserFingerprint(fingerprint);
-      return fingerprint;
-    } catch (error) {
-      // Retornar dados básicos mesmo em caso de erro
-      return {
-        userAgent: navigator.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-        language: navigator.language || 'pt-BR',
-        platform: navigator.platform || 'MacIntel',
-        timezone: 'America/Sao_Paulo',
-        screenResolution: '1920x1080'
-      };
-    }
-     }, []);
-
-  // ✅ NOVO: Gerar Canvas fingerprint
-  const generateCanvasFingerprint = useCallback(() => {
-    try {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return 'unsupported';
-      
-      canvas.width = 280;
-      canvas.height = 60;
-      
-      ctx.textBaseline = 'top';
-      ctx.font = '14px Arial';
-      ctx.fillStyle = '#f60';
-      ctx.fillRect(125, 1, 62, 20);
-      ctx.fillStyle = '#069';
-      ctx.fillText('HoodX 🎰 Blaze', 2, 15);
-      ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
-      ctx.fillText('Mega Roulette BR', 4, 45);
-      
-      return canvas.toDataURL().slice(-50); // Últimos 50 chars
-    } catch (error) {
-      return 'error';
-    }
-  }, []);
-
-  // ✅ NOVO: Gerar WebGL fingerprint
-  const generateWebGLFingerprint = useCallback(() => {
-    try {
-      const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      if (!gl) return 'unsupported';
-      
-      const webgl = gl as WebGLRenderingContext;
-      const renderer = webgl.getParameter(webgl.RENDERER);
-      const vendor = webgl.getParameter(webgl.VENDOR);
-      
-      return `${vendor}|${renderer}`.slice(0, 100);
-    } catch (error) {
-      return 'error';
-    }
-  }, []);
-
-  // ✅ NOVO: Gerar Font fingerprint (sample)
-  const generateFontFingerprint = useCallback(() => {
-    try {
-      const fonts = ['Arial', 'Helvetica', 'Times', 'Courier', 'Verdana', 'Georgia', 'Palatino', 'Garamond', 'Comic Sans MS', 'Trebuchet MS', 'Arial Black', 'Impact'];
-      const availableFonts = fonts.filter(font => {
-        const span = document.createElement('span');
-        span.innerHTML = 'mmmmmmmmlli';
-        span.style.fontSize = '72px';
-        span.style.fontFamily = font;
-        document.body.appendChild(span);
-        const width = span.offsetWidth;
-        document.body.removeChild(span);
-        return width > 0;
-      });
-      return availableFonts.join(',').slice(0, 100);
-    } catch (error) {
-      return 'error';
-    }
-  }, []);
-
-  // ✅ NOVO: Gerar Audio fingerprint
-  const generateAudioFingerprint = useCallback(() => {
-    try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const analyser = audioContext.createAnalyser();
-      const gain = audioContext.createGain();
-      
-      oscillator.type = 'triangle';
-      oscillator.frequency.setValueAtTime(10000, audioContext.currentTime);
-      
-      gain.gain.setValueAtTime(0, audioContext.currentTime);
-      oscillator.connect(analyser);
-      analyser.connect(gain);
-      gain.connect(audioContext.destination);
-      
-      oscillator.start(0);
-      oscillator.stop(audioContext.currentTime + 0.1);
-      
-      const frequencyData = new Float32Array(analyser.frequencyBinCount);
-      analyser.getFloatFrequencyData(frequencyData);
-      
-      return frequencyData.slice(0, 10).join(',').slice(0, 50);
-    } catch (error) {
-      return 'unsupported';
-    }
-  }, []);
-
-  // ✅ NOVO: Obter Performance timing
-  const getPerformanceTiming = useCallback(() => {
-    try {
-      if (!window.performance || !window.performance.timing) return 'unsupported';
-      
-      const timing = window.performance.timing;
-      return {
-        loadTime: timing.loadEventEnd - timing.navigationStart,
-        domReadyTime: timing.domContentLoadedEventEnd - timing.navigationStart,
-        connectTime: timing.connectEnd - timing.connectStart,
-        requestTime: timing.responseEnd - timing.requestStart
-      };
-    } catch (error) {
-      return 'error';
-    }
-  }, []);
-
-  // NOVO: Capturar fingerprint na inicialização
-  useEffect(() => {
-    captureUserFingerprint();
-  }, [captureUserFingerprint]);
-
   // Função para iniciar operação com tip específico
   const startOperation = async (tipValue: number) => {
     setOperationLoading(true);
@@ -512,14 +559,15 @@ export default function BlazeMegaRouletteBR() {
         return;
       }
 
-      // Capturar dados atuais do navegador
-      const currentFingerprint = captureUserFingerprint();
+      userIdRef.current = user.id;
+      
+
       
       setOperationStatus('AUTENTICANDO...');
 
       // ✅ ETAPA 1: Buscar token da Blaze
       
-      const tokenResponse = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+      const tokenResponse = await fetch('/api/bots2/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -583,58 +631,66 @@ export default function BlazeMegaRouletteBR() {
 
       // Preparar dados de autenticação
       const authData = authResult.data;
+      setAuthTokens(authData);
       
       setOperationStatus('CONECTANDO...');
 
-      // ✅ ETAPA 3: Conectar usando tokens gerados via Edge Function
+      // ✅ ETAPA 4: Conectar usando tokens gerados via Edge Function
 
       // Conectar ao WebSocket
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bots2/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: user.id,
           action: 'bet-connect',
-          tipValue: tipValue,
-          // ✅ Usar tokens gerados via Edge Function
+          tipValue, // Passar o valor do tip para a API
+          // ✅ Usar tokens gerados no client-side
           authTokens: {
             ppToken: authData.ppToken,
             jsessionId: authData.jsessionId,
             pragmaticUserId: authData.pragmaticUserId
           },
-          // Enviar fingerprint completo
-          userFingerprint: currentFingerprint,
-          clientHeaders: {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': navigator.language + ',' + navigator.languages.slice(1, 3).join(',') + ';q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'User-Agent': navigator.userAgent,
-            'X-User-Timezone': currentFingerprint?.timezone,
-            'X-User-Resolution': currentFingerprint?.screenResolution,
-            'X-User-Language': navigator.language,
-            'X-User-Platform': navigator.platform
+          // ✅ NOVO: Enviar dados do usuário para repasse à Pragmatic
+          userFingerprint: {
+            userAgent: navigator.userAgent,
+            language: navigator.language,
+            platform: (navigator as any).userAgentData?.platform || navigator.platform,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            screenResolution: `${screen.width}x${screen.height}`,
+            colorDepth: screen.colorDepth,
+            pixelRatio: window.devicePixelRatio,
+            hardwareConcurrency: navigator.hardwareConcurrency,
+            connectionType: (navigator as any).connection?.effectiveType
           },
-          clientMetadata: {
-            timestamp: Date.now(),
-            sessionId: crypto.getRandomValues(new Uint32Array(1))[0].toString(16),
-            browserFingerprint: currentFingerprint
-          }
+
         })
       });
 
       const result = await response.json();
 
       if (!result.success) {
-        // Se falhou a conexão, não precisa finalizar histórico (ainda não foi criado)
-        setOperationError(`Erro na conexão WebSocket: ${result.error}`);
+        let errorMessage = `Erro na conexão WebSocket: ${result.error}`;
+        
+        // Tratamento específico para token expirado
+        if (result.needsTokenUpdate) {
+          errorMessage = result.error + ' Clique aqui para configurar.';
+          setAlertMessage({
+            type: 'error',
+            message: errorMessage
+          });
+          
+          // Auto redirect para config após 3 segundos
+          setTimeout(() => {
+            window.location.href = '/config';
+          }, 5000);
+        }
+        
+        setOperationError(errorMessage);
         setOperationStatus('ERRO');
         return;
       }
 
-      // Operação iniciada com sucesso
-      setOperationStarted(true);
       
       setIsOperating(true);
       operationRef.current = true;
@@ -644,9 +700,14 @@ export default function BlazeMegaRouletteBR() {
       // Iniciar monitoramento
       monitoringRef.current = true;
       startMonitoring();
+      
+      // 📊 NOVO: Resetar estatísticas de martingale para nova operação
+      resetMartingaleStats();
+      
+      // 📈 NOVO: Resetar histórico de apostas para nova operação
+      resetBetHistory();
 
     } catch (error) {
-      // Se houve erro, não precisa finalizar histórico (ainda não foi criado)
       setOperationError('Erro inesperado na conexão');
       setOperationStatus('ERRO');
     } finally {
@@ -659,8 +720,6 @@ export default function BlazeMegaRouletteBR() {
     try {
       setStrategyLoading(true);
       setSelectedTipValue(tipValue);
-      
-
       
       // Fechar modal de estratégia
       setStrategyModalOpen(false);
@@ -682,18 +741,16 @@ export default function BlazeMegaRouletteBR() {
       try {
         setOperationLoading(true);
         
-
-
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-          action: 'stop-operation'
-        })
-      });
-
-      const result = await response.json();
+        const response = await fetch('/api/bots2/blaze/pragmatic/blaze-megarouletebr', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    userId: userIdRef.current,
+            action: 'stop-operation'
+                  })
+                });
+                
+        const result = await response.json();
 
         if (result.success) {
           setIsOperating(false);
@@ -705,19 +762,17 @@ export default function BlazeMegaRouletteBR() {
           // Parar monitoramento
           monitoringRef.current = false;
           setError(null);
-          setOperationStarted(false); // Reset para próxima operação
-          setLastSavedData(null);
-
+          
           setOperationSuccess('Operação encerrada com sucesso');
           setTimeout(() => setOperationSuccess(null), 3000);
           } else {
           setOperationError(`Erro ao parar operação: ${result.error}`);
         }
-    } catch (error: any) {
+      } catch (error: any) {
         setOperationError('Erro inesperado ao parar operação');
-    } finally {
+      } finally {
         setOperationLoading(false);
-    }
+      }
       return;
     }
 
@@ -732,7 +787,7 @@ export default function BlazeMegaRouletteBR() {
     
     while (monitoringRef.current) {
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bots2/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -744,7 +799,13 @@ export default function BlazeMegaRouletteBR() {
       const result = await response.json();
 
         if (result.success && result.data) {
-
+          // DEBUG: Log dos dados recebidos (apenas primeira vez ou mudanças)
+          const currentLogsCount = result.data.logs?.length || 0;
+          const previousLogsCount = websocketLogs.length;
+          
+          if (currentLogsCount !== previousLogsCount) {
+            // DEBUG: Logs atualizados
+          }
           
           setWebsocketLogs(result.data.logs || []);
           setLastSevenResults(result.data.lastSevenResults || []);
@@ -753,28 +814,28 @@ export default function BlazeMegaRouletteBR() {
           setOperationState(result.data.operationState || null);
           // NOVO: Capturar estado da janela de apostas
           setBettingWindow(result.data.bettingWindow || { isOpen: false });
-          
-          // Sistema simplificado - dados salvos automaticamente via useEffect
-          
-          // NOVO: Atualizar estados do WebSocket baseado nos logs
-  
+          // 📊 NOVO: Atualizar estatísticas de martingale da API
+          if (result.data.martingaleUsage) {
+            setMartingaleUsage(result.data.martingaleUsage);
+          }
+          // 📈 NOVO: Processar resultados das apostas para o gráfico
+          if (result.data.logs) {
+            processBetResults(result.data.logs);
+          }
         }
 
-          } catch (error) {
+    } catch (error) {
       }
 
-      // Verificar mais frequentemente durante operações ativas
-      const delay = operationActive ? 1000 : 2000; // 1 segundo se operando, 2 segundos se não
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 segundos
     }
     
-
   };
 
   // Buscar relatório
   const fetchOperationReport = async () => {
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bots2/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -787,8 +848,28 @@ export default function BlazeMegaRouletteBR() {
 
       if (result.success && result.data) {
         setOperationReport(result.data);
-        
-        // Sistema simplificado - dados são salvos automaticamente pelo useEffect
+      }
+
+    } catch (error) {
+    }
+  };
+
+  // Reset relatório
+  const resetOperationReport = async () => {
+    try {
+      const response = await fetch('/api/bots2/blaze/pragmatic/blaze-megarouletebr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userIdRef.current,
+          action: 'reset-operation-report'
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        await fetchOperationReport();
       }
 
     } catch (error) {
@@ -797,72 +878,13 @@ export default function BlazeMegaRouletteBR() {
 
 
 
-
-
   useEffect(() => {
     if (userIdRef.current && isOperating) {
       fetchOperationReport();
-      const interval = setInterval(fetchOperationReport, 2000); // ✅ CORRIGIDO: A cada 2 segundos para tempo real
-    return () => clearInterval(interval);
+      const interval = setInterval(fetchOperationReport, 10000); // A cada 10 segundos
+      return () => clearInterval(interval);
     }
   }, [isOperating]);
-
-
-
-
-
-  // NOVO: Verificar status inicial do servidor ao carregar a página
-  const checkInitialServerStatus = useCallback(async () => {
-    if (!userIdRef.current) return;
-    
-
-    
-    try {
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-          action: 'get-websocket-logs'
-        })
-      });
-
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        const { connectionStatus, operationActive, logs = [], lastSevenResults = [], bettingWindow = { isOpen: false }, operationState = null } = result.data;
-        
-
-        
-        // Verificar se há atividade REAL no servidor (conexão ativa E operação ativa)
-        const isReallyActive = connectionStatus?.connected && operationActive;
-        
-        // Sempre sincronizar os dados disponíveis (para mostrar logs históricos)
-        if (logs.length > 0 || lastSevenResults.length > 0) {
-          setWebsocketLogs(logs);
-          setLastSevenResults(lastSevenResults);
-          setConnectionStatus(connectionStatus || { connected: false, lastUpdate: Date.now() });
-          setOperationState(operationState);
-          setBettingWindow(bettingWindow);
-
-        }
-        
-        // Só considerar "operando" se realmente estiver ativo
-        if (isReallyActive) {
-          setIsOperating(true);
-          setOperationActive(true);
-          setOperationStatus('OPERANDO');
-          monitoringRef.current = true;
-          startMonitoring();
-        } else {
-          setIsOperating(false);
-          setOperationActive(false);
-          setOperationStatus('DESCONECTADO');
-        }
-      }
-    } catch (error) {
-    }
-  }, []);
 
 
 
@@ -873,146 +895,39 @@ export default function BlazeMegaRouletteBR() {
     };
   }, []);
 
-  // NOVO: Controle inteligente baseado no padrão de repetição E janela de apostas
+  // NOVO: Controle inteligente do botão baseado no padrão E janela de apostas
   const hasCompletePattern = lastSevenResults.length >= 7;
+  const canStartOperation = hasCompletePattern && bettingWindow.isOpen && !operationActive;
   
-  // Verificar se é padrão de repetição válido
+  // IMPORTANTE: Verificar se é padrão de repetição válido
   const isValidRepetitionPattern = lastSevenResults.length >= 7 && 
     lastSevenResults[5]?.color === lastSevenResults[0]?.color && 
     lastSevenResults[6]?.color === lastSevenResults[1]?.color;
-    
-  const canStartOperation = hasCompletePattern && isValidRepetitionPattern && bettingWindow.isOpen && !operationActive;
   
-  // IMPORTANTE: Mostrar padrão de repetição detectado
-  const currentPattern = lastSevenResults.map((r: any) => r.color).join('');
+  // Função para inverter cores (adaptada ao formato R/B do backend)
+  const invertColor = (color: string): string => {
+    if (color === 'R' || color === 'red') return 'B';
+    if (color === 'B' || color === 'black') return 'R';
+    return color; // green/G permanece inalterado
+  };
 
-  // Adicionar função para capturar informações do usuário
-  function getUserInfo() {
-    const ua = navigator.userAgent;
-    
-    // Detectar sistema operacional
-    let platform = 'Unknown';
-    if (ua.includes('Windows')) platform = 'Windows';
-    else if (ua.includes('Macintosh') || ua.includes('Mac OS')) platform = 'macOS';
-    else if (ua.includes('Linux')) platform = 'Linux';
-    else if (ua.includes('Android')) platform = 'Android';
-    else if (ua.includes('iPhone') || ua.includes('iPad')) platform = 'iOS';
+  // Padrão base para apostas (primeiros 5 resultados - CORES HISTÓRICAS)
+  const basePattern = lastSevenResults.slice(0, 5).map((r: any) => r.color);
+  
+  // ✅ NOVO: Padrão invertido que será apostado (CONTRA o histórico)
+  const bettingPattern = basePattern.map(invertColor);
+  
+  // Padrão atual para exibição - MOSTRA AS CORES QUE SERÃO APOSTADAS
+  const currentPattern = bettingPattern.join('');
 
-    // Detectar navegador
-    let browser = 'Unknown';
-    if (ua.includes('Chrome') && !ua.includes('Edg')) browser = 'Chrome';
-    else if (ua.includes('Firefox')) browser = 'Firefox';
-    else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
-    else if (ua.includes('Edg')) browser = 'Edge';
-    else if (ua.includes('Opera')) browser = 'Opera';
+  // ✅ Debug removido para evitar re-renders infinitos
 
-    // Detectar se é mobile
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  // Pattern para exibição no ESTADO_OPERAÇÃO - vem da API quando operação está ativa
+  const displayPattern = operationState?.pattern || currentPattern;
 
-    // Detectar timezone
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-    // Detectar idioma
-    const language = navigator.language || 'pt-BR';
 
-    // Screen info
-    const screenInfo = {
-      width: screen.width,
-      height: screen.height,
-      colorDepth: screen.colorDepth
-    };
 
-    return {
-      userAgent: ua,
-      platform,
-      browser,
-      isMobile,
-      timezone,
-      language,
-      screenInfo,
-      timestamp: new Date().toISOString()
-    };
-  }
-
-  // ✅ NOVO: Detectar informações de rede do usuário
-  useEffect(() => {
-    async function detectNetworkInfo() {
-      try {
-        // Detectar IP usando múltiplas APIs
-        const ipApis = [
-          'https://api.ipify.org?format=json',
-          'https://ipapi.co/json/',
-          'https://api.myip.com'
-        ];
-
-        let detectedIP = 'Não detectado';
-        let location = 'Não detectado';
-        let vpnDetected = false;
-
-        for (const api of ipApis) {
-          try {
-            const response = await fetch(api);
-            const data = await response.json();
-            
-            if (data.ip) {
-              detectedIP = data.ip;
-              
-              // Se a API retorna informações de localização
-              if (data.city && data.country) {
-                location = `${data.city}, ${data.country}`;
-              }
-              
-              // Verificação básica de VPN (algumas APIs fornecem isso)
-              if (data.proxy === true || data.vpn === true || data.hosting === true) {
-                vpnDetected = true;
-              }
-              
-              break; // Parar no primeiro sucesso
-            }
-          } catch (error) {
-            continue;
-          }
-        }
-
-        // Verificação adicional de VPN baseada em padrões de IP
-        const vpnPatterns = [
-          /^10\./, /^172\.(1[6-9]|2[0-9]|3[0-1])\./, /^192\.168\./,
-          /^169\.254\./, /^127\./, /^::1/, /^fc00:/, /^fe80:/
-        ];
-        
-        const isPrivateIP = vpnPatterns.some(pattern => pattern.test(detectedIP));
-        
-        setUserNetworkInfo({
-          ip: detectedIP,
-          vpnDetected: vpnDetected || isPrivateIP,
-          vpnStatus: vpnDetected ? 'DETECTADA' : (isPrivateIP ? 'POSSÍVEL' : 'NÃO DETECTADA'),
-          location
-        });
-
-        // Atualizar elementos na tela
-        const ipElement = document.getElementById('user-ip');
-        const vpnElement = document.getElementById('vpn-status');
-        
-        if (ipElement) ipElement.textContent = detectedIP;
-        if (vpnElement) {
-          vpnElement.textContent = vpnDetected ? 'DETECTADA' : (isPrivateIP ? 'POSSÍVEL' : 'NÃO DETECTADA');
-          vpnElement.className = `font-mono text-sm ${
-            vpnDetected ? 'text-red-400' : (isPrivateIP ? 'text-yellow-400' : 'text-green-400')
-          }`;
-        }
-
-      } catch (error) {
-        setUserNetworkInfo({
-          ip: 'Erro na detecção',
-          vpnDetected: false,
-          vpnStatus: 'Erro na verificação',
-          location: 'Erro na detecção'
-        });
-      }
-    }
-
-    detectNetworkInfo();
-  }, []);
 
   return (
     <div className="min-h-screen bg-black text-green-400 relative overflow-hidden">
@@ -1083,7 +998,8 @@ export default function BlazeMegaRouletteBR() {
           </button>
 
           {/* Card Operação */}
-          <Card className="border-green-500/30 backdrop-blur-sm">
+          <Card className="border-blue-500/30 backdrop-blur-sm">
+
             <CardContent>
               <div className="space-y-4">
                 
@@ -1108,10 +1024,112 @@ export default function BlazeMegaRouletteBR() {
                     </span>
                   </div>
                   
-
+                  {isOperating && (websocketLogs.length > 0 || lastSevenResults.length > 0) && (
+                    <div className="text-xs font-mono text-gray-500">
+                      LOGS: {websocketLogs.length} | ÚLTIMOS_7: {lastSevenResults.length}/7
+                    </div>
+                  )}
                 </div>
 
+                {/* Últimos 7 Resultados */}
+                {lastSevenResults.length > 0 && (
+                  <div className="space-y-2">
 
+                    <div className="flex gap-2 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg flex-wrap">
+                      {lastSevenResults.slice().reverse().map((result: any, index: number) => {
+                        // Calcular posição cronológica: index 0 = posição 7 (mais recente), index 6 = posição 1 (mais antigo)
+                        const cronologicalPosition = lastSevenResults.length - index;
+                        const baseClasses = "w-12 h-12 rounded-full flex flex-col items-center justify-center text-xs font-bold font-mono shadow-lg transition-all duration-300 hover:scale-110";
+                        const colorClasses = result.color === 'R' 
+                          ? 'bg-red-500 text-white shadow-red-500/50' 
+                          : 'bg-gray-800 text-white border border-gray-600 shadow-gray-800/50';
+                        
+                        return (
+                          <div
+                            key={`result-${index}-${result.gameId}`}
+                            className={`${baseClasses} ${colorClasses}`}
+                            title={`Posição ${cronologicalPosition} | Número: ${result.number} | Game: ${result.gameId}`}
+                          >
+                            <div className="text-[8px] leading-none">{cronologicalPosition}</div>
+                            <div className="text-xs leading-none">{result.color}</div>
+                          </div>
+                        );
+                      })}
+                      {lastSevenResults.length < 7 && (
+                        Array.from({ length: 7 - lastSevenResults.length }).map((_, index) => {
+                          const cronologicalPosition = 7 - lastSevenResults.length - index;
+                          return (
+                            <div
+                              key={`empty-${index}`}
+                              className="w-12 h-12 rounded-full border-2 border-dashed border-gray-600 flex flex-col items-center justify-center text-xs text-gray-500"
+                            >
+                              <div className="text-[8px] leading-none">{cronologicalPosition}</div>
+                              <div className="text-xs leading-none">?</div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {isValidRepetitionPattern && (
+                      <div className="text-xs font-mono text-green-300 bg-green-500/10 p-2 rounded border border-green-500/20">
+                        ✅ Padrão de repetição válido: Posições 1,2 repetiram em 6,7!
+                  </div>
+                )}
+
+
+                  </div>
+                )}
+
+                {/* Estado da Operação */}
+                {operationState && (
+                  <div className="space-y-2">
+
+                    <div className="p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg space-y-1 text-xs font-mono">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Apostas:</span>
+                        <span className="text-cyan-400">{displayPattern ? displayPattern.split('').map((cor, i) => `${i+1}:${cor}`).join(' ') : 'N/A'}</span>
+                      </div>
+                      {lastSevenResults.length >= 5 && (
+                      <div className="flex justify-between">
+                          <span className="text-gray-400">Histórico:</span>
+                          <span className="text-gray-500">{basePattern.map((cor, i) => `${i+1}:${cor}`).join(' ')}</span>
+                      </div>
+                      )}
+
+                    </div>
+                  </div>
+                )}
+
+                {/* Logs do WebSocket */}
+                {websocketLogs.length > 0 && (
+                  <div className="space-y-2">
+
+                    <div className="max-h-64 overflow-y-auto p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1">
+                      {websocketLogs.filter(log => 
+                        !log.message.includes('🎰 Janela de apostas') && 
+                        !log.message.includes('Apostas abertas') && 
+                        !log.message.includes('Apostas fechadas')
+                      ).slice(0, 20).map((log, index) => (
+                        <div key={`log-${index}-${log.timestamp}`} className="text-xs font-mono flex items-start gap-2">
+                          <span className="text-gray-500 text-xs">
+                            {new Date(log.timestamp).toLocaleTimeString('pt-BR')}
+                          </span>
+                          <span className={`flex-1 ${
+                            log.type === 'error' ? 'text-red-400' :
+                            log.type === 'success' ? 'text-green-400' :
+                            log.type === 'game' ? 'text-yellow-400' :
+                            log.type === 'bets-open' ? 'text-green-400 font-bold' :
+                            log.type === 'bets-closed' ? 'text-red-400 font-bold' :
+                            'text-gray-300'
+                          }`}>
+                            {log.message}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Erro */}
                 {operationError && (
@@ -1195,13 +1213,20 @@ export default function BlazeMegaRouletteBR() {
 
 
 
-          {/* Card Operações */}
+
+
+
+
+          {/* Novos Cards dos Componentes */}
           <OperationsCard operationReport={operationReport} />
-
-
-
-          {/* Card CRÉDITOS_DISPONÍVEIS */}
-                          <CreditDisplay />
+          
+          {/* 📈 Gráfico de Linha de Apostas */}
+          <BetLineChart betHistory={betHistory} />
+          
+          {/* 📊 Gráfico de Consumo de Martingale */}
+          <MartingaleChart martingaleUsage={martingaleUsage} />
+          
+          <CreditDisplay />
 
         </div>
       </div>
@@ -1214,7 +1239,7 @@ export default function BlazeMegaRouletteBR() {
           setAlertMessage(null);
           blazeConfigModal.closeModal();
         }}
-        title={isConfigured ? 'EDITAR_TOKEN_BLAZE' : 'CONFIGURAR_BLAZE'}
+        title={isConfigured ? 'EDITAR_TOKEN_BLAZE' : 'CONFIG_BLAZE'}
         description={isConfigured ? 'Atualize seu token de autenticação Blaze' : 'Configure seu token de autenticação Blaze'}
         type="info"
         actions={{
@@ -1259,33 +1284,17 @@ export default function BlazeMegaRouletteBR() {
           </div>
 
           <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mb-2">
               <Settings className="h-4 w-4 text-blue-400" />
               <span className="text-sm font-semibold text-blue-400 font-mono">COMO_OBTER_TOKEN</span>
-              </div>
-              <button
-                onClick={() => setTutorialModalOpen(true)}
-                className="px-3 py-1 bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded-md text-xs font-semibold text-green-400 font-mono transition-colors duration-200"
-              >
-                VER_TUTORIAL
-              </button>
             </div>
             <div className="text-xs text-gray-300 font-mono space-y-1">
               <p>1. Faça login na sua conta Blaze</p>
               <p>2. Abra as Ferramentas do Desenvolvedor (F12)</p>
-              <p>3. Vá para Aplicação (Application) → Armazenamento Local (Local Storage)</p>
+              <p>3. Vá para Application → Local Storage</p>
               <p>4. Selecione &quot;https://blaze.bet.br&quot;</p>
               <p>5. Encontre &quot;ACCESS_TOKEN&quot; e copie o valor</p>
               <p>6. Cole no campo acima</p>
-            </div>
-            
-            <div className="mt-3 p-3 bg-gray-800/50 border border-gray-600/50 rounded-lg">
-              <div className="text-xs font-semibold text-yellow-400 font-mono mb-2">EXEMPLO_TOKEN:</div>
-              <div className="text-xs text-gray-300 font-mono flex items-center gap-2 overflow-hidden">
-                <span className="text-orange-400 flex-shrink-0">ACCESS_TOKEN:</span>
-                <span className="text-green-400 truncate">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTM5N.....</span>
-              </div>
             </div>
           </div>
         </div>
@@ -1298,48 +1307,6 @@ export default function BlazeMegaRouletteBR() {
         onConfirm={handleStrategyConfirm}
         loading={strategyLoading}
       />
-
-      {/* Modal do Tutorial GIF */}
-      {tutorialModalOpen && typeof window !== 'undefined' && createPortal(
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-[9999999] p-4">
-          <div className="relative bg-gray-900 rounded-xl border border-gray-700 max-w-4xl max-h-[90vh] overflow-hidden">
-            {/* Header do Modal */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-700">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-green-500/20 rounded-lg">
-                  <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-green-400 font-mono">TUTORIAL_ACCESS_TOKEN</h3>
-              </div>
-              <button
-                onClick={() => setTutorialModalOpen(false)}
-                className="p-2 hover:bg-gray-800 rounded-lg transition-colors duration-200 text-gray-400 hover:text-white"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            
-            {/* Conteúdo do Modal */}
-            <div className="p-4">
-              <div className="text-sm text-gray-400 mb-4 font-mono">
-                // Tutorial visual: Como obter o ACCESS_TOKEN da Blaze
-              </div>
-              <div className="flex justify-center">
-                <img 
-                  src="/step_accesstoken.gif" 
-                  alt="Tutorial ACCESS_TOKEN"
-                  className="max-w-full max-h-[60vh] object-contain rounded-lg border border-gray-700"
-                />
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
     </div>
   );
 } 

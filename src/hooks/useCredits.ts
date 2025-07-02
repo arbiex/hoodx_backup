@@ -91,7 +91,7 @@ export function useCredits() {
       const { data: { user }, error: userError } = await supabase.auth.getUser()
       
       if (!user || userError) {
-        console.log('User not authenticated, skipping credits load')
+  
         setCredits(null)
         setLoading(false)
         return
@@ -189,7 +189,7 @@ export function useCredits() {
     try {
       // Tabelas operations_history, betting_sessions e betting_history foram removidas
       // Sistema agora usa controle em memória
-      console.log('ℹ️ [CREDITS] loadOperations desabilitado - usando sistema simplificado')
+
       setOperations([])
       return
       
@@ -215,7 +215,7 @@ export function useCredits() {
       setOperations(data || [])
       */
     } catch (err) {
-      console.log('ℹ️ [CREDITS] loadOperations desabilitado:', err)
+      
       setOperations([])
     }
   }
@@ -225,7 +225,7 @@ export function useCredits() {
     try {
       // Tabelas operations_history, betting_sessions e betting_history foram removidas
       // Sistema agora usa controle em memória
-      console.log('ℹ️ [CREDITS] loadOperationStats desabilitado - usando sistema simplificado')
+
       setOperationStats(null)
       return
       
@@ -248,7 +248,7 @@ export function useCredits() {
       setOperationStats(data)
       */
     } catch (err) {
-      console.log('ℹ️ [CREDITS] loadOperationStats desabilitado:', err)
+      
       setOperationStats(null)
     }
   }

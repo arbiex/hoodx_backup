@@ -53,7 +53,7 @@ export default function DebugStrategyModal({ isOpen, onClose, onConfirm, loading
       }
 
       if (data) {
-        console.log('🎯 [DEBUG-STRATEGY] Estratégias carregadas:', data)
+  
         setStrategies(data)
       }
     } catch (error) {
@@ -65,7 +65,7 @@ export default function DebugStrategyModal({ isOpen, onClose, onConfirm, loading
 
   const handleConfirm = () => {
     if (selectedStrategy) {
-      console.log('🎯 [DEBUG-STRATEGY] Estratégia selecionada:', selectedStrategy)
+  
       onConfirm(selectedStrategy)
     }
   }

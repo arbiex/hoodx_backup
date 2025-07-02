@@ -20,7 +20,7 @@ function HomeContent() {
         }
       } catch (error) {
         // Erro ou não logado, permanecer na página de login
-        console.log('Usuário não logado, permanecendo na página principal')
+
       }
     }
 

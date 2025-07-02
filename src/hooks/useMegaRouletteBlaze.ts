@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { authenticateUserFrontend } from '../lib/frontend-auth';
 
 // Tipos
 interface AuthData {
@@ -420,23 +419,54 @@ export function useMegaRouletteBlaze() {
         throw new Error('Usuário não autenticado');
       }
 
-      // Etapa 1: Buscar token da Blaze
-      addLog('🔍 Buscando token da Blaze...');
+      // Etapa 1: Buscar token da Blaze (API CONSOLIDADA)
+      addLog('🔍 Buscando token da Blaze via API consolidada...');
       
-      const tokenResponse = await fetch('/api/user/blaze-token');
+      const tokenResponse = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          action: 'get-blaze-token'
+        })
+      });
+      
       const tokenData = await tokenResponse.json();
       
       if (!tokenData.success || !tokenData.token) {
-        throw new Error('Token da Blaze não encontrado. Configure em /config');
+        throw new Error(tokenData.error || 'Token da Blaze não encontrado. Configure em /config');
       }
       
       addLog('✅ Token da Blaze encontrado');
       
-      // Etapa 2: Autenticação Frontend (REPLICA EXATA DA EDGE FUNCTION)
-      addLog('🎯 Executando autenticação frontend (mesma lógica da Edge Function)...');
-      addLog('📱 IMPORTANTE: 100% no browser - IP real preservado');
+      // Etapa 2: Autenticação Frontend (USANDO API CONSOLIDADA)
+      addLog('🎯 Executando autenticação frontend via API consolidada...');
+      addLog('📱 IMPORTANTE: 100% no servidor - headers críticos aplicados');
       
-      const frontendAuthResult = await authenticateUserFrontend(tokenData.token);
+      const frontendAuthResponse = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          action: 'frontend-auth',
+          blazeToken: tokenData.token,
+          userAgent: navigator.userAgent,
+          acceptLanguage: navigator.language,
+          realBrowserHeaders: {
+            'sec-ch-ua': (navigator as any).userAgentData?.brands?.map((brand: any) => 
+              `"${brand.brand}";v="${brand.version}"`).join(', ') || '"Not)A;Brand";v="8", "Chromium";v="138"',
+            'sec-ch-ua-mobile': (navigator as any).userAgentData?.mobile ? '?1' : '?0',
+            'sec-ch-ua-platform': `"${(navigator as any).userAgentData?.platform || 'macOS'}"`,
+            'DNT': '1',
+            'Upgrade-Insecure-Requests': '1',
+            'Pragma': 'no-cache',
+            'Cache-Control': 'no-cache',
+            'X-Requested-With': 'XMLHttpRequest'
+          }
+        })
+      });
+
+      const frontendAuthResult = await frontendAuthResponse.json();
       
       if (!frontendAuthResult.success || !frontendAuthResult.data) {
         const errorMsg = frontendAuthResult.error || 'Falha na autenticação frontend';
@@ -457,7 +487,7 @@ export function useMegaRouletteBlaze() {
         throw new Error('Nenhum token de autenticação disponível');
       }
       
-      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr/route', {
+      const response = await fetch('/api/bots/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -470,7 +500,7 @@ export function useMegaRouletteBlaze() {
             pragmaticUserId: ''
           },
           // ✅ Flag para evitar fallback server-side
-          forceClientSideAuth: true
+          // Permitir switch de servidor e reconexão automática
         })
       });
 

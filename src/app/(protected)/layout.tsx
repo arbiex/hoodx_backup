@@ -12,7 +12,7 @@ export default function ProtectedLayout({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
-  const isBlazeMegaRoulettebrPage = pathname === '/blaze-megaroulettebr'
+  const shouldHideBottomSidebar = pathname === '/blaze-megaroulettebr' || pathname === '/bmg'
 
   return (
     <AuthWrapper>
@@ -24,11 +24,11 @@ export default function ProtectedLayout({
       <div className="relative z-10">
         <div className="max-w-[720px] mx-auto">
           <Header />
-          <div className={isBlazeMegaRoulettebrPage ? "pb-4" : "pb-24"}>
+          <div className={shouldHideBottomSidebar ? "pb-4" : "pb-24"}>
             {children}
           </div>
         </div>
-        {!isBlazeMegaRoulettebrPage && <BottomSidebar />}
+        {!shouldHideBottomSidebar && <BottomSidebar />}
       </div>
     </div>
     </AuthWrapper>

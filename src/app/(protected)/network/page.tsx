@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Copy, Users, Link as LinkIcon, DollarSign, Crown, Shield, Target, Check, Filter, ChevronDown, ChevronUp, Clock, CreditCard, AlertCircle } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { toast } from 'sonner'
+import { supabase } from '@/lib/supabase'
 import MatrixRain from '@/components/MatrixRain'
 import Modal, { useModal } from '@/components/ui/modal'
 import { useNetwork, NetworkNode } from '@/hooks/useNetwork'
@@ -24,10 +25,9 @@ export default function HackerNetworkPage() {
   
   const { isOpen: isFiltersModalOpen, openModal: openFiltersModal, closeModal: closeFiltersModal } = useModal()
   
-  // Estados para proteção por senha
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [password, setPassword] = useState('')
-  const [passwordError, setPasswordError] = useState('')
+  // Estados para verificação de agente
+  const [isAgent, setIsAgent] = useState<boolean | null>(null)
+  const [agentLoading, setAgentLoading] = useState(true)
   const [filters, setFilters] = useState({
     level: '',
     dateFrom: '',
@@ -96,12 +96,34 @@ export default function HackerNetworkPage() {
   const pagination = usePagination(filteredNodes.length, itemsPerPage)
   const paginatedNodes = pagination.getPageItems(filteredNodes)
 
-  // Verificar se já está autenticado no localStorage
+  // Verificar se o usuário é um agente ativo
   useEffect(() => {
-    const networkAuth = localStorage.getItem('network_authenticated')
-    if (networkAuth === 'true') {
-      setIsAuthenticated(true)
+    const checkAgentStatus = async () => {
+      try {
+        setAgentLoading(true)
+        const { data, error } = await supabase
+          .from('agents')
+          .select('is_active')
+          .eq('user_id', (await supabase.auth.getUser()).data.user?.id)
+          .eq('is_active', true)
+          .single()
+
+        if (error && error.code !== 'PGRST116') {
+          console.error('Erro ao verificar status de agente:', error)
+          setIsAgent(false)
+          return
+        }
+
+        setIsAgent(!!data)
+      } catch (error) {
+        console.error('Erro inesperado:', error)
+        setIsAgent(false)
+      } finally {
+        setAgentLoading(false)
+      }
     }
+
+    checkAgentStatus()
   }, [])
 
   // Check for referral code from URL on mount
@@ -123,22 +145,9 @@ export default function HackerNetworkPage() {
     }
   }, [getSponsorInfo])
 
-  // Função para verificar a senha
-  const handlePasswordSubmit = () => {
-    if (password === 'matrix') {
-      setIsAuthenticated(true)
-      localStorage.setItem('network_authenticated', 'true')
-      setPasswordError('')
-      setPassword('')
-    } else {
-      setPasswordError('Senha incorreta. Tente novamente.')
-    }
-  }
-
-  // Função para fazer logout (limpar autenticação)
-  const handleLogout = () => {
-    setIsAuthenticated(false)
-    localStorage.removeItem('network_authenticated')
+  // Função para voltar ao dashboard
+  const handleBackToDashboard = () => {
+    window.location.href = '/dashboard'
   }
 
   const commissionRates = [
@@ -185,64 +194,61 @@ export default function HackerNetworkPage() {
     })
   }
 
-  // Se não estiver autenticado, mostrar modal de senha
-  if (!isAuthenticated) {
+  // Loading state
+  if (agentLoading) {
+    return (
+      <div className="px-4 relative">
+        <MatrixRain />
+        <div className="relative z-10 min-h-screen flex items-center justify-center">
+          <Card className="border-green-500/30 backdrop-blur-sm max-w-md w-full">
+            <CardContent className="p-8 text-center">
+              <div className="text-green-400 font-mono">
+                Verificando acesso...
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  // Se não for agente, mostrar acesso negado
+  if (!isAgent) {
     return (
       <div className="px-4 relative">
         {/* Matrix Rain Background */}
         <MatrixRain />
         
         <div className="relative z-10 min-h-screen flex items-center justify-center">
-          <Card className="border-green-500/30 backdrop-blur-sm max-w-md w-full">
+          <Card className="border-red-500/30 backdrop-blur-sm max-w-md w-full">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-green-400 font-mono text-center">
+              <CardTitle className="flex items-center gap-2 text-red-400 font-mono text-center">
                 <Shield className="h-5 w-5" />
-                ACESSO_RESTRITO
+                ACESSO_NEGADO
               </CardTitle>
               <CardDescription className="text-gray-400 font-mono text-xs text-center">
-                {`// Digite a senha para acessar a rede`}
+                {`// Apenas agentes autorizados podem acessar a rede`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Input
-                  type="password"
-                  placeholder="Digite a senha..."
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value)
-                    setPasswordError('')
-                  }}
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      handlePasswordSubmit()
-                    }
-                  }}
-                  className="bg-gray-800/50 border-gray-600 text-white font-mono focus:border-green-500"
-                />
-                {passwordError && (
-                  <div className="flex items-center gap-2 text-red-400 text-sm font-mono">
-                    <AlertCircle className="h-4 w-4" />
-                    {passwordError}
-                  </div>
-                )}
+              <div className="text-center space-y-4">
+                <div className="flex items-center gap-2 text-yellow-400 text-sm font-mono justify-center">
+                  <AlertCircle className="h-4 w-4" />
+                  Você não é um agente ativo
+                </div>
+                
+                <p className="text-gray-400 text-sm font-mono">
+                  Entre em contato com a administração para se tornar um agente.
+                </p>
               </div>
-              
-              <Button 
-                onClick={handlePasswordSubmit}
-                className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono"
-                variant="outline"
-              >
-                ACESSAR_REDE
-              </Button>
               
               <div className="text-center">
                 <Button
-                  onClick={() => window.history.back()}
+                  onClick={handleBackToDashboard}
                   variant="ghost"
                   className="text-gray-400 hover:text-white font-mono text-sm"
                 >
-                  ← VOLTAR
+                  ← VOLTAR AO DASHBOARD
                 </Button>
               </div>
             </CardContent>
@@ -265,12 +271,12 @@ export default function HackerNetworkPage() {
              <p className="text-gray-400 font-mono text-sm">// Expanda sua rede e ganhe comissões</p>
            </div>
            <Button
-             onClick={handleLogout}
+             onClick={handleBackToDashboard}
              variant="ghost"
              size="sm"
-             className="text-gray-500 hover:text-red-400 font-mono text-xs"
+             className="text-gray-500 hover:text-blue-400 font-mono text-xs"
            >
-             SAIR
+             DASHBOARD
            </Button>
          </div>
 

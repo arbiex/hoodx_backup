@@ -32,8 +32,24 @@ const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'
   const [tooltip, setTooltip] = useState<{ visible: boolean; x: number; y: number; content: string }>({ 
     visible: false, x: 0, y: 0, content: '' 
   });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [chartWidth, setChartWidth] = useState(400);
   const maxPoints = 50; // Máximo de pontos visíveis
   const visibleHistory = betHistory.slice(-maxPoints);
+
+  // Atualizar largura do gráfico baseado no container
+  useEffect(() => {
+    const updateWidth = () => {
+      if (containerRef.current) {
+        const width = containerRef.current.offsetWidth - 40; // Padding interno
+        setChartWidth(Math.max(300, width)); // Mínimo de 300px
+      }
+    };
+    
+    updateWidth();
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, []);
   
   if (visibleHistory.length === 0) {
     return (
@@ -50,7 +66,7 @@ const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
-          <div className="h-40 flex items-center justify-center border border-gray-700/50 rounded-lg">
+          <div className="h-32 flex items-center justify-center border border-gray-700/50 rounded-lg">
             <span className="text-xs font-mono text-gray-500">Aguardando apostas...</span>
           </div>
         </CardContent>
@@ -58,8 +74,7 @@ const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'
     );
   }
   
-  const chartWidth = 400;
-  const chartHeight = 120;
+  const chartHeight = 128; // Para h-32 (32 * 4px = 128px)
   const padding = 20;
   
   // Calcular valor acumulado para cada ponto
@@ -106,9 +121,9 @@ const BetLineChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss'
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
-        <div className="relative">
+        <div className="relative" ref={containerRef}>
           {/* SVG do gráfico */}
-          <svg width={chartWidth} height={chartHeight} className="border border-gray-700/50 rounded-lg bg-gray-800/30">
+          <svg width="100%" height={chartHeight} className="border border-gray-700/50 rounded-lg bg-gray-800/30" viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
             {/* Linha central de referência */}
             <line 
               x1={padding} 
@@ -214,8 +229,24 @@ const ProfitChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss';
   const [tooltip, setTooltip] = useState<{ visible: boolean; x: number; y: number; content: string }>({ 
     visible: false, x: 0, y: 0, content: '' 
   });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [chartWidth, setChartWidth] = useState(400);
   const maxPoints = 50; // Máximo de pontos visíveis
   const visibleHistory = betHistory.slice(-maxPoints);
+
+  // Atualizar largura do gráfico baseado no container
+  useEffect(() => {
+    const updateWidth = () => {
+      if (containerRef.current) {
+        const width = containerRef.current.offsetWidth - 40; // Padding interno
+        setChartWidth(Math.max(300, width)); // Mínimo de 300px
+      }
+    };
+    
+    updateWidth();
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, []);
   
   if (visibleHistory.length === 0) {
     return (
@@ -232,7 +263,7 @@ const ProfitChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss';
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
-          <div className="h-40 flex items-center justify-center border border-gray-700/50 rounded-lg">
+          <div className="h-32 flex items-center justify-center border border-gray-700/50 rounded-lg">
             <span className="text-xs font-mono text-gray-500">Aguardando apostas...</span>
           </div>
         </CardContent>
@@ -240,8 +271,7 @@ const ProfitChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss';
     );
   }
   
-  const chartWidth = 400;
-  const chartHeight = 120;
+  const chartHeight = 128; // Para h-32 (32 * 4px = 128px)
   const padding = 20;
   
   // Calcular lucro acumulado para cada ponto
@@ -294,9 +324,9 @@ const ProfitChart = ({ betHistory }: { betHistory: Array<{ type: 'win' | 'loss';
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
-        <div className="relative">
+        <div className="relative" ref={containerRef}>
           {/* SVG do gráfico */}
-          <svg width={chartWidth} height={chartHeight} className="border border-gray-700/50 rounded-lg bg-gray-800/30">
+          <svg width="100%" height={chartHeight} className="border border-gray-700/50 rounded-lg bg-gray-800/30" viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
             {/* Linha central de referência (R$ 0) */}
             <line 
               x1={padding} 

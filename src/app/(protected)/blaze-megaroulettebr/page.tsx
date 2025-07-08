@@ -3,7 +3,7 @@
  * 
  * Esta é uma cópia da página BMG para operações na Blaze Mega Roulette BR.
  * 
- * API: /api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr
+ * API: /api/bmgbr/blaze/pragmatic/blaze-megarouletebr
  * Página: /blaze-megaroulettebr
  */
 'use client';
@@ -306,7 +306,7 @@ export default function BlazeMegaRouletteBR() {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
           
-          const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+          const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -338,7 +338,7 @@ export default function BlazeMegaRouletteBR() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -706,7 +706,7 @@ export default function BlazeMegaRouletteBR() {
       await resetAllGraphs();
 
       // ✅ ETAPA 1: Buscar token da Blaze
-      const tokenResponse = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const tokenResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -765,7 +765,7 @@ export default function BlazeMegaRouletteBR() {
       setAuthTokens(authData);
       
       // ✅ ETAPA 3: Conectar usando tokens gerados via Edge Function
-      const connectResponse = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const connectResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -806,7 +806,7 @@ export default function BlazeMegaRouletteBR() {
       }
 
       // ✅ ETAPA 2: Iniciar operação (start-operation)
-      const operationResponse = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const operationResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -858,7 +858,7 @@ export default function BlazeMegaRouletteBR() {
           throw new Error('Usuário não autenticado');
         }
         
-        const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -948,7 +948,7 @@ export default function BlazeMegaRouletteBR() {
     
     while (monitoringRef.current) {
     try {
-      const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1019,7 +1019,7 @@ export default function BlazeMegaRouletteBR() {
   // Buscar relatório
   const fetchOperationReport = async () => {
     try {
-      const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1041,7 +1041,7 @@ export default function BlazeMegaRouletteBR() {
   // Reset relatório
   const resetOperationReport = async () => {
     try {
-      const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1063,7 +1063,7 @@ export default function BlazeMegaRouletteBR() {
   // 2. Função para atualizar o backend sempre que o switch mudar
   useEffect(() => {
     if (!userIdRef.current) return;
-          fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+          fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1135,7 +1135,7 @@ export default function BlazeMegaRouletteBR() {
     setTotalMartingaleAmount(calculateTotalAmount(seq));
     // Enviar para backend
     if (userIdRef.current) {
-      fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

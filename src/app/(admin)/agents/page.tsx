@@ -21,7 +21,8 @@ import {
   Crown,
   AlertTriangle,
   Check,
-  X
+  X,
+  CreditCard
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -44,6 +45,26 @@ interface User {
   created_at: string
 }
 
+interface PendingWithdrawal {
+  id: string
+  user_id: string
+  user_email: string
+  agent_code: string
+  amount: number
+  fee_amount: number
+  net_amount: number
+  withdrawal_type: string
+  crypto_type?: string
+  wallet_address?: string
+  pix_key_type?: string
+  pix_key?: string
+  full_name?: string
+  cpf?: string
+  status: string
+  created_at: string
+  admin_notes?: string
+}
+
 export default function AgentsPage() {
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [agents, setAgents] = useState<Agent[]>([])
@@ -51,20 +72,30 @@ export default function AgentsPage() {
   const [loading, setLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   
+  // Saques pendentes
+  const [pendingWithdrawals, setPendingWithdrawals] = useState<PendingWithdrawal[]>([])
+  const [loadingWithdrawals, setLoadingWithdrawals] = useState(false)
+  
   // Modal states
   const { isOpen: isCreateModalOpen, openModal: openCreateModal, closeModal: closeCreateModal } = useModal()
   const { isOpen: isEditModalOpen, openModal: openEditModal, closeModal: closeEditModal } = useModal()
+  const { isOpen: isWithdrawalModalOpen, openModal: openWithdrawalModal, closeModal: closeWithdrawalModal } = useModal()
   
   // Form states
   const [selectedUserId, setSelectedUserId] = useState('')
   const [commissionRate, setCommissionRate] = useState('50.00')
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null)
   const [userSearchTerm, setUserSearchTerm] = useState('')
+  const [selectedWithdrawal, setSelectedWithdrawal] = useState<PendingWithdrawal | null>(null)
+  const [processingWithdrawal, setProcessingWithdrawal] = useState(false)
+  const [adminNotes, setAdminNotes] = useState('')
+  const [reversalJustification, setReversalJustification] = useState('')
 
   useEffect(() => {
     checkCurrentUser()
     loadAgents()
     loadUsers()
+    loadPendingWithdrawals()
   }, [])
 
   const checkCurrentUser = async () => {
@@ -107,6 +138,26 @@ export default function AgentsPage() {
       setUsers(availableUsers)
     } catch (error) {
       console.error('Erro:', error)
+    }
+  }
+
+  const loadPendingWithdrawals = async () => {
+    try {
+      setLoadingWithdrawals(true)
+      const { data, error } = await supabase.rpc('get_pending_withdrawals')
+      
+      if (error) {
+        console.error('Erro ao carregar saques pendentes:', error)
+        toast.error('Erro ao carregar saques pendentes')
+        return
+      }
+
+      setPendingWithdrawals(data || [])
+    } catch (error) {
+      console.error('Erro ao carregar saques pendentes:', error)
+      toast.error('Erro inesperado ao carregar saques')
+    } finally {
+      setLoadingWithdrawals(false)
     }
   }
 
@@ -181,30 +232,80 @@ export default function AgentsPage() {
     }
   }
 
-  const toggleAgentStatus = async (agent: Agent) => {
+  // Função para desativar código de agente
+  const disableAgentCode = async (agentCode: string) => {
     try {
-      const { data, error } = await supabase.rpc('update_agent', {
-        p_agent_id: agent.id,
-        p_is_active: !agent.is_active
-      })
+      const { data, error } = await supabase.rpc('disable_agent_code', {
+        p_agent_code: agentCode
+      });
 
       if (error) {
-        console.error('Erro ao alterar status:', error)
-        toast.error('Erro ao alterar status')
-        return
+        console.error('Erro ao desativar código:', error);
+        toast.error('Erro ao desativar código do agente');
+        return;
       }
 
       if (data.success) {
-        toast.success(`Agente ${!agent.is_active ? 'ativado' : 'desativado'} com sucesso`)
-        loadAgents()
+        toast.success(data.message);
+        await loadAgents(); // Recarregar lista
       } else {
-        toast.error(data.error || 'Erro ao alterar status')
+        toast.error(data.error || 'Erro ao desativar código');
       }
-    } catch (error) {
-      console.error('Erro:', error)
-      toast.error('Erro inesperado')
+    } catch (err) {
+      console.error('Erro inesperado:', err);
+      toast.error('Erro inesperado ao desativar código');
     }
-  }
+  };
+
+  // Função para ativar código de agente
+  const enableAgentCode = async (agentCode: string) => {
+    try {
+      const { data, error } = await supabase.rpc('enable_agent_code', {
+        p_agent_code: agentCode
+      });
+
+      if (error) {
+        console.error('Erro ao ativar código:', error);
+        toast.error('Erro ao ativar código do agente');
+        return;
+      }
+
+      if (data.success) {
+        toast.success(data.message);
+        await loadAgents(); // Recarregar lista
+      } else {
+        toast.error(data.error || 'Erro ao ativar código');
+      }
+    } catch (err) {
+      console.error('Erro inesperado:', err);
+      toast.error('Erro inesperado ao ativar código');
+    }
+  };
+
+  // Função para alternar status do agente
+  const toggleAgentStatus = async (agentCode: string, currentStatus: boolean) => {
+    try {
+      const { data, error } = await supabase.rpc('toggle_agent_code', {
+        p_agent_code: agentCode
+      });
+
+      if (error) {
+        console.error('Erro ao alterar status:', error);
+        toast.error('Erro ao alterar status do agente');
+        return;
+      }
+
+      if (data.success) {
+        toast.success(data.message);
+        await loadAgents(); // Recarregar lista
+      } else {
+        toast.error(data.error || 'Erro ao alterar status');
+      }
+    } catch (err) {
+      console.error('Erro inesperado:', err);
+      toast.error('Erro inesperado ao alterar status');
+    }
+  };
 
   const removeAgent = async (agent: Agent) => {
     if (!confirm(`Tem certeza que deseja remover o agente ${agent.email}?`)) {
@@ -240,6 +341,92 @@ export default function AgentsPage() {
     setCommissionRate(agent.commission_rate.toString())
     openEditModal()
   }
+
+  const openWithdrawalDetails = (withdrawal: PendingWithdrawal) => {
+    setSelectedWithdrawal(withdrawal)
+    setAdminNotes('')
+    setReversalJustification('')
+    openWithdrawalModal()
+  }
+
+  const processWithdrawal = async (status: 'completed' | 'failed' | 'cancelled', rejectionReason?: string) => {
+    if (!selectedWithdrawal) return;
+
+    setProcessingWithdrawal(true);
+    try {
+      const { data, error } = await supabase.rpc('process_withdrawal', {
+        p_withdrawal_id: selectedWithdrawal.id,
+        p_status: status,
+        p_admin_notes: adminNotes || rejectionReason || null,
+        p_admin_user_id: currentUser?.id
+      });
+
+      if (error) {
+        console.error('Erro ao processar saque:', error);
+        toast.error('Erro ao processar saque');
+        return;
+      }
+
+      if (data.success) {
+        toast.success(`Saque ${status === 'completed' ? 'aprovado' : status === 'failed' ? 'rejeitado' : 'cancelado'} com sucesso`);
+        closeWithdrawalModal();
+        setSelectedWithdrawal(null);
+        setAdminNotes('');
+        loadPendingWithdrawals();
+      } else {
+        toast.error('Erro ao processar saque', {
+          description: data.error || 'Erro desconhecido'
+        });
+      }
+    } catch (error) {
+      console.error('Erro:', error);
+      toast.error('Erro inesperado ao processar saque');
+    } finally {
+      setProcessingWithdrawal(false);
+    }
+  };
+
+  const reverseWithdrawal = async () => {
+    if (!selectedWithdrawal || !reversalJustification.trim()) {
+      toast.error('Justificativa é obrigatória para estorno');
+      return;
+    }
+
+    setProcessingWithdrawal(true);
+    try {
+      const { data, error } = await supabase.rpc('reverse_withdrawal', {
+        p_withdrawal_id: selectedWithdrawal.id,
+        p_admin_notes: reversalJustification,
+        p_admin_user_id: currentUser?.id
+      });
+
+      if (error) {
+        console.error('Erro ao estornar saque:', error);
+        toast.error('Erro ao estornar saque');
+        return;
+      }
+
+      if (data.success) {
+        toast.success('Saque estornado com sucesso', {
+          description: `R$ ${data.amount_reversed.toFixed(2)} devolvidos para ${data.user_email}`
+        });
+        closeWithdrawalModal();
+        setSelectedWithdrawal(null);
+        setAdminNotes('');
+        setReversalJustification('');
+        loadPendingWithdrawals();
+      } else {
+        toast.error('Erro ao estornar saque', {
+          description: data.error || 'Erro desconhecido'
+        });
+      }
+    } catch (error) {
+      console.error('Erro:', error);
+      toast.error('Erro inesperado ao estornar saque');
+    } finally {
+      setProcessingWithdrawal(false);
+    }
+  };
 
   // Filtrar agentes
   const filteredAgents = agents.filter(agent => 
@@ -347,6 +534,67 @@ export default function AgentsPage() {
             </Card>
           </div>
 
+          {/* Saques Pendentes */}
+          {pendingWithdrawals.length > 0 && (
+            <Card className="bg-gray-900 border-orange-500/30">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-orange-400 flex items-center gap-2">
+                      <AlertTriangle className="h-5 w-5" />
+                      Saques Pendentes
+                    </CardTitle>
+                    <CardDescription className="text-gray-400">
+                      {pendingWithdrawals.length} solicitação(ões) aguardando processamento
+                    </CardDescription>
+                  </div>
+                  <Button
+                    onClick={loadPendingWithdrawals}
+                    variant="outline"
+                    size="sm"
+                    disabled={loadingWithdrawals}
+                    className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
+                  >
+                    {loadingWithdrawals ? 'Carregando...' : 'Atualizar'}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {pendingWithdrawals.map((withdrawal) => (
+                    <div
+                      key={withdrawal.id}
+                      className="flex items-center justify-between p-4 rounded-lg bg-orange-500/5 border border-orange-500/20"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-2 h-2 rounded-full bg-orange-400" />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-white">{withdrawal.user_email}</span>
+                            <Badge variant="outline" className="text-xs border-orange-500/50 text-orange-400">
+                              {withdrawal.agent_code}
+                            </Badge>
+                          </div>
+                          <div className="text-sm text-gray-400 mt-1">
+                            R$ {withdrawal.amount.toFixed(2)} • {withdrawal.withdrawal_type === 'crypto' ? `${withdrawal.crypto_type || 'CRYPTO'}` : `PIX ${withdrawal.pix_key_type?.toUpperCase() || ''}`} • {new Date(withdrawal.created_at).toLocaleDateString('pt-BR')}
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openWithdrawalDetails(withdrawal)}
+                        className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
+                      >
+                        Processar
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Filtros */}
           <Card className="bg-gray-900 border-gray-800">
             <CardContent className="p-6">
@@ -369,7 +617,7 @@ export default function AgentsPage() {
             <CardHeader>
               <CardTitle className="text-white">Lista de Agentes</CardTitle>
               <CardDescription className="text-gray-400">
-                Agentes ativos no sistema com suas respectivas comissões
+                Agentes do sistema com taxas individuais. Agentes inativos bloqueiam novos cadastros e não geram comissões.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -409,6 +657,9 @@ export default function AgentsPage() {
                             <span>Comissão: {agent.commission_rate}%</span>
                             <span>Indicações: {agent.total_referrals}</span>
                             <span>Gerado: R$ {agent.total_commissions_generated.toFixed(2)}</span>
+                            {!agent.is_active && (
+                              <span className="text-red-400 font-medium">• Bloqueia cadastros</span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -417,7 +668,7 @@ export default function AgentsPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => toggleAgentStatus(agent)}
+                          onClick={() => toggleAgentStatus(agent.agent_code, agent.is_active)}
                           className={agent.is_active ? 'text-red-400 hover:bg-red-400/10' : 'text-green-400 hover:bg-green-400/10'}
                         >
                           {agent.is_active ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
@@ -445,6 +696,8 @@ export default function AgentsPage() {
               )}
             </CardContent>
           </Card>
+
+
         </div>
       </main>
 
@@ -606,6 +859,197 @@ export default function AgentsPage() {
             <Button onClick={updateAgent} className="bg-blue-600 hover:bg-blue-700">
               Salvar Alterações
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal Processar Saque */}
+      <Modal 
+        isOpen={isWithdrawalModalOpen} 
+        onClose={() => {
+          closeWithdrawalModal()
+          setSelectedWithdrawal(null)
+          setAdminNotes('')
+          setReversalJustification('')
+        }}
+        title="Processar Saque"
+        size="lg"
+      >
+        {selectedWithdrawal && (
+          <div className="space-y-4 py-4">
+            {/* Informações do Saque */}
+            <div className="grid gap-2">
+              <Label className="text-white">Informações do Saque</Label>
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-gray-400">ID:</span>
+                    <span className="text-white ml-2">#{selectedWithdrawal.id.slice(0, 8)}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Status:</span>
+                    <Badge variant="outline" className="ml-2 border-orange-500/50 text-orange-400">
+                      {selectedWithdrawal.status.toUpperCase()}
+                    </Badge>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Agente:</span>
+                    <span className="text-white ml-2">{selectedWithdrawal.user_email}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Código:</span>
+                    <span className="text-white ml-2">{selectedWithdrawal.agent_code}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Data:</span>
+                    <span className="text-white ml-2">{new Date(selectedWithdrawal.created_at).toLocaleDateString('pt-BR')}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Tipo:</span>
+                    <span className="text-white ml-2">
+                      {selectedWithdrawal.withdrawal_type === 'crypto' 
+                        ? selectedWithdrawal.crypto_type || 'CRYPTO' 
+                        : 'PIX'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Valores */}
+            <div className="grid gap-2">
+              <Label className="text-white">Valores</Label>
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm">
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <span className="text-gray-400">Solicitado:</span>
+                    <span className="text-green-400 ml-2 font-medium">R$ {selectedWithdrawal.amount.toFixed(2)}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Taxa:</span>
+                    <span className="text-red-400 ml-2">-R$ {selectedWithdrawal.fee_amount.toFixed(2)}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Líquido:</span>
+                    <span className="text-white ml-2 font-medium">R$ {selectedWithdrawal.net_amount.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Dados de Pagamento */}
+            <div className="grid gap-2">
+              <Label className="text-white">Dados de Pagamento</Label>
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm">
+                {selectedWithdrawal.withdrawal_type === 'crypto' ? (
+                  <div className="space-y-2">
+                    <div>
+                      <span className="text-gray-400">Cripto:</span>
+                      <span className="text-white ml-2">{selectedWithdrawal.crypto_type}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Wallet:</span>
+                      <span className="text-white ml-2 font-mono text-xs break-all">{selectedWithdrawal.wallet_address}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div>
+                      <span className="text-gray-400">PIX:</span>
+                      <span className="text-white ml-2">{selectedWithdrawal.pix_key}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Nome:</span>
+                      <span className="text-white ml-2">{selectedWithdrawal.full_name}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">CPF:</span>
+                      <span className="text-white ml-2">{selectedWithdrawal.cpf}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Notas do Admin */}
+            <div className="grid gap-2">
+              <Label htmlFor="admin-notes" className="text-white">Notas do Administrador</Label>
+              <textarea
+                id="admin-notes"
+                value={adminNotes}
+                onChange={(e) => setAdminNotes(e.target.value)}
+                placeholder="Observações sobre o processamento..."
+                className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500 rounded-lg p-3 text-sm"
+                rows={2}
+              />
+            </div>
+
+            {/* Estorno (só para saques completed ou failed) */}
+            {(selectedWithdrawal.status === 'completed' || selectedWithdrawal.status === 'failed') && (
+              <div className="grid gap-2">
+                <Label className="text-yellow-400">Estorno de Saque</Label>
+                <div className="bg-yellow-500/5 border border-yellow-500/30 rounded-lg p-3">
+                  <p className="text-sm text-gray-400 mb-2">
+                    Devolverá R$ {selectedWithdrawal.amount.toFixed(2)} para o saldo do agente.
+                  </p>
+                  <textarea
+                    value={reversalJustification}
+                    onChange={(e) => setReversalJustification(e.target.value)}
+                    placeholder="Justificativa obrigatória para o estorno..."
+                    className="w-full bg-gray-800 border-gray-700 text-white placeholder:text-gray-500 rounded-lg p-3 text-sm"
+                    rows={2}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-between gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              closeWithdrawalModal()
+              setSelectedWithdrawal(null)
+              setAdminNotes('')
+              setReversalJustification('')
+            }}
+            disabled={processingWithdrawal}
+          >
+            Cancelar
+          </Button>
+          
+          <div className="flex gap-2">
+            {/* Estorno */}
+            {selectedWithdrawal && (selectedWithdrawal.status === 'completed' || selectedWithdrawal.status === 'failed') && (
+              <Button
+                onClick={reverseWithdrawal}
+                disabled={processingWithdrawal || !reversalJustification.trim()}
+                className="bg-yellow-600 hover:bg-yellow-700"
+              >
+                {processingWithdrawal ? 'Estornando...' : 'Estornar'}
+              </Button>
+            )}
+            
+            {/* Ações para saques pendentes */}
+            {selectedWithdrawal && selectedWithdrawal.status === 'pending' && (
+              <>
+                <Button
+                  onClick={() => processWithdrawal('failed', 'Saque rejeitado pelo administrador')}
+                  disabled={processingWithdrawal}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  {processingWithdrawal ? 'Processando...' : 'Rejeitar'}
+                </Button>
+                <Button
+                  onClick={() => processWithdrawal('completed')}
+                  disabled={processingWithdrawal}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {processingWithdrawal ? 'Processando...' : 'Aprovar'}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </Modal>

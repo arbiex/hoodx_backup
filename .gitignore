@@ -36,6 +36,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# 📁 NOVO: Logs do WebSocket
+
+
 # IDE
 .vscode/
 .idea/

@@ -1,10 +1,11 @@
 /**
- * 🎯 BLAZE MEGA ROULETTE BR - VERSÃO PRINCIPAL
+ * 🧪 BMG2 - VERSÃO DE TESTES
  * 
- * Esta é uma cópia da página BMG para operações na Blaze Mega Roulette BR.
+ * Esta é uma cópia da página BMG original para testar novas funcionalidades
+ * sem interferir no sistema em produção.
  * 
- * API: /api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr
- * Página: /blaze-megaroulettebr
+ * API: /api/bmgbr/blaze/pragmatic/blaze-megarouletebr
+ * Página: /bmgbr
  */
 'use client';
 
@@ -19,13 +20,14 @@ import InlineAlert from '@/components/ui/inline-alert';
 import CreditDisplay from '@/components/CreditDisplay';
 
 import OperationsCard from '@/components/OperationsCard';
+import DetailedHistoryCard from '@/components/DetailedHistoryCard';
 import GameStatisticsCard from '@/components/GameStatisticsCard';
 
 
 
 
 
-export default function BlazeMegaRouletteBR() {
+export default function BMGBR() {
   // Estados básicos
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -197,16 +199,16 @@ export default function BlazeMegaRouletteBR() {
   // ✅ NOVO: Estado para forçar exibição como operando (evita piscar)
   const [forceOperatingDisplay, setForceOperatingDisplay] = useState(false);
 
+  // 🛡️ NOVO: Estados para controle de segurança baseado em status
+  const [allowedStatuses, setAllowedStatuses] = useState<string[]>([]); // Status permitidos para operar
+  const [waitingForSafeStatus, setWaitingForSafeStatus] = useState(false); // Se está aguardando status seguro
+  const [currentGameStatus, setCurrentGameStatus] = useState<string>('Aguardando'); // Status atual do jogo (vem do GameStatisticsCard)
+
   // 🎯 NOVO: Estado para controlar Stop Gain (null = desabilitado)
   const [stopGainPercentage, setStopGainPercentage] = useState<number | null>(null);
 
   // 🎯 NOVO: Flag para identificar parada automática por stop gain
   const [isStopGainTriggered, setIsStopGainTriggered] = useState(false);
-
-  // 🛡️ NOVO: Sistema de controle de segurança por status
-  const [allowedStatuses, setAllowedStatuses] = useState<string[]>([]);
-  const [waitingForSafeStatus, setWaitingForSafeStatus] = useState(false);
-  const [currentGameStatus, setCurrentGameStatus] = useState<string>('Aguardando');
 
   // 💰 NOVA FUNÇÃO: Calcular sequência de martingale baseada no stake
   const calculateMartingaleSequence = (stake: number): number[] => {
@@ -285,60 +287,13 @@ export default function BlazeMegaRouletteBR() {
     }
   }, [stopGainPercentage, isOperating, forceOperatingDisplay, operationReport?.summary.profit, userBanca]);
 
-  // 🛡️ NOVO: Monitoramento automático para ativar modo real quando status melhorar
-  useEffect(() => {
-    // Só executar se estiver aguardando status seguro e regra estiver ativa
-    if (!waitingForSafeStatus || !currentGameStatus || !isOperating || allowedStatuses.length === 0) return;
-
-    // Verificar se o status atual agora é permitido
-    if (allowedStatuses.includes(currentGameStatus)) {
-      console.log(`🛡️ Status melhorou para "${currentGameStatus}" - Ativando modo real automaticamente`);
-      
-      // Resetar estado de aguardo
-      setWaitingForSafeStatus(false);
-      
-      // Notificar usuário
-      setOperationSuccess(`✅ Status seguro detectado: ${currentGameStatus}! Bot ativou automaticamente o modo real.`);
-      
-      // Enviar comando para API ativar modo real
-      const activateRealMode = async () => {
-        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) return;
-          
-          const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: user.id,
-              action: 'activate-real-mode',
-              allowedStatuses: allowedStatuses.length > 0 ? allowedStatuses : null
-            })
-          });
-          
-          const result = await response.json();
-          
-          if (!result.success) {
-            console.error('Erro ao ativar modo real:', result.error);
-            setOperationError('Erro ao ativar modo real automaticamente. Tente novamente.');
-          }
-        } catch (error) {
-          console.error('Erro ao ativar modo real:', error);
-          setOperationError('Erro ao ativar modo real automaticamente. Tente novamente.');
-        }
-      };
-      
-      activateRealMode();
-    }
-  }, [waitingForSafeStatus, currentGameStatus, allowedStatuses, isOperating]);
-
   // 🛡️ NOVO: Função para enviar configuração de status seguro para API
   const updateSafetyConfig = async (config: { allowedStatuses: string[]; waitingForSafeStatus: boolean; currentGameStatus: string }) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -351,23 +306,12 @@ export default function BlazeMegaRouletteBR() {
       });
 
       if (!response.ok) {
-        console.error('Erro ao atualizar configuração de segurança');
+        console.error('Erro ao atualizar configuração de segurança:', response.statusText);
       }
     } catch (error) {
       console.error('Erro ao atualizar configuração de segurança:', error);
     }
   };
-
-  // 🛡️ NOVO: Effect para enviar configuração quando mudar
-  useEffect(() => {
-    if (allowedStatuses.length > 0 || waitingForSafeStatus || currentGameStatus !== 'Aguardando') {
-      updateSafetyConfig({
-        allowedStatuses,
-        waitingForSafeStatus,
-        currentGameStatus
-      });
-    }
-  }, [allowedStatuses, waitingForSafeStatus, currentGameStatus]);
 
   // 💰 NOVA FUNÇÃO: Formatar valor monetário
   const formatCurrency = (value: number): string => {
@@ -544,12 +488,6 @@ export default function BlazeMegaRouletteBR() {
       return;
     }
 
-    // ✅ NOVO: No modo análise, sempre pode parar
-    if (operationState?.mode === 'analysis') {
-      setCanSafelyStop(true);
-      return;
-    }
-
     // 🛑 NOVO: Se backend enviou controle específico, usar essa informação
     if (stopButtonControl !== null) {
       setCanSafelyStop(stopButtonControl.canStop);
@@ -706,7 +644,7 @@ export default function BlazeMegaRouletteBR() {
       await resetAllGraphs();
 
       // ✅ ETAPA 1: Buscar token da Blaze
-      const tokenResponse = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const tokenResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -765,7 +703,7 @@ export default function BlazeMegaRouletteBR() {
       setAuthTokens(authData);
       
       // ✅ ETAPA 3: Conectar usando tokens gerados via Edge Function
-      const connectResponse = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const connectResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -806,7 +744,7 @@ export default function BlazeMegaRouletteBR() {
       }
 
       // ✅ ETAPA 2: Iniciar operação (start-operation)
-      const operationResponse = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const operationResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -858,7 +796,7 @@ export default function BlazeMegaRouletteBR() {
           throw new Error('Usuário não autenticado');
         }
         
-        const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -880,6 +818,7 @@ export default function BlazeMegaRouletteBR() {
         setForceOperatingDisplay(false); // ✅ NOVO: Liberar exibição forçada
         setOperationActive(false);
         setOperationState(null);
+        setWaitingForSafeStatus(false); // 🛡️ NOVO: Resetar estado de aguardo
         monitoringRef.current = false;
         
         // 🎯 NOVO: Resetar stop gain apenas se não foi parada automática
@@ -909,11 +848,11 @@ export default function BlazeMegaRouletteBR() {
         return;
       }
 
-      // 🛡️ NOVO: Verificar se o status atual é seguro (apenas para modo real)
-      if (allowedStatuses.length > 0 && !allowedStatuses.includes(currentGameStatus)) {
+      // 🛡️ NOVO: Verificar se o status atual é permitido para operação (apenas se regra estiver ativa)
+      if (allowedStatuses.length > 0 && currentGameStatus && !allowedStatuses.includes(currentGameStatus)) {
         setWaitingForSafeStatus(true);
         setOperationError(null);
-        setOperationSuccess(`⏳ Bot ligado em modo análise. Aguardando status seguro para modo real. Atual: ${currentGameStatus}. Permitidos: ${allowedStatuses.join(', ')}`);
+        setOperationSuccess(`⏳ Bot ligado em modo análise. Aguardando status seguro para modo real. Status atual: ${currentGameStatus}. Bot ativará automaticamente quando o status for: ${allowedStatuses.join(', ')}`);
         
         // Atualizar configuração na API
         await updateSafetyConfig({
@@ -948,7 +887,7 @@ export default function BlazeMegaRouletteBR() {
     
     while (monitoringRef.current) {
     try {
-      const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1006,6 +945,11 @@ export default function BlazeMegaRouletteBR() {
           if (result.data.detailedHistory) {
             setDetailedHistory(result.data.detailedHistory);
           }
+
+          // 🛡️ NOVO: Capturar status atual do jogo (se disponível na API)
+          if (result.data.currentGameStatus) {
+            setCurrentGameStatus(result.data.currentGameStatus);
+          }
         }
 
     } catch (error) {
@@ -1019,7 +963,7 @@ export default function BlazeMegaRouletteBR() {
   // Buscar relatório
   const fetchOperationReport = async () => {
     try {
-      const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1041,7 +985,7 @@ export default function BlazeMegaRouletteBR() {
   // Reset relatório
   const resetOperationReport = async () => {
     try {
-      const response = await fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1063,7 +1007,7 @@ export default function BlazeMegaRouletteBR() {
   // 2. Função para atualizar o backend sempre que o switch mudar
   useEffect(() => {
     if (!userIdRef.current) return;
-          fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+          fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1091,6 +1035,53 @@ export default function BlazeMegaRouletteBR() {
       operationRef.current = false;
     };
   }, []);
+
+  // 🛡️ NOVO: Monitoramento automático para ativar modo real quando status melhorar
+  useEffect(() => {
+    // Só executar se estiver aguardando status seguro e regra estiver ativa
+    if (!waitingForSafeStatus || !currentGameStatus || !isOperating || allowedStatuses.length === 0) return;
+
+    // Verificar se o status atual agora é permitido
+    if (allowedStatuses.includes(currentGameStatus)) {
+      console.log(`🛡️ Status melhorou para "${currentGameStatus}" - Ativando modo real automaticamente`);
+      
+      // Resetar estado de aguardo
+      setWaitingForSafeStatus(false);
+      
+      // Notificar usuário
+      setOperationSuccess(`✅ Status seguro detectado: ${currentGameStatus}! Bot ativou automaticamente o modo real.`);
+      
+      // Enviar comando para API ativar modo real
+      const activateRealMode = async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+          
+                      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: user.id,
+                action: 'activate-real-mode',
+                allowedStatuses: allowedStatuses.length > 0 ? allowedStatuses : null
+              })
+            });
+          
+          const result = await response.json();
+          
+          if (!result.success) {
+            console.error('Erro ao ativar modo real:', result.error);
+            setOperationError('Erro ao ativar modo real automaticamente. Tente novamente.');
+          }
+        } catch (error) {
+          console.error('Erro ao ativar modo real:', error);
+          setOperationError('Erro ao ativar modo real automaticamente. Tente novamente.');
+        }
+      };
+      
+      activateRealMode();
+    }
+  }, [waitingForSafeStatus, currentGameStatus, allowedStatuses, isOperating]);
 
   // NOVO: Controle inteligente do botão baseado no padrão E janela de apostas
   const hasCompletePattern = lastSevenResults.length >= 7;
@@ -1135,7 +1126,7 @@ export default function BlazeMegaRouletteBR() {
     setTotalMartingaleAmount(calculateTotalAmount(seq));
     // Enviar para backend
     if (userIdRef.current) {
-      fetch('/api/blaze-megaroulettebr/blaze/pragmatic/blaze-megarouletebr', {
+      fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1216,9 +1207,6 @@ export default function BlazeMegaRouletteBR() {
               </div>
             </div>
           </button>
-
-          {/* Card Créditos Disponíveis */}
-          <CreditDisplay />
 
           {/* 💰 NOVO: Card de Configuração de Banca */}
           <Card className="border-yellow-500/30 backdrop-blur-sm">
@@ -1359,7 +1347,7 @@ export default function BlazeMegaRouletteBR() {
                     </div>
                   )}
                 </div>
-                
+
                 {/* 🛡️ NOVO: Seção de Status Seguro */}
                 <div className="mt-6 space-y-3">
                   <label className="text-sm font-semibold text-gray-300 font-mono">
@@ -1454,6 +1442,11 @@ export default function BlazeMegaRouletteBR() {
             </CardContent>
           </Card>
 
+          {/* 📊 NOVO: Card de Estatísticas dos Jogos (STATUS_ATUAL) - MOVIDO PARA BAIXO DO CARD DE CONFIGURAÇÕES */}
+          <GameStatisticsCard 
+            onStatusChange={(status) => setCurrentGameStatus(status)}  // 🛡️ NOVO: Capturar status atual
+          />
+
           {/* Card Operação */}
           <Card className="border-blue-500/30 backdrop-blur-sm">
 
@@ -1538,11 +1531,106 @@ export default function BlazeMegaRouletteBR() {
                   </div>
                 )}
 
+                {/* Estado da Operação */}
+                {isRealOperation && operationState && (
+                  <div className="space-y-2">
+                    <div className="p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg space-y-1 text-xs font-mono">
+                      {lastSevenResults.length >= 5 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Histórico:</span>
+                          <span className="text-gray-500">{basePattern.map((cor, i) => `${i+1}:${cor}`).join(' ')}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
+                {/* Logs do WebSocket */}
+                {websocketLogs.length > 0 && (
+                  <div className="space-y-2">
 
+                    <div className="max-h-64 overflow-y-auto p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1">
+                      {websocketLogs.filter(log => 
+                        !log.message.includes('🎰 Janela de apostas') && 
+                        !log.message.includes('Apostas abertas') && 
+                        !log.message.includes('Apostas fechadas')
+                      ).slice(0, 20).map((log, index) => (
+                        <div key={`log-${index}-${log.timestamp}`} className="text-xs font-mono flex items-start gap-2">
+                          <span className="text-gray-500 text-xs">
+                            {new Date(log.timestamp).toLocaleTimeString('pt-BR')}
+                          </span>
+                          <span className={`flex-1 ${
+                            log.type === 'error' ? 'text-red-400' :
+                            log.type === 'success' ? 'text-green-400' :
+                            log.type === 'game' ? 'text-yellow-400' :
+                            log.type === 'bets-open' ? 'text-green-400 font-bold' :
+                            log.type === 'bets-closed' ? 'text-red-400 font-bold' :
+                            'text-gray-300'
+                          }`}>
+                            {log.message}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-
-
+                {/* 📊 Gráfico de Vitórias Martingale */}
+                {isOperating && (
+                  <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg">
+                    <div className="flex items-center gap-2 mb-3">
+                      <BarChart3 className="h-3 w-3 text-purple-400" />
+                      <span className="text-xs font-mono text-purple-400">VITÓRIAS MARTINGALE</span>
+                    </div>
+                    
+                    {/* Estatísticas compactas */}
+                    <div className="grid grid-cols-4 gap-2 mb-3">
+                      {martingaleUsage.map((usage, index) => (
+                        <div
+                          key={index}
+                          className="p-1.5 bg-gray-800/50 border border-gray-600/30 rounded text-center"
+                        >
+                          <div className="text-xs text-gray-400 font-mono">
+                            M{index + 1}
+                          </div>
+                          <div className="text-sm font-bold text-white font-mono">
+                            {usage}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    {/* Gráfico de barras simples */}
+                    <div className="flex items-end gap-1 h-16 bg-gray-800/30 p-2 rounded">
+                      {martingaleUsage.map((usage, index) => {
+                        const maxUsage = Math.max(...martingaleUsage, 1);
+                        const barHeight = usage > 0 ? (usage / maxUsage) * 100 : 5; // Mínimo 5% para visibilidade
+                        const colors = ['#10B981', '#F59E0B', '#EF4444', '#8B5CF6']; // Verde, Amarelo, Vermelho, Roxo
+                        
+                        return (
+                          <div key={index} className="flex-1 flex flex-col items-center">
+                            <div 
+                              className="w-full rounded-t transition-all duration-300"
+                              style={{ 
+                                height: `${barHeight}%`,
+                                backgroundColor: usage > 0 ? colors[index] : '#374151',
+                                minHeight: '2px'
+                              }}
+                            />
+                            <span className="text-xs font-mono text-gray-400 mt-1">M{index + 1}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    
+                    <div className="text-xs font-mono text-purple-400 text-center mt-2 space-y-1">
+                      <div>Vitórias: {martingaleUsage.reduce((sum, usage) => sum + usage, 0)}</div>
+                      <div className="text-xs text-gray-400">
+                        Rodadas analisadas: M1={analysisRounds[0]} | M2={analysisRounds[1]} | M3={analysisRounds[2]} | M4={analysisRounds[3]}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Erro */}
                 {operationError && (
@@ -1600,9 +1688,9 @@ export default function BlazeMegaRouletteBR() {
                   {/* ✅ NOVO: Mostrar informações da estratégia quando não operando */}
                   
 
+
+
                 </div>
-
-
 
               </div>
             </CardContent>
@@ -1617,8 +1705,10 @@ export default function BlazeMegaRouletteBR() {
           {/* Novos Cards dos Componentes */}
           <OperationsCard operationReport={operationReport} />
           
-          {/* 📊 NOVO: Card de Estatísticas dos Jogos */}
-          <GameStatisticsCard onStatusChange={setCurrentGameStatus} />
+          {/* 📋 NOVO: Card de Histórico Detalhado */}
+          <DetailedHistoryCard history={detailedHistory} />
+          
+          <CreditDisplay />
 
         </div>
       </div>

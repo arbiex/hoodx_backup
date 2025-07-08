@@ -32,8 +32,43 @@ export default function OperationsCard({ operationReport }: OperationsCardProps)
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-6 text-gray-400 font-mono text-sm">
-            Nenhuma operação ativa
+          <div className="space-y-4">
+            {/* Cards de Estatísticas - Estado Inativo */}
+            <div className="grid grid-cols-3 gap-4">
+              {/* Card APOSTAS */}
+              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                <div className="text-center">
+                  <div className="text-gray-400 text-xs font-mono mb-1">APOSTAS</div>
+                  <div className="text-blue-400 text-lg font-mono font-bold">
+                    0
+                  </div>
+                </div>
+              </div>
+              
+              {/* Card LUCRO */}
+              <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                <div className="text-center">
+                  <div className="text-gray-400 text-xs font-mono mb-1">LUCRO</div>
+                  <div className="text-green-400 text-lg font-mono font-bold">
+                    R$ 0,00
+                  </div>
+                </div>
+              </div>
+
+              {/* Card CONSUMO */}
+              <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                <div className="text-center">
+                  <div className="text-gray-400 text-xs font-mono mb-1">CONSUMO</div>
+                  <div className="text-orange-400 text-lg font-mono font-bold">
+                    R$ 0,00
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-center py-2 text-gray-400 font-mono text-sm">
+              Nenhuma operação ativa
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -54,7 +89,7 @@ export default function OperationsCard({ operationReport }: OperationsCardProps)
       <CardContent>
         <div className="space-y-4">
           {/* Cards de Estatísticas */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             {/* Card APOSTAS */}
             <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
               <div className="text-center">
@@ -73,6 +108,16 @@ export default function OperationsCard({ operationReport }: OperationsCardProps)
                   (operationReport.summary.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'
                 }`}>
                   R$ {(operationReport.summary.profit || 0).toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            {/* Card CONSUMO */}
+            <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+              <div className="text-center">
+                <div className="text-gray-400 text-xs font-mono mb-1">CONSUMO</div>
+                <div className="text-orange-400 text-lg font-mono font-bold">
+                  R$ 0,00
                 </div>
               </div>
             </div>

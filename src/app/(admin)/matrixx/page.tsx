@@ -6,12 +6,16 @@ import AdminHeader from '@/components/AdminHeader'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import Modal from '@/components/ui/modal'
+import { toast } from 'sonner'
 
 import { 
   Users, 
   CreditCard, 
   Search,
-  DollarSign
+  DollarSign,
+  Plus
 } from 'lucide-react'
 import { Pagination } from '@/components/ui/pagination'
 
@@ -33,6 +37,13 @@ export default function MatrixPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const usersPerPage = 10;
+  
+  // Estados do modal de créditos
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [creditAmount, setCreditAmount] = useState('');
+  const [creditDescription, setCreditDescription] = useState('');
+  const [addingCredits, setAddingCredits] = useState(false);
   
   // Aplicar pesquisa nos usuários
   const filteredUsers = users.filter(user => 
@@ -86,19 +97,73 @@ export default function MatrixPage() {
     }
   };
 
-  // Atualizar créditos do usuário
-  const updateUserCredits = async (userId: string, newCredits: number) => {
+  // Abrir modal de adicionar créditos
+  const openAddCreditsModal = (user: User) => {
+    setSelectedUser(user);
+    setCreditAmount('');
+    setCreditDescription('');
+    setIsModalOpen(true);
+  };
+
+  // Fechar modal
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedUser(null);
+    setCreditAmount('');
+    setCreditDescription('');
+  };
+
+  // Adicionar créditos manuais
+  const addManualCredits = async () => {
+    if (!selectedUser || !currentUser?.id) return;
+    
+    const amount = parseFloat(creditAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error('Valor inválido', {
+        description: 'Digite um valor maior que zero'
+      });
+      return;
+    }
+    
+    if (!creditDescription.trim()) {
+      toast.error('Descrição obrigatória', {
+        description: 'Digite o motivo da adição de créditos'
+      });
+      return;
+    }
+    
+    setAddingCredits(true);
+    
     try {
-      const { error } = await supabase.rpc('update_user_credits_admin', {
-        p_user_id: userId,
-        p_credits: newCredits
+      const { data, error } = await supabase.rpc('add_manual_credits', {
+        p_user_id: selectedUser.id,
+        p_amount: amount,
+        p_description: creditDescription,
+        p_admin_user_id: currentUser.id
       });
 
-      if (!error) {
+      if (error) {
+        console.error('Erro ao adicionar créditos:', error);
+        toast.error('Erro ao adicionar créditos');
+        return;
+      }
+
+      if (data.success) {
+        toast.success('Créditos adicionados com sucesso', {
+          description: `R$ ${amount.toFixed(2)} adicionados para ${data.user_email}`
+        });
+        closeModal();
         loadUsers(); // Recarregar lista
+      } else {
+        toast.error('Erro ao adicionar créditos', {
+          description: data.error || 'Erro desconhecido'
+        });
       }
     } catch (error) {
-      console.error('Erro ao atualizar créditos:', error);
+      console.error('Erro:', error);
+      toast.error('Erro inesperado ao adicionar créditos');
+    } finally {
+      setAddingCredits(false);
     }
   };
 
@@ -235,15 +300,10 @@ export default function MatrixPage() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => {
-                                    const newCredits = prompt(`Créditos atuais: R$ ${user.credits || 0}\nNovo valor:`, (user.credits || 0).toString());
-                                    if (newCredits !== null) {
-                                      updateUserCredits(user.id, parseFloat(newCredits) || 0);
-                                    }
-                                  }}
+                                  onClick={() => openAddCreditsModal(user)}
                                   className="border-gray-600 text-gray-300 hover:bg-gray-700 text-xs px-2 py-1 h-7"
                                 >
-                                  Editar Créditos
+                                  <Plus className="h-3 w-3 mr-1" /> Adicionar Créditos
                                 </Button>
                               </div>
                             </td>
@@ -270,6 +330,46 @@ export default function MatrixPage() {
           </Card>
         </div>
       </main>
+
+      {/* Modal de Adicionar Créditos */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={closeModal}
+        title={`Adicionar Créditos para ${selectedUser?.email}`}
+      >
+        <div className="space-y-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="creditAmount">Valor dos Créditos</Label>
+            <Input
+              id="creditAmount"
+              type="number"
+              value={creditAmount}
+              onChange={(e) => setCreditAmount(e.target.value)}
+              placeholder="Ex: 100.00"
+              className="bg-gray-800 border-gray-700 text-white"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="creditDescription">Descrição do Crédito</Label>
+            <Input
+              id="creditDescription"
+              type="text"
+              value={creditDescription}
+              onChange={(e) => setCreditDescription(e.target.value)}
+              placeholder="Ex: Reembolso de serviço"
+              className="bg-gray-800 border-gray-700 text-white"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={closeModal} disabled={addingCredits}>
+            Cancelar
+          </Button>
+          <Button onClick={addManualCredits} disabled={addingCredits}>
+            {addingCredits ? 'Adicionando...' : 'Adicionar Créditos'}
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 } 

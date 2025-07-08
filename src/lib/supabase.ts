@@ -15,8 +15,7 @@ if (!supabaseAnonKey) {
 
 // Debug logs para verificar as variáveis (apenas no desenvolvimento)
 if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-  console.log('Supabase URL:', supabaseUrl)
-  console.log('Supabase Key exists:', !!supabaseAnonKey)
+  // Debug removido para evitar logs desnecessários
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {

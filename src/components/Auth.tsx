@@ -120,6 +120,14 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
           })
           hasShownToast.current = true
         }
+      }).catch(error => {
+        console.error('Error in getSponsorInfo:', error)
+        if (isInviteOnly && !hasShownToast.current) {
+          toast.error("CONVITE_INVÁLIDO", {
+            description: "Erro ao validar código de convite"
+          })
+          hasShownToast.current = true
+        }
       })
     }
   }, [getSponsorInfo, isInviteOnly, initialReferralCode])
@@ -275,9 +283,21 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
                         getSponsorInfo(code).then(sponsor => {
                           if (sponsor) {
                             setSponsorInfo(sponsor)
+                            toast.success("CÓDIGO_VÁLIDO", {
+                              description: `Agente encontrado: ${sponsor.email}`
+                            })
                           } else {
                             setSponsorInfo(null)
+                            toast.error("CÓDIGO_INVÁLIDO", {
+                              description: "Código não encontrado ou inativo"
+                            })
                           }
+                        }).catch(error => {
+                          console.error('Error in input getSponsorInfo:', error)
+                          setSponsorInfo(null)
+                          toast.error("ERRO_VALIDAÇÃO", {
+                            description: "Erro ao validar código"
+                          })
                         })
                       } else {
                         setSponsorInfo(null)

@@ -3,6 +3,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Copy, Users, Link as LinkIcon, DollarSign, Crown, Shield, Target, Check, Filter, ChevronDown, ChevronUp, Clock, CreditCard, AlertCircle } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { toast } from 'sonner'
@@ -11,6 +12,8 @@ import MatrixRain from '@/components/MatrixRain'
 import Modal, { useModal } from '@/components/ui/modal'
 import { useNetwork, NetworkNode } from '@/hooks/useNetwork'
 import { Pagination, PaginationInfo, usePagination } from '@/components/ui/pagination'
+import { WithdrawalModal } from '@/components/WithdrawalModal'
+import { WithdrawalHistoryCard } from '@/components/WithdrawalHistoryCard'
 
 export default function HackerNetworkPage() {
   const { 
@@ -24,6 +27,7 @@ export default function HackerNetworkPage() {
   } = useNetwork()
   
   const { isOpen: isFiltersModalOpen, openModal: openFiltersModal, closeModal: closeFiltersModal } = useModal()
+  const { isOpen: isWithdrawalModalOpen, openModal: openWithdrawalModal, closeModal: closeWithdrawalModal } = useModal()
   
   // Estados para verificação de agente
   const [isAgent, setIsAgent] = useState<boolean | null>(null)
@@ -42,6 +46,8 @@ export default function HackerNetworkPage() {
     joinedDate: string;
     code: string;
   } | null>(null)
+  
+
 
   // Filtrar dados baseado nos filtros aplicados
   const filteredNodes = useMemo(() => {
@@ -96,7 +102,7 @@ export default function HackerNetworkPage() {
   const pagination = usePagination(filteredNodes.length, itemsPerPage)
   const paginatedNodes = pagination.getPageItems(filteredNodes)
 
-  // Verificar se o usuário é um agente ativo
+  // Verificar se o usuário é um agente (ativo ou inativo)
   useEffect(() => {
     const checkAgentStatus = async () => {
       try {
@@ -105,7 +111,6 @@ export default function HackerNetworkPage() {
           .from('agents')
           .select('is_active')
           .eq('user_id', (await supabase.auth.getUser()).data.user?.id)
-          .eq('is_active', true)
           .single()
 
         if (error && error.code !== 'PGRST116') {
@@ -114,7 +119,12 @@ export default function HackerNetworkPage() {
           return
         }
 
-        setIsAgent(!!data)
+        // Se encontrou um agente, independente do status
+        if (data) {
+          setIsAgent(true)
+        } else {
+          setIsAgent(false)
+        }
       } catch (error) {
         console.error('Erro inesperado:', error)
         setIsAgent(false)
@@ -155,9 +165,21 @@ export default function HackerNetworkPage() {
   ]
 
   const handleWithdrawalClick = () => {
-    // Navigate to withdrawal page
-    window.location.href = '/withdrawal'
+    const currentBalance = commissionBalance?.commission_balance || 0
+    
+    if (currentBalance < 10) {
+      toast.error('Saldo insuficiente', {
+        description: 'Valor mínimo para saque é R$ 10,00'
+      })
+      return
+    }
+    
+    openWithdrawalModal()
   }
+
+
+
+
 
   const copyInviteLink = () => {
     if (referralInfo?.referral_url && referralInfo.referral_url.trim() && referralInfo.referral_url !== 'Loading...') {
@@ -234,7 +256,7 @@ export default function HackerNetworkPage() {
               <div className="text-center space-y-4">
                 <div className="flex items-center gap-2 text-yellow-400 text-sm font-mono justify-center">
                   <AlertCircle className="h-4 w-4" />
-                  Você não é um agente ativo
+                  Você não é um agente
                 </div>
                 
                 <p className="text-gray-400 text-sm font-mono">
@@ -280,6 +302,8 @@ export default function HackerNetworkPage() {
            </Button>
          </div>
 
+
+
          {/* Network Stats Overview */}
          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
            {/* Total Earned */}
@@ -319,6 +343,34 @@ export default function HackerNetworkPage() {
            </Card>
         </div>
 
+        {/* Invite Link Section */}
+        <Card className="mb-8 border-green-500/30 backdrop-blur-lg shadow-2xl shadow-green-500/10">
+          <CardHeader>
+            <CardTitle className="text-green-400 font-mono flex items-center gap-2">
+              <LinkIcon className="h-5 w-5" />
+              LINK_REDE
+            </CardTitle>
+            <CardDescription className="text-gray-400 font-mono text-xs">
+              // Compartilhe este link para expandir sua rede
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2">
+              <Input
+                value={referralInfo?.referral_url && referralInfo.referral_url.trim() && referralInfo.referral_url !== 'Loading...' ? referralInfo.referral_url : 'Loading...'}
+                readOnly
+                className="bg-black/50 border-green-500/30 text-green-400 font-mono text-sm"
+              />
+              <Button
+                onClick={copyInviteLink}
+                className="bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono"
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Available Balance with Withdrawal */}
         <Card className="mb-8 border-purple-500/30 backdrop-blur-sm">
           <CardHeader>
@@ -347,34 +399,6 @@ export default function HackerNetworkPage() {
             </div>
              </CardContent>
            </Card>
-
-                 {/* Invite Link Section */}
-         <Card className="mb-8 border-green-500/30 backdrop-blur-lg shadow-2xl shadow-green-500/10">
-           <CardHeader>
-             <CardTitle className="text-green-400 font-mono flex items-center gap-2">
-               <LinkIcon className="h-5 w-5" />
-               LINK_REDE
-             </CardTitle>
-             <CardDescription className="text-gray-400 font-mono text-xs">
-               // Compartilhe este link para expandir sua rede
-             </CardDescription>
-           </CardHeader>
-           <CardContent>
-             <div className="flex gap-2">
-               <Input
-                 value={referralInfo?.referral_url && referralInfo.referral_url.trim() && referralInfo.referral_url !== 'Loading...' ? referralInfo.referral_url : 'Loading...'}
-                 readOnly
-                 className="bg-black/50 border-green-500/30 text-green-400 font-mono text-sm"
-               />
-               <Button
-                 onClick={copyInviteLink}
-                 className="bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono"
-               >
-                 <Copy className="h-4 w-4" />
-               </Button>
-             </div>
-           </CardContent>
-         </Card>
 
                  {/* Commission Structure */}
          <Card className="mb-8 border-green-500/30 backdrop-blur-lg shadow-2xl shadow-green-500/10">
@@ -476,7 +500,7 @@ export default function HackerNetworkPage() {
                       <div>
                       <div className="font-medium font-mono text-red-400 text-sm">TAXA_SAQUE</div>
                       <div className="text-xs text-gray-400 font-mono mt-1">
-                        Taxa de processamento de 3% aplicada a todas as solicitações de saque
+                        Taxa de processamento de 2% aplicada a todas as solicitações de saque
                       </div>
                     </div>
                   </div>
@@ -487,7 +511,18 @@ export default function HackerNetworkPage() {
                     <div>
                       <div className="font-medium font-mono text-purple-400 text-sm">LIMITE_SAQUE</div>
                       <div className="text-xs text-gray-400 font-mono mt-1">
-                        Máximo de uma solicitação de saque por semana por conta
+                        Máximo de uma solicitação de saque por dia
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Minimum Withdrawal */}
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-orange-500/5 border border-orange-500/20">
+                    <DollarSign className="h-5 w-5 text-orange-400 mt-0.5" />
+                    <div>
+                      <div className="font-medium font-mono text-orange-400 text-sm">SAQUE_MÍNIMO</div>
+                      <div className="text-xs text-gray-400 font-mono mt-1">
+                        Valor mínimo de R$ 100,00 para solicitar saque
                       </div>
                     </div>
                   </div>
@@ -521,6 +556,9 @@ export default function HackerNetworkPage() {
              </CardContent>
           </Card>
         )}
+
+        {/* Withdrawal History */}
+        <WithdrawalHistoryCard />
 
         {/* All Network Nodes */}
         <Card className="border-green-500/30 backdrop-blur-sm">
@@ -563,7 +601,7 @@ export default function HackerNetworkPage() {
             )}
 
             {/* Empty State */}
-                          {!loading && !error && filteredNodes.length === 0 && (
+            {!loading && !error && filteredNodes.length === 0 && (
               <div className="text-center py-8">
                 <div className="text-gray-400 font-mono">
                   {networkNodes.length === 0 
@@ -635,6 +673,13 @@ export default function HackerNetworkPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Withdrawal Modal */}
+        <WithdrawalModal
+          isOpen={isWithdrawalModalOpen}
+          onClose={closeWithdrawalModal}
+          availableBalance={commissionBalance?.commission_balance || 0}
+        />
 
         {/* Filters Modal */}
         <Modal

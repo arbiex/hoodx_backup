@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 
 // Tipos
 interface AuthData {
@@ -349,10 +349,6 @@ export function useMegaRouletteBlaze() {
   // Função para obter userId atual
   const getCurrentUserId = async (): Promise<string | null> => {
     try {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
       const { data: { user } } = await supabase.auth.getUser();
       return user?.id || null;
     } catch (error) {

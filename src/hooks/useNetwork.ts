@@ -84,12 +84,11 @@ export function useNetwork() {
         return
       }
 
-      // Verificar se o usuário é um agente ativo
+      // Verificar se o usuário é um agente (ativo ou inativo)
       const { data: agentData, error: agentError } = await supabase
         .from('agents')
         .select('agent_code, commission_rate, is_active')
         .eq('user_id', user.id)
-        .eq('is_active', true)
         .single()
 
       if (agentError && agentError.code !== 'PGRST116') {
@@ -99,110 +98,78 @@ export function useNetwork() {
       }
 
       if (!agentData) {
-        setError('Usuário não é um agente ativo')
+        setError('Usuário não é um agente')
         return
       }
 
-      // Buscar dados da rede do agente usando a nova função
-      const { data: networkData, error: networkError } = await supabase.rpc('get_agent_network_stats', {
-        p_user_id: user.id
-      })
-      
+      // URL base da aplicação
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hoodx.ai'
+      const referralUrl = `${baseUrl}/invite?ref=${agentData.agent_code}`
 
-
-      if (networkError) {
-        console.error('Error loading network data:', networkError)
-        setError(`Failed to load network data: ${networkError.message || JSON.stringify(networkError)}`)
-        return
+      const referralData = {
+        referral_code: agentData.agent_code,
+        referral_url: referralUrl
       }
 
-      if (networkData && !networkData.error) {
-        try {
-          // URL base da aplicação
-          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hoodx.ai'
-          const referralUrl = `${baseUrl}/invite?ref=${agentData.agent_code}`
+      // Buscar lista de indicados do agente de forma segura
+      let nodesData: NetworkNode[] = []
+      try {
+        const { data: referralsData, error: referralsError } = await supabase.rpc('get_user_referrals', {
+          agent_user_id: user.id
+        })
 
-          const referralData = {
-            referral_code: agentData.agent_code,
-            referral_url: referralUrl
-          }
-
-          const statsData = {
-            total_referrals: networkData.total_referrals || 0,
-            active_referrals: networkData.total_referrals || 0,
-            total_commissions_generated: networkData.total_commissions || 0,
-            max_level: 1
-          }
-
-          // Buscar lista de indicados do agente
-          const { data: referralsData, error: referralsError } = await supabase
-            .from('user_referrals')
-            .select(`
-              user_id,
-              created_at,
-              auth.users!user_referrals_user_id_fkey(email)
-            `)
-            .eq('sponsor_id', user.id)
-
-          let nodesData: NetworkNode[] = []
-          if (referralsData && !referralsError) {
-            nodesData = referralsData.map((ref: any) => ({
-              user_id: ref.user_id,
-              email: ref.users?.email || 'Email não disponível',
-              level: 1,
-              status: 'active' as const,
-              total_commissions: 0,
-              joined_date: ref.created_at,
-              referral_code: agentData.agent_code
-            }))
-          }
-
-          setReferralInfo(referralData)
-          setNetworkStats(statsData)
-          setNetworkNodes(nodesData)
-        } catch (dataError) {
-          console.error('Error processing network data:', dataError)
-          setError(`Error processing network data: ${dataError}`)
+        if (referralsData && !referralsError) {
+          nodesData = referralsData.map((ref: any) => ({
+            user_id: ref.user_id,
+            email: ref.email || 'Email não disponível',
+            level: 1,
+            status: 'active' as const,
+            total_commissions: 0,
+            joined_date: ref.created_at,
+            referral_code: agentData.agent_code
+          }))
+        } else if (referralsError) {
+          console.warn('Warning loading referrals:', referralsError)
+          // Não falhar se não conseguir carregar indicados, apenas definir como lista vazia
+          nodesData = []
         }
-      } else {
-        // Se networkData tiver erro ou for null
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hoodx.ai'
-        const referralUrl = `${baseUrl}/invite?ref=${agentData.agent_code}`
-        
-        setReferralInfo({
-          referral_code: agentData.agent_code,
-          referral_url: referralUrl
-        })
-        setNetworkStats({
-          total_referrals: 0,
-          active_referrals: 0,
-          total_commissions_generated: 0,
-          max_level: 1
-        })
-        setNetworkNodes([])
+      } catch (referralsErr) {
+        console.warn('Warning loading referrals:', referralsErr)
+        nodesData = []
       }
+
+      // Definir estatísticas baseadas nos dados reais
+      const statsData = {
+        total_referrals: nodesData.length,
+        active_referrals: nodesData.length,
+        total_commissions_generated: 0,
+        max_level: 1
+      }
+
+      setReferralInfo(referralData)
+      setNetworkStats(statsData)
+      setNetworkNodes(nodesData)
 
     } catch (err) {
       console.error('Error loading network data:', err)
-      setError('Failed to load network data')
+      setError('Erro ao carregar dados da rede')
     } finally {
       setLoading(false)
     }
   }, [])
 
-  // Buscar saldo de comissões (apenas para agentes ativos)
+  // Buscar saldo de comissões (para agentes ativos e inativos)
   const loadCommissionBalance = useCallback(async () => {
     try {
       const { supabase } = await import('@/lib/supabase')
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // Verificar se é um agente ativo
+      // Verificar se é um agente (ativo ou inativo)
       const { data: agentData, error: agentError } = await supabase
         .from('agents')
         .select('is_active')
         .eq('user_id', user.id)
-        .eq('is_active', true)
         .single()
 
       if (agentError && agentError.code !== 'PGRST116') {
@@ -381,8 +348,6 @@ export function useNetwork() {
       const { supabase } = await import('@/lib/supabase')
       const { data, error } = await supabase.rpc('register_user_with_referral', {
         p_user_id: userId,
-        p_email: email,
-        p_full_name: fullName,
         p_referral_code: referralCode
       })
 

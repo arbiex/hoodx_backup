@@ -1,12 +1,12 @@
 'use client'
 
 /**
- * 🧪 MODAL ATUALIZADO PARA BMG2
+ * 🧪 MODAL DINÂMICO PARA DIFERENTES ESTRATÉGIAS
  * 
- * Modal de seleção de stake atualizado com os novos valores de martingale:
- * - Nova sequência M1-M10: [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50]
- * - Multiplicadores: 1x(R$20), 3x(R$60), 6x(R$120), 10x(R$200)
- * - Bancas ideais ajustadas: 200, 600, 1200, 2000
+ * Modal de seleção de stake que adapta-se automaticamente às diferentes sequências:
+ * - BMG/BOTS: [1.50, 3.00, 6.00, 12.50, 25.50, 51.50, 103.50, 207.50, 415.50, 831.50]
+ * - BMG2/BOTS2: [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50]
+ * - BMGBR: [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50]
  */
 
 import Modal from '@/components/ui/modal'
@@ -30,44 +30,62 @@ interface BlazeMegaRouletteStrategyModalProps {
   onClose: () => void
   onConfirm: (tipValue: number) => void
   loading?: boolean
+  // ✅ NOVA PROP: Sequência de martingales específica da estratégia
+  martingaleSequence?: number[]
+  // ✅ NOVA PROP: Nome da estratégia para personalização
+  strategyName?: string
 }
 
 export default function BlazeMegaRouletteStrategyModal({ 
   isOpen, 
   onClose, 
   onConfirm, 
-  loading = false 
+  loading = false,
+  martingaleSequence = [1.50, 3.00, 6.00, 12.50, 25.50, 51.50, 103.50, 207.50, 415.50, 831.50], // Default BMG
+  strategyName = 'BMG'
 }: BlazeMegaRouletteStrategyModalProps) {
   const [selectedMultiplier, setSelectedMultiplier] = useState<number>(1)
 
-  // Multiplicadores disponíveis - VALORES ATUALIZADOS BMG2
+  // ✅ MULTIPLICADORES DINÂMICOS baseados na primeira aposta da sequência
+  const baseValue = martingaleSequence[0] // M1 da sequência
+  
   const multiplierOptions = [
-    { value: 1, baseValue: 20.00 },
-    { value: 3, baseValue: 60.00 },
-    { value: 6, baseValue: 120.00 },
-    { value: 10, baseValue: 200.00 }
+    { value: 1, baseValue: baseValue * 1 },
+    { value: 3, baseValue: baseValue * 3 },
+    { value: 6, baseValue: baseValue * 6 },
+    { value: 10, baseValue: baseValue * 10 }
   ]
 
-  // Nova sequência base M1-M10 - VALORES ATUALIZADOS BMG2
-  const baseSequence = [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50]
+  // ✅ BANCA IDEAL DINÂMICA baseada na sequência total
+  const calculateBancaIdeal = (multiplier: number): number => {
+    const totalSequenceValue = martingaleSequence.reduce((sum, value) => sum + value, 0) * multiplier
+    
+    // Diferentes estratégias de banca ideal
+    if (strategyName === 'BMG' || strategyName === 'BLAZE_MEGA_ROULETTE') {
+      // BMG/BOTS: Simplesmente a soma total M1-M10 arredondada para cima
+      return Math.ceil(totalSequenceValue)
+    } else {
+      // BMG2/BMGBR: Sequência personalizada com valores fixos
+      return multiplier === 1 ? 200 : 
+             multiplier === 3 ? 600 :
+             multiplier === 6 ? 1200 :
+             multiplier === 10 ? 2000 :
+             Math.ceil(totalSequenceValue * 2.5)
+    }
+  }
 
   // Gerar estratégia com multiplicador
   const getStrategy = (multiplier: number): StrategyInfo => {
-    const sequence: MartingaleSequence[] = baseSequence.map((value, index) => ({
+    const sequence: MartingaleSequence[] = martingaleSequence.map((value, index) => ({
       level: index + 1,
       value: value * multiplier
     }))
 
-         const totalInvestment = sequence.reduce((sum, item) => sum + item.value, 0)
-     // Banca ideal com valores ajustados para nova sequência BMG2
-     const bancaIdeal = multiplier === 1 ? 200 : 
-                       multiplier === 3 ? 600 :
-                       multiplier === 6 ? 1200 :
-                       multiplier === 10 ? 2000 :
-                       Math.ceil(totalInvestment * 2.5)
+    const totalInvestment = sequence.reduce((sum, item) => sum + item.value, 0)
+    const bancaIdeal = calculateBancaIdeal(multiplier)
 
     return {
-      tip: 20.00 * multiplier, // Valor inicial M1 * multiplicador
+      tip: baseValue * multiplier, // Valor inicial M1 * multiplicador
       multiplier,
       sequence,
       bancaIdeal,
@@ -93,12 +111,11 @@ export default function BlazeMegaRouletteStrategyModal({
   }
 
   const getRiskLevel = (multiplier: number) => {
-    const option = multiplierOptions.find(opt => opt.value === multiplier)
     const riskLabel = multiplier === 1 ? 'Conservadora' :
                      multiplier === 3 ? 'Moderada' :
                      multiplier === 6 ? 'Agressiva' :
                      multiplier === 10 ? 'Máxima' : 'Desconhecida'
-    return option ? `${riskLabel}: R$ ${option.baseValue.toFixed(2)}` : 'Estratégia desconhecida'
+    return riskLabel
   }
 
   const selectedStrategyData = selectedMultiplier ? getStrategy(selectedMultiplier) : null
@@ -140,6 +157,9 @@ export default function BlazeMegaRouletteStrategyModal({
               >
                 <div className="text-lg font-mono font-bold">
                   R$ {option.baseValue.toFixed(2)}
+                </div>
+                <div className="text-xs font-mono text-gray-400 mt-1">
+                  {getRiskLevel(option.value)}
                 </div>
               </button>
             ))}

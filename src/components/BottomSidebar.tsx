@@ -4,10 +4,13 @@ import { usePathname } from 'next/navigation'
 import { OptimizedLink } from '@/components/ui/optimized-link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
 import { 
   LayoutDashboard, 
   DollarSign, 
-  Settings
+  Settings,
+  Network
 } from 'lucide-react'
 
 interface NavigationItem {
@@ -21,6 +24,44 @@ interface NavigationItem {
 
 export default function BottomSidebar() {
   const pathname = usePathname()
+  const [isAgent, setIsAgent] = useState<boolean>(false)
+  const [agentLoading, setAgentLoading] = useState(true)
+
+  // Verificar se o usuário é um agente (ativo ou inativo)
+  useEffect(() => {
+    const checkAgentStatus = async () => {
+      try {
+        setAgentLoading(true)
+        const { data: { user } } = await supabase.auth.getUser()
+        
+        if (!user) {
+          setIsAgent(false)
+          return
+        }
+
+        const { data, error } = await supabase
+          .from('agents')
+          .select('is_active')
+          .eq('user_id', user.id)
+          .single()
+
+        if (error && error.code !== 'PGRST116') {
+          console.error('Erro ao verificar status de agente:', error)
+          setIsAgent(false)
+          return
+        }
+
+        setIsAgent(!!data) // Se encontrou um agente, independente do status
+      } catch (error) {
+        console.error('Erro inesperado:', error)
+        setIsAgent(false)
+      } finally {
+        setAgentLoading(false)
+      }
+    }
+
+    checkAgentStatus()
+  }, [])
 
   const navigationItems: NavigationItem[] = [
     {
@@ -29,6 +70,13 @@ export default function BottomSidebar() {
       icon: LayoutDashboard,
       description: 'Main dashboard'
     },
+    // Adicionar Network para todos os agentes (ativos e inativos)
+    ...(isAgent ? [{
+      name: 'Network',
+      href: '/network',
+      icon: Network,
+      description: 'Network dashboard'
+    }] : []),
     {
       name: 'Config',
       href: '/config',
@@ -36,6 +84,11 @@ export default function BottomSidebar() {
       description: 'Configuration'
     }
   ]
+
+  // Não renderizar durante carregamento
+  if (agentLoading) {
+    return null
+  }
 
   return (
     <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50">

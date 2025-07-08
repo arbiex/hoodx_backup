@@ -4,11 +4,11 @@
  * Esta é uma cópia do sistema de autenticação original para testes
  * de novas funcionalidades sem interferir no sistema em produção.
  * 
- * API: /api/bots2/blaze/pragmatic/
- */
-import { createClient } from '@supabase/supabase-js';
-
-// Interface para resultado de autenticação
+   * API: /api/bots2/blaze/pragmatic/
+   */
+  import { createClient } from '@supabase/supabase-js';
+  
+  // Interface para resultado de autenticação
 export interface AuthResult {
   userId: string;
   originalUserId: string;

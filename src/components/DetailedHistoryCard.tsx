@@ -16,7 +16,7 @@ interface HistoryEntry {
   timestamp: number;
   mode: 'analysis' | 'real';
   martingaleLevel: number;
-  betColor: 'R' | 'B';
+  betColor: 'R' | 'B' | 'E' | 'O' | 'L' | 'H';
   resultColor: string; // 'R', 'B', 'green' (sem pending/sent)
   resultNumber: number;
   gameId: string;
@@ -160,9 +160,17 @@ export default function DetailedHistoryCard({ history }: DetailedHistoryCardProp
     ];
 
     const csvData = filteredHistory.map(entry => {
-      const betColor = entry.betColor === 'R' ? 'Vermelho' : 'Preto';
-      const resultColor = entry.resultColor === 'R' ? 'Vermelho' : 
-                         entry.resultColor === 'B' ? 'Preto' : 'Verde';
+      const betColor = entry.betColor === 'R' ? 'Vermelho' : 
+                         entry.betColor === 'B' ? 'Preto' : 
+                         entry.betColor === 'E' ? 'Par' : 
+                         entry.betColor === 'O' ? 'Ímpar' : 
+                         entry.betColor === 'L' ? 'Baixas (1-18)' : 
+                         entry.betColor === 'H' ? 'Altas (19-36)' : 'Verde';
+      
+      // Usar a mesma lógica de formatResult para CSV
+      const resultFormatted = formatResult(entry);
+      const resultColor = resultFormatted.text;
+      
       const status = entry.isWin ? 'Vitória' : 'Derrota';
       
       return [
@@ -189,15 +197,69 @@ export default function DetailedHistoryCard({ history }: DetailedHistoryCardProp
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-            link.download = `bmgbr_historico_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `bmgbr_historico_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
   };
 
   // Função para formatar cor
   const formatColor = (color: string) => {
-    if (color === 'R') return { text: 'Vermelho', class: 'text-red-400' };
-    if (color === 'B') return { text: 'Preto', class: 'text-gray-300' };
-    return { text: 'Verde', class: 'text-green-400' };
+    switch (color) {
+      case 'R':
+        return { text: 'Vermelho', class: 'text-red-400' };
+      case 'B':
+        return { text: 'Preto', class: 'text-gray-300' };
+      case 'E':
+        return { text: 'Par', class: 'text-blue-400' };
+      case 'O':
+        return { text: 'Ímpar', class: 'text-purple-400' };
+      case 'L':
+        return { text: 'Baixas (1-18)', class: 'text-yellow-400' };
+      case 'H':
+        return { text: 'Altas (19-36)', class: 'text-orange-400' };
+      default:
+        return { text: 'Verde', class: 'text-green-400' };
+    }
+  };
+
+  // Função para interpretar resultado baseado no tipo de aposta
+  const formatResult = (entry: HistoryEntry) => {
+    const { betColor, resultColor, resultNumber } = entry;
+    
+    // Se o resultado foi verde (zero), sempre mostrar verde
+    if (resultColor === 'green' || resultNumber === 0) {
+      return { text: 'Verde (0)', class: 'text-green-400' };
+    }
+    
+    // Interpretar resultado baseado no tipo de aposta
+    switch (betColor) {
+      case 'E': // Aposta Par
+      case 'O': // Aposta Ímpar
+        // Para apostas par/ímpar, mostrar se o número é par ou ímpar
+        if (resultNumber % 2 === 0) {
+          return { text: 'Par', class: 'text-blue-400' };
+        } else {
+          return { text: 'Ímpar', class: 'text-purple-400' };
+        }
+        
+      case 'L': // Aposta Baixas
+      case 'H': // Aposta Altas
+        // Para apostas baixas/altas, mostrar se o número é baixo ou alto
+        if (resultNumber >= 1 && resultNumber <= 18) {
+          return { text: 'Baixas (1-18)', class: 'text-yellow-400' };
+        } else if (resultNumber >= 19 && resultNumber <= 36) {
+          return { text: 'Altas (19-36)', class: 'text-orange-400' };
+        }
+        break;
+        
+      case 'R': // Aposta Vermelho
+      case 'B': // Aposta Preto
+      default:
+        // Para apostas vermelho/preto, mostrar a cor normalmente
+        return formatColor(resultColor);
+    }
+    
+    // Fallback para casos não cobertos
+    return formatColor(resultColor);
   };
 
   // Função para formatar status da aposta
@@ -381,7 +443,7 @@ export default function DetailedHistoryCard({ history }: DetailedHistoryCardProp
               <tbody>
                 {filteredHistory.map((entry) => {
                   const betColorFormatted = formatColor(entry.betColor);
-                  const resultColorFormatted = formatColor(entry.resultColor);
+                  const resultColorFormatted = formatResult(entry);
                   
                   return (
                     <tr key={entry.id} className="border-b border-gray-700/50 hover:bg-gray-800/30">

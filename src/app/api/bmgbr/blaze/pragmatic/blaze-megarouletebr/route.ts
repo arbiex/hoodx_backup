@@ -1,11 +1,3 @@
-/**
- * 🧪 BOTS2 - ROUTE - VERSÃO DE TESTES
- * 
- * Esta é uma cópia do endpoint principal original para testes
- * de novas funcionalidades sem interferir no sistema em produção.
- * 
- * API: /api/bots2/blaze/pragmatic/blaze-megarouletebr
- */
 import { NextRequest, NextResponse } from 'next/server';
 import WebSocket from 'ws';
 import { createClient } from '@supabase/supabase-js';
@@ -17,13 +9,10 @@ import {
 } from '../auth';
 import { getBaseUrl } from '@/lib/utils';
 
-
-// Interface consolidada para configuração
 interface MegaRouletteConfig {
   userId: string;
-  action?: 'bet-connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic' | 'get-sessions-history' | 'blaze-proxy' | 'pragmatic-proxy' | 'debug-auth' | 'get-blaze-token' | 'frontend-auth' | 'generate-client-tokens' | 'update-strategy' | 'update-stake' | 'activate-real-mode';
+  action?: 'bet-connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic' | 'get-sessions-history' | 'blaze-proxy' | 'pragmatic-proxy' | 'debug-auth' | 'get-blaze-token' | 'frontend-auth' | 'generate-client-tokens' | 'update-strategy' | 'update-stake' | 'update-bet-type' | 'set-standby-mode' | 'force-check-api-results';
   forceClientSideAuth?: boolean;
-  // Dados para proxies
   blazeToken?: string;
   selectedCurrencyType?: string;
   userAgent?: string;
@@ -31,52 +20,34 @@ interface MegaRouletteConfig {
   realBrowserHeaders?: any;
   params?: string;
   userFingerprint?: any;
-  // Dados para debug
   testType?: string;
-
+  // M4 Direto parâmetros
+  m4DirectBetType?: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
+  // 🤖 NOVO: Campo para modo standby
+  isStandbyMode?: boolean;
 }
 
-
-
-// Interface simplificada
 interface SimpleConfig {
   userId: string;
   action: string;
 }
 
-// Armazenamento dos logs do WebSocket
 const websocketLogs: { [userId: string]: Array<{ timestamp: number; message: string; type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' }> } = {};
 const connectionStatus: { [userId: string]: { connected: boolean; error?: string; lastUpdate: number } } = {};
 
-// NOVO: Sistema de aquecimento - armazena resultados reais para análise
 const gameResults: { [userId: string]: Array<{ number: number; color: string; gameId: string; timestamp: number }> } = {};
 
-// NOVO: Estados para controle da operação
+// 🔥 SIMPLIFICADO: Estado da operação focado apenas no M4 Direto
 const operationState: { [userId: string]: {
   active: boolean; 
-  martingaleLevel: number;         // 0-3 (nível do martingale M1-M4)
+  martingaleLevel: number;
   waitingForResult: boolean;
   lastGameId?: string;
-  currentBetColor?: 'R' | 'B';    // ✅ NOVO: Armazena cor da aposta atual
+  currentBetColor?: 'R' | 'B' | 'E' | 'O' | 'L' | 'H';
   
-
   strategy: {
-    sequences: number[];           // [stake, stake*4+2, stake*10+2, stake*22+2] - Nova estrutura personalizada M1-M4
-    maxMartingale: number;        // 4
-  };
-  // 🔍 CONTADORES DE ANÁLISE (aquecimento)
-  analysisCounters: {
-    m1Wins: number;              // Vitórias no M1 (limiar: 8)
-    m2Wins: number;              // Vitórias no M2 (limiar: 4)
-    m3Wins: number;              // Vitórias no M3 (limiar: 2)
-    m4Losses: number;            // 🔄 MUDANÇA: Derrotas no M4 (limiar: 1)
-  };
-  // 📊 LIMIARES PARA SAIR DA ANÁLISE
-  thresholds: {
-    m1Required: number;          // 8 vitórias no M1
-    m2Required: number;          // 4 vitórias no M2
-    m3Required: number;          // 2 vitórias no M3
-    m4Required: number;          // 🔄 MUDANÇA: 1 derrota no M4
+    sequences: number[];
+    maxMartingale: number;
   };
   stats: {
     totalBets: number;
@@ -85,18 +56,22 @@ const operationState: { [userId: string]: {
     profit: number;
     startedAt: number;
   };
-  // 🛡️ NOVO: Configurações de segurança
-  safetyConfig?: {
-    allowedStatuses?: string[];  // Status permitidos para operação ['Excelente', 'Bom', etc]
-  };
-  // 🎯 NOVO: Controle de ativação inteligente
-  smartActivation?: {
-    readyToActivate?: boolean;      // Limiar atingido, aguardando momento ideal
-    waitingForSequenceEnd?: boolean; // Aguardando fim da sequência atual
-  };
+  // Tipo de aposta para modo M4 direto
+  m4DirectBetType?: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
+  // 🎯 NOVO: Campos para Meta de Lucro
+  stopGainPercentage: null;
+  userBanca: null;
+  // 🎯 NOVO: Campo para stake pendente
+  pendingStake?: number | null;
+  // 🤖 NOVO: Modo standby - conectado mas aguardando limiar
+  isStandbyMode?: boolean;
+  // 🔄 NOVO: Controle de polling da URL/API
+  lastProcessedGameId?: string;
+  apiPollingInterval?: NodeJS.Timeout;
+  // 🎯 NOVO: Controle de missão cumprida
+  missionCompleted?: boolean;
 } } = {};
 
-// Controle de conexões WebSocket
 const activeWebSockets: { [userId: string]: {
   ws: any;
   sessionId: string;
@@ -104,7 +79,6 @@ const activeWebSockets: { [userId: string]: {
   lastActivity: number;
 } } = {};
 
-// NOVO: Controle de sessões para renovação automática
 const sessionControl: { [userId: string]: {
   jsessionId: string;
   ppToken: string;
@@ -115,11 +89,8 @@ const sessionControl: { [userId: string]: {
   maxRenewalAttempts: number;
 } } = {};
 
-// NOVO: Timers para renovação automática
-const renewalTimers: { [userId: string]: NodeJS.Timeout } = {};
 const autoRenewalIntervals: { [userId: string]: NodeJS.Timeout } = {};
 
-// Controle de reconexões WebSocket
 const reconnectionControl: { [userId: string]: {
   attempts: number;
   lastAttempt: number;
@@ -127,121 +98,37 @@ const reconnectionControl: { [userId: string]: {
   backoffDelay: number;
 } } = {};
 
-// NOVO: Controle para começar a coletar resultados apenas após primeiro "apostas fechadas"
-// Removido: resultCollectionEnabled - não precisa mais aguardar primeiro "apostas fechadas"
-
-// NOVO: Controle para distinguir primeira conexão de reconexões
 const isFirstConnection: { [userId: string]: boolean } = {};
 
-// NOVO: Controle do estado das apostas (abertas/fechadas) para timing do botão
 const bettingWindowState: { [userId: string]: {
-  isOpen: boolean;           // Se a janela de apostas está aberta
-  currentGameId?: string;    // ID do jogo atual
-  lastUpdate: number;        // Timestamp da última atualização
+  isOpen: boolean;
+  currentGameId?: string;
+  lastUpdate: number;
 } } = {};
 
-// 📊 NOVO: Rastreamento de vitórias de martingale por usuário (para gráfico)
-const martingaleUsageStats: { [userId: string]: number[] } = {};
+// ✅ NOVO: Tracking da primeira aposta realizada após conexão
+const firstBetTimestamp: { [userId: string]: number | null } = {};
 
-// 📊 NOVO: Rastreamento de rodadas analisadas por nível (para mostrar total de tentativas)
-const analysisRoundsStats: { [userId: string]: number[] } = {};
-
-// 🔄 NOVO: Contador específico para derrotas no M4 (lógica invertida)
-const m4LossesCounter: { [userId: string]: number } = {};
-
-// 📋 NOVO: Histórico detalhado de análises e apostas reais
+// 🔥 SIMPLIFICADO: Histórico detalhado apenas para modo real
 const detailedHistory: { [userId: string]: Array<{
   id: string;
   timestamp: number;
-  mode: 'analysis' | 'real';
   martingaleLevel: number;
-  betColor: 'R' | 'B';
+  betColor: 'R' | 'B' | 'E' | 'O' | 'L' | 'H';
   resultColor: string;
   resultNumber: number;
   gameId: string;
   isWin: boolean;
   betAmount: number;
   profit: number;
-  sequencePosition: string; // "M1", "M2", "M3", "M4"
+  sequencePosition: string;
 }> } = {};
 
-// 🔄 NOVO: Timer para reconexão automática a cada 10 minutos
 const reconnectionTimers: { [userId: string]: NodeJS.Timeout } = {};
 
-
-
-
-
-// 📊 FUNÇÃO: Registrar vitórias de martingale (alimenta o gráfico)
-// ✅ IMPORTANTE: Só chama quando:
-// - Ganha em M1, M2, M3 (imediatamente após vitória)
-// - M4 tem lógica INVERTIDA: só conta derrotas, não vitórias
-// - Vitórias M4 são ignoradas (volta para M1)
-function recordMartingaleUsage(userId: string, martingaleLevel: number) {
-  // Inicializar array se não existir
-  if (!martingaleUsageStats[userId]) {
-    martingaleUsageStats[userId] = new Array(4).fill(0);
-  }
-  
-  // Registrar vitória (martingaleLevel já está 0-indexed)
-  if (martingaleLevel >= 0 && martingaleLevel < 4) {
-    const oldValue = martingaleUsageStats[userId][martingaleLevel];
-    martingaleUsageStats[userId][martingaleLevel]++;
-    addWebSocketLog(userId, `📊 Vitória M${martingaleLevel + 1} registrada - Total: ${martingaleUsageStats[userId][martingaleLevel]}`, 'success');
-  }
-}
-
-// 📊 FUNÇÃO: Resetar estatísticas de vitórias de martingale
-function resetMartingaleUsage(userId: string) {
-  martingaleUsageStats[userId] = new Array(4).fill(0);
-  addWebSocketLog(userId, `📊 Estatísticas de vitórias de martingale resetadas`, 'info');
-}
-
-// 📊 FUNÇÃO: Registrar rodada analisada por nível
-function recordAnalysisRound(userId: string, martingaleLevel: number) {
-  // Inicializar array se não existir
-  if (!analysisRoundsStats[userId]) {
-    analysisRoundsStats[userId] = new Array(4).fill(0);
-  }
-  
-  // Registrar rodada analisada (martingaleLevel já está 0-indexed)
-  if (martingaleLevel >= 0 && martingaleLevel < 4) {
-    analysisRoundsStats[userId][martingaleLevel]++;
-  }
-}
-
-// 📊 FUNÇÃO: Resetar estatísticas de rodadas analisadas
-function resetAnalysisRounds(userId: string) {
-  analysisRoundsStats[userId] = new Array(4).fill(0);
-  addWebSocketLog(userId, `📊 Estatísticas de rodadas analisadas resetadas`, 'info');
-}
-
-// 🔄 FUNÇÃO: Registrar derrota no M4 (lógica invertida)
-function recordM4Loss(userId: string) {
-  addWebSocketLog(userId, `🔍 DEBUG: recordM4Loss chamado`, 'info');
-  
-  if (!m4LossesCounter[userId]) {
-    m4LossesCounter[userId] = 0;
-  }
-  
-  const oldValue = m4LossesCounter[userId];
-  m4LossesCounter[userId]++;
-  addWebSocketLog(userId, `📊 Registrada derrota M4 - Total: ${oldValue} → ${m4LossesCounter[userId]}`, 'info');
-}
-
-// 🔄 FUNÇÃO: Resetar contador de derrotas M4
-function resetM4Losses(userId: string) {
-  m4LossesCounter[userId] = 0;
-  addWebSocketLog(userId, `📊 Contador de derrotas M4 resetado`, 'info');
-}
-
-
-
-// 📋 FUNÇÃO: Adicionar entrada ao histórico detalhado
 function addDetailedHistoryEntry(userId: string, entry: {
-  mode: 'analysis' | 'real';
   martingaleLevel: number;
-  betColor: 'R' | 'B';
+  betColor: 'R' | 'B' | 'E' | 'O' | 'L' | 'H';
   resultColor: string;
   resultNumber: number;
   gameId: string;
@@ -252,16 +139,12 @@ function addDetailedHistoryEntry(userId: string, entry: {
     detailedHistory[userId] = [];
   }
   
-  // 🔧 CORREÇÃO: Calcular profit corretamente
-  // Vitória: ganha o valor apostado (2x o valor apostado - valor apostado = valor apostado de lucro)
-  // Derrota: perde o valor apostado
   const profit = entry.isWin ? entry.betAmount : -entry.betAmount;
   const sequencePosition = `M${entry.martingaleLevel + 1}`;
   
   const historyEntry = {
     id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     timestamp: Date.now(),
-    mode: entry.mode,
     martingaleLevel: entry.martingaleLevel,
     betColor: entry.betColor,
     resultColor: entry.resultColor,
@@ -275,36 +158,37 @@ function addDetailedHistoryEntry(userId: string, entry: {
   
   detailedHistory[userId].push(historyEntry);
   
-  // Limitar histórico a 1000 entradas para evitar uso excessivo de memória
   if (detailedHistory[userId].length > 1000) {
     detailedHistory[userId] = detailedHistory[userId].slice(-1000);
   }
   
-  addWebSocketLog(userId, `📋 Entrada adicionada ao histórico: ${sequencePosition} ${entry.mode} ${entry.isWin ? 'WIN' : 'LOSS'}`, 'info');
+  // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `📋 Entrada adicionada ao histórico: ${sequencePosition} ${entry.isWin ? 'WIN' : 'LOSS'}`, 'info');
 }
 
-// 📋 FUNÇÃO: Resetar histórico detalhado
 function resetDetailedHistory(userId: string) {
   detailedHistory[userId] = [];
-  addWebSocketLog(userId, `📋 Histórico detalhado resetado`, 'info');
+  // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `📋 Histórico detalhado resetado`, 'info');
 }
 
-// 📋 FUNÇÃO: Obter histórico detalhado
 function getDetailedHistory(userId: string) {
   return detailedHistory[userId] || [];
 }
 
-// 📋 FUNÇÃO: Atualizar número do resultado na última entrada do histórico
 function updateLastHistoryEntryNumber(userId: string, resultNumber: number, gameId: string) {
   if (!detailedHistory[userId] || detailedHistory[userId].length === 0) {
     return;
   }
   
-  // Encontrar a última entrada que corresponde ao gameId
-  const lastEntryIndex = detailedHistory[userId].findLastIndex(entry => entry.gameId === gameId);
+  const lastEntry = detailedHistory[userId][detailedHistory[userId].length - 1];
   
-  if (lastEntryIndex !== -1) {
-    detailedHistory[userId][lastEntryIndex].resultNumber = resultNumber;
+  if (lastEntry.gameId === gameId && (lastEntry.resultColor === 'pending' || lastEntry.resultColor === 'sent')) {
+    lastEntry.resultNumber = resultNumber;
+    lastEntry.gameId = gameId;
+    
+    // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `📋 Número do resultado atualizado no histórico: ${resultNumber}`, 'info');
   }
 }
 
@@ -367,7 +251,11 @@ export async function POST(request: NextRequest) {
       customMartingaleSequence,
       stakeBased,
       // Novos campos para estratégia 'Break-Even Estratégico'
-      breakEvenStrategy
+      breakEvenStrategy,
+      // 🔥 NOVO: Campo para M4 Direto
+      m4DirectBetType,
+      // 🤖 NOVO: Campo para modo standby
+      isStandbyMode
     } = requestBody;
 
     if (!userId) {
@@ -377,16 +265,16 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // ✅ Log apenas uma vez os dados capturados (só na primeira conexão)
-    if (action === 'bet-connect') {
-      addWebSocketLog(userId, `🔍 Dados reais capturados (primeira conexão):`, 'info');
-      addWebSocketLog(userId, `📱 User-Agent: ${userFingerprint?.userAgent || clientUserAgent}`, 'info');
-      addWebSocketLog(userId, `🌍 IP: ${clientIP}`, 'info');
-      addWebSocketLog(userId, `🗣️ Idioma: ${userFingerprint?.language || clientLanguage}`, 'info');
-      if (userFingerprint?.platform) addWebSocketLog(userId, `🖥️ Plataforma: ${userFingerprint.platform}`, 'info');
-      if (userFingerprint?.screenResolution) addWebSocketLog(userId, `📺 Resolução: ${userFingerprint.screenResolution}`, 'info');
-      if (userFingerprint?.timezone) addWebSocketLog(userId, `🕐 Timezone: ${userFingerprint.timezone}`, 'info');
-    }
+    // Logs removidos: informações técnicas desnecessárias para o usuário
+    // if (action === 'bet-connect') {
+    //   addWebSocketLog(userId, `🔍 Dados reais capturados (primeira conexão):`, 'info');
+    //   addWebSocketLog(userId, `📱 User-Agent: ${userFingerprint?.userAgent || clientUserAgent}`, 'info');
+    //   addWebSocketLog(userId, `🌍 IP: ${clientIP}`, 'info');
+    //   addWebSocketLog(userId, `🗣️ Idioma: ${userFingerprint?.language || clientLanguage}`, 'info');
+    //   if (userFingerprint?.platform) addWebSocketLog(userId, `🖥️ Plataforma: ${userFingerprint.platform}`, 'info');
+    //   if (userFingerprint?.screenResolution) addWebSocketLog(userId, `📺 Resolução: ${userFingerprint.screenResolution}`, 'info');
+    //   if (userFingerprint?.timezone) addWebSocketLog(userId, `🕐 Timezone: ${userFingerprint.timezone}`, 'info');
+    // }
 
     // Ações disponíveis
     switch (action) {
@@ -405,7 +293,7 @@ export async function POST(request: NextRequest) {
           pixelRatio: userFingerprint?.pixelRatio,
           hardwareConcurrency: userFingerprint?.hardwareConcurrency,
           connectionType: userFingerprint?.connectionType
-        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased);
+        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased, m4DirectBetType, isStandbyMode);
       
       case 'start-operation':
         return await startSimpleOperation(userId);
@@ -477,17 +365,20 @@ export async function POST(request: NextRequest) {
             ...realBrowserHeaders
           };
 
-          const blazeResponse = await fetch('https://blaze.bet.br/api/games/mega-roulette---brazilian/play', {
-            method: 'POST',
-            headers: blazeHeaders,
-            body: JSON.stringify({
-              selected_currency_type: selectedCurrencyType || 'BRL'
-            })
-          });
+          // 🔄 USAR SISTEMA DE RETRY para chamada da Blaze
+          const blazeResponse = await retryBlazeRequest(async () => {
+            return await fetch('https://blaze.bet.br/api/games/mega-roulette---brazilian/play', {
+              method: 'POST',
+              headers: blazeHeaders,
+              body: JSON.stringify({
+                selected_currency_type: selectedCurrencyType || 'BRL'
+              })
+            });
+          }, 'ppToken');
 
           if (!blazeResponse.ok) {
             const errorText = await blazeResponse.text();
-            console.error('❌ [PROXY] Erro na Blaze:', blazeResponse.status, errorText);
+            console.error('❌ [PROXY] Erro na Blaze após tentativas:', blazeResponse.status, errorText);
             return NextResponse.json({
               success: false,
               error: `Erro da Blaze: ${blazeResponse.status} - ${errorText}`
@@ -648,41 +539,57 @@ export async function POST(request: NextRequest) {
       
       case 'update-strategy':
         // 🛡️ NOVO: Suporte para configurações de segurança
-        const { stopGainPercentage, allowedStatuses } = requestBody;
+        const { stopGainPercentage, allowedStatuses, userBanca } = requestBody;
         
         if (userId && operationState[userId]) {
           // Atualizar configurações existentes
           if (stopGainPercentage !== undefined) {
-            // Salvar stop gain (já existe no código)
-            addWebSocketLog(userId, `🎯 Stop gain ${stopGainPercentage ? `ativado: ${stopGainPercentage}%` : 'desativado'}`, 'success');
+            // 🎯 NOVO: Armazenar meta de lucro no operationState
+            // Se stopGainPercentage é null, manter o valor anterior se existir
+            if (stopGainPercentage === null && operationState[userId].stopGainPercentage) {
+              // Mantém o valor anterior se estava ativada
+              addWebSocketLog(userId, `🎯 Meta de lucro mantida: ${operationState[userId].stopGainPercentage}%`, 'success');
+            } else {
+              operationState[userId].stopGainPercentage = stopGainPercentage;
+              addWebSocketLog(userId, `🎯 Meta de lucro ${stopGainPercentage ? `ativada: ${stopGainPercentage}%` : 'desativada'}`, 'success');
+            }
+          }
+          
+                      // 🎯 NOVO: Armazenar banca do usuário para cálculo da Meta de Lucro
+          if (userBanca !== undefined) {
+            operationState[userId].userBanca = userBanca;
+            addWebSocketLog(userId, `💰 Banca definida: R$ ${userBanca.toFixed(2)}`, 'success');
           }
           
           // 🛡️ NOVO: Salvar configurações de status permitidos
           if (allowedStatuses && Array.isArray(allowedStatuses)) {
-            if (!operationState[userId].safetyConfig) {
-              operationState[userId].safetyConfig = {};
-            }
-            operationState[userId].safetyConfig.allowedStatuses = allowedStatuses;
-            addWebSocketLog(userId, `🛡️ Status permitidos atualizados: ${allowedStatuses.join(', ')}`, 'success');
+            // Removido: safetyConfig não existe mais
+            // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, `🛡️ Status permitidos ignorados (sistema simplificado)`, 'info');
           }
         }
         
         return NextResponse.json({ success: true });
       
+      case 'set-pending-stake':
+        const { newStake: pendingStake } = requestBody;
+        
+        if (userId && pendingStake && operationState[userId]) {
+          // Definir stake pendente
+          operationState[userId].pendingStake = pendingStake;
+          
+          addWebSocketLog(userId, `⏳ Stake pendente: R$ ${pendingStake.toFixed(2)} - Será aplicada após próxima derrota`, 'info');
+        }
+        return NextResponse.json({ success: true });
+      
       case 'update-stake':
         const { newStake } = requestBody;
+        
         if (userId && newStake && operationState[userId]) {
-          // Atualizar sequência de martingale com novo stake
-          const calculateSequence = (baseTip: number) => {
-            const baseSequence = [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50];
-            const multiplier = baseTip / 20.00;
-            return baseSequence.map(value => value * multiplier);
-          };
+          // Atualizar stake na operação
+          operationState[userId].strategy.sequences = requestBody.customMartingaleSequence || [newStake, newStake * 4, newStake * 10, newStake * 22];
           
-          const newSequence = calculateSequence(newStake);
-          operationState[userId].strategy.sequences = newSequence;
-          
-          addWebSocketLog(userId, `💰 Stake atualizado para R$ ${newStake.toFixed(2)} - Nova sequência: [${newSequence.slice(0, 4).map(v => v.toFixed(2)).join(', ')}]`, 'success');
+          addWebSocketLog(userId, `💰 Stake atualizada: R$ ${newStake.toFixed(2)}`, 'success');
         }
         return NextResponse.json({ success: true });
       
@@ -691,13 +598,186 @@ export async function POST(request: NextRequest) {
         if (userId && operationState[userId]?.active) {
           addWebSocketLog(userId, `🛡️ Comando recebido: ativar modo real automaticamente`, 'success');
           
-          // Forçar saída do modo análise e ativar modo real
-          const operation = operationState[userId];
-          operation.martingaleLevel = 0; // Reset para M1 no modo real
-          
-          addWebSocketLog(userId, `🚀 MODO REAL ATIVADO! Status seguro detectado → Iniciando apostas reais no M1`, 'success');
+          // 🔥 NOVO: Verificar se é modo M4 direto
+          if (requestBody.m4DirectBetType) {
+            addWebSocketLog(userId, `🔥 MODO M4 DIRETO ATIVADO! Ignorando todos os limiares`, 'success');
+            
+            // Forçar saída do modo análise e ativar modo real imediatamente
+            const operation = operationState[userId];
+            operation.martingaleLevel = 0; // Reset para M1 no modo real
+            
+            // Marcar como modo M4 direto para parar quando acertar M4
+            operation.m4DirectBetType = requestBody.m4DirectBetType || 'red'; // 🔥 NOVO: Armazenar tipo de aposta
+            
+            const betTypeLabel = 
+              operation.m4DirectBetType === 'red' ? 'VERMELHO' :
+              operation.m4DirectBetType === 'black' ? 'PRETO' :
+              operation.m4DirectBetType === 'even' ? 'PAR' :
+              operation.m4DirectBetType === 'odd' ? 'ÍMPAR' :
+              operation.m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
+              'ALTAS (19-36)';
+            
+            addWebSocketLog(userId, `🚀 MODO M4 DIRETO ATIVADO! Apostando em ${betTypeLabel} direto no M1 → Objetivo: acertar M4`, 'success');
+          } else {
+            // Lógica normal para status seguro
+            const operation = operationState[userId];
+            operation.martingaleLevel = 0; // Reset para M1 no modo real
+            
+            addWebSocketLog(userId, `🚀 MODO REAL ATIVADO! Status seguro detectado → Iniciando apostas reais no M1`, 'success');
+          }
         }
         return NextResponse.json({ success: true });
+      
+      case 'update-bet-type':
+        // 🤖 NOVO: Endpoint para atualizar tipo de aposta dinamicamente durante operação
+        if (userId && operationState[userId]) {
+          const newBetType = requestBody.m4DirectBetType;
+          
+          if (!newBetType) {
+            return NextResponse.json({
+              success: false,
+              error: 'Tipo de aposta (m4DirectBetType) é obrigatório'
+            }, { status: 400 });
+          }
+          
+          const validBetTypes = ['red', 'black', 'even', 'odd', 'low', 'high'];
+          if (!validBetTypes.includes(newBetType)) {
+            return NextResponse.json({
+              success: false,
+              error: 'Tipo de aposta inválido'
+            }, { status: 400 });
+          }
+          
+          // Atualizar tipo de aposta no estado da operação
+          operationState[userId].m4DirectBetType = newBetType;
+          
+          const betTypeNames = {
+            'red': 'VERMELHO',
+            'black': 'PRETO',
+            'even': 'PAR',
+            'odd': 'ÍMPAR',
+            'low': 'BAIXAS (1-18)',
+            'high': 'ALTAS (19-36)'
+          };
+          
+          const typeName = betTypeNames[newBetType as keyof typeof betTypeNames];
+          addWebSocketLog(userId, `🤖 Auto Bot: Tipo de aposta atualizado para ${typeName}`, 'success');
+          
+          return NextResponse.json({
+            success: true,
+            message: `Tipo de aposta atualizado para ${typeName}`,
+            newBetType: newBetType
+          });
+        }
+        
+        return NextResponse.json({
+          success: false,
+          error: 'Operação não encontrada'
+        }, { status: 404 });
+      
+      case 'set-standby-mode':
+        // 🤖 NOVO: Ativar/desativar modo standby
+        if (userId && operationState[userId]) {
+          const standbyMode = requestBody.isStandbyMode;
+          
+          if (typeof standbyMode !== 'boolean') {
+            return NextResponse.json({
+              success: false,
+              error: 'isStandbyMode deve ser um valor booleano'
+            }, { status: 400 });
+          }
+          
+          operationState[userId].isStandbyMode = standbyMode;
+          
+          const statusMessage = standbyMode ? 
+            '🤖 Modo standby ativado - conectado mas aguardando limiar' : 
+            '🎯 Modo standby desativado - operação normal';
+          
+          addWebSocketLog(userId, statusMessage, 'success');
+          
+          return NextResponse.json({
+            success: true,
+            message: statusMessage,
+            isStandbyMode: standbyMode
+          });
+        }
+        
+        return NextResponse.json({
+          success: false,
+          error: 'Operação não encontrada'
+        }, { status: 404 });
+      
+      // 🎯 SISTEMA AUTOMÁTICO: Debug manual removido - processamento automático via gameId
+      
+      // 🎯 SISTEMA AUTOMÁTICO: Debug manual removido - processamento automático via gameId
+      
+      case 'force-check-api-results':
+        // 🔄 NOVO: Ação para forçar WebSocket verificar API de resultados
+        try {
+          const operation = operationState[userId];
+          if (!operation) {
+            return NextResponse.json({
+              success: false,
+              error: 'Operação não encontrada'
+            });
+          }
+          
+          const { gameId, expectedResult } = requestBody;
+          
+          addWebSocketLog(userId, `🔄 Debug: Forçando verificação da API de resultados para GameId: ${gameId}`, 'info');
+          
+          if (expectedResult) {
+            addWebSocketLog(userId, `🎯 Resultado esperado: ${expectedResult.number} (${expectedResult.color})`, 'info');
+          }
+          
+          // Forçar verificação da API
+          await checkForNewResults(userId);
+          
+          // Aguardar um pouco para o processamento
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Verificar se resultado específico foi processado
+          if (gameId && operation.lastProcessedGameId === gameId) {
+            addWebSocketLog(userId, `✅ Resultado ${gameId} foi processado com sucesso pelo WebSocket`, 'success');
+            
+            return NextResponse.json({
+              success: true,
+              data: {
+                message: 'Resultado processado com sucesso pelo WebSocket',
+                gameId,
+                processedGameId: operation.lastProcessedGameId,
+                operationState: {
+                  waitingForResult: operation.waitingForResult,
+                  lastGameId: operation.lastGameId,
+                  currentBetColor: operation.currentBetColor
+                }
+              }
+            });
+          } else {
+            addWebSocketLog(userId, `⚠️ Resultado ${gameId} ainda não foi processado pelo WebSocket`, 'info');
+            addWebSocketLog(userId, `🔍 Último processado: ${operation.lastProcessedGameId || 'nenhum'}`, 'info');
+            
+            return NextResponse.json({
+              success: true,
+              data: {
+                message: 'Verificação executada - resultado ainda não processado pelo WebSocket',
+                gameId,
+                processedGameId: operation.lastProcessedGameId,
+                operationState: {
+                  waitingForResult: operation.waitingForResult,
+                  lastGameId: operation.lastGameId,
+                  currentBetColor: operation.currentBetColor
+                }
+              }
+            });
+          }
+          
+        } catch (error) {
+          return NextResponse.json({
+            success: false,
+            error: 'Erro ao forçar verificação da API'
+          });
+        }
       
       default:
       return NextResponse.json({
@@ -718,7 +798,89 @@ export async function POST(request: NextRequest) {
 
 
 
+// 🎯 NOVO: Função para calcular target da Meta de Lucro
+function calculateStopGainTarget(userBanca: number, percentage: number): number {
+  return (userBanca * percentage) / 100;
+}
+
+// 🎯 NOVO: Função para verificar Meta de Lucro atingida
+function checkStopGainReached(userId: string): boolean {
+  const operation = operationState[userId];
+  if (!operation || !operation.stopGainPercentage || !operation.userBanca) {
+    return false;
+  }
+  
+  const targetProfit = calculateStopGainTarget(operation.userBanca, operation.stopGainPercentage);
+  const currentProfit = operation.stats.profit;
+  
+  return currentProfit >= targetProfit;
+}
+
 // Função para adicionar log
+// 🔄 SISTEMA DE RETRY INTELIGENTE para erros 500 da Blaze
+async function retryBlazeRequest(
+  requestFunction: () => Promise<Response>, 
+  operationType: string,
+  maxRetries: number = 3,
+  baseDelayMs: number = 2000
+): Promise<Response> {
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🔄 [RETRY-${operationType.toUpperCase()}] Tentativa ${attempt}/${maxRetries}`);
+      
+      const response = await requestFunction();
+      
+      // Se resposta OK, retornar imediatamente
+      if (response.ok) {
+        if (attempt > 1) {
+          console.log(`✅ [RETRY-${operationType.toUpperCase()}] Sucesso na tentativa ${attempt}!`);
+        }
+        return response;
+      }
+      
+      // Se erro 500 (Internal Server Error) da Blaze, tentar novamente
+      if (response.status === 500 && attempt < maxRetries) {
+        const errorText = await response.text();
+        
+        // Verificar se é o erro específico código 1010
+        const isCode1010 = errorText.includes('"code":1010') || errorText.includes('Code: 1010');
+        
+        if (isCode1010) {
+          const delayMs = baseDelayMs * Math.pow(2, attempt - 1); // Backoff exponencial
+          console.log(`⚠️ [RETRY-${operationType.toUpperCase()}] Erro 500 (Code: 1010) da Blaze - tentando novamente em ${delayMs}ms...`);
+          console.log(`🔍 [RETRY-${operationType.toUpperCase()}] Erro detectado: Internal server error temporário`);
+          
+          // Aguardar antes da próxima tentativa
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+        }
+      }
+      
+      // Se chegou aqui, erro não é 500 ou não é recuperável
+      console.log(`❌ [RETRY-${operationType.toUpperCase()}] Erro ${response.status} não é recuperável`);
+      return response;
+      
+    } catch (error) {
+      console.log(`❌ [RETRY-${operationType.toUpperCase()}] Erro de rede na tentativa ${attempt}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+      
+      // Se não é a última tentativa, aguardar antes de tentar novamente
+      if (attempt < maxRetries) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+        console.log(`🔄 [RETRY-${operationType.toUpperCase()}] Tentando novamente em ${delayMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        continue;
+      }
+      
+      // Se é a última tentativa, re-lançar o erro
+      throw error;
+    }
+  }
+  
+  // Este ponto nunca deveria ser alcançado, mas por segurança:
+  throw new Error(`Máximo de tentativas (${maxRetries}) esgotado para ${operationType}`);
+}
+
 function addWebSocketLog(userId: string, message: string, type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' = 'info') {
   if (!websocketLogs[userId]) {
     websocketLogs[userId] = [];
@@ -739,27 +901,204 @@ function addWebSocketLog(userId: string, message: string, type: 'info' | 'error'
   
 }
 
+
+
+
+
+// 🔄 FUNÇÃO: Polling da URL/API para detectar novos resultados
+async function startApiPolling(userId: string): Promise<void> {
+  const operation = operationState[userId];
+  if (!operation) return;
+  
+  // Limpar polling anterior se existir
+  if (operation.apiPollingInterval) {
+    clearInterval(operation.apiPollingInterval);
+  }
+  
+  // 🔇 LOG SILENCIOSO: Não logar o início do polling - apenas quando há apostas
+  // addWebSocketLog(userId, `🔄 Iniciando polling da URL/API para detectar resultados`, 'info');
+  
+  // Polling a cada 2 segundos
+  operation.apiPollingInterval = setInterval(async () => {
+    try {
+      await checkForNewResults(userId);
+    } catch (error) {
+      console.warn(`Erro no polling da URL/API para usuário ${userId}:`, error);
+    }
+  }, 2000);
+}
+
+// 🔍 FUNÇÃO: Verificar se há novos resultados na URL/API
+async function checkForNewResults(userId: string): Promise<void> {
+  const operation = operationState[userId];
+  if (!operation) {
+    return;
+  }
+  
+  // 🎯 NOVA LÓGICA: Usar função centralizada para determinar se deve fazer polling
+  if (!shouldPollForResults(userId)) {
+    // 🔇 SILENCIOSO: Não fazer polling se não há necessidade
+    return;
+  }
+  
+  // 📊 LOG: Mostrar status da verificação apenas quando há apostas
+  const hasActiveBets = operation.waitingForResult && !!operation.lastGameId;
+  if (hasActiveBets) {
+    addWebSocketLog(userId, `🔍 Verificando API - Aguardando resultado da aposta (Game: ${operation.lastGameId})`, 'info');
+  }
+  
+  try {
+    // 🎯 CONSULTAR: insights API local
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/bmgbr/blaze/pragmatic/blaze-megarouletebr/insights`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        user_id: `polling_${userId}`,
+        action: 'get',
+        limit: 3 // Buscar apenas os últimos 3 resultados
+      })
+    });
+    
+    if (response.ok) {
+      const result = await response.json();
+      
+      if (result.success && result.data && result.data.results && result.data.results.length > 0) {
+        const latestResult = result.data.results[0]; // Resultado mais recente
+        
+        // 🔍 VERIFICAR: Se é um novo resultado que não foi processado
+        if (latestResult.gameId !== operation.lastProcessedGameId) {
+          // 🔍 LOG: Debug do estado atual da operação
+          addWebSocketLog(userId, `🔍 Novo resultado detectado: ${latestResult.gameId} | Aguardando: ${operation.waitingForResult ? operation.lastGameId : 'Nenhum'}`, 'info');
+          
+          // 🎯 VERIFICAR: Se estamos aguardando resultado de uma aposta ESPECÍFICA
+          if (operation.waitingForResult && operation.lastGameId) {
+            // ✅ CORREÇÃO: Verificar se o resultado é para a aposta que está aguardando
+            if (latestResult.gameId === operation.lastGameId) {
+              addWebSocketLog(userId, `🎯 Resultado da aposta encontrado: Game ${latestResult.gameId}, Número ${latestResult.number}`, 'success');
+              
+              // Processar resultado da aposta específica
+              const correctedColor = getColorFromNumber(latestResult.number);
+              const colorCode = latestResult.number === 0 ? 'green' : (correctedColor === 'red' ? 'R' : 'B');
+              
+              await processGameResult(userId, latestResult.gameId, latestResult.number, correctedColor);
+              
+              addWebSocketLog(userId, `✅ Resultado processado - sistema deve continuar funcionando`, 'success');
+            } else {
+              // 🔍 DEBUG: Resultado não é para a aposta atual
+              addWebSocketLog(userId, `🔍 Resultado não é da aposta atual: API=${latestResult.gameId}, Aguardando=${operation.lastGameId}`, 'info');
+            }
+                      } else if (operation.isStandbyMode === true) {
+              // 🔍 Processar resultado apenas se modo standby ativo (para auto-bot)
+              addWebSocketLog(userId, `🔄 Novo resultado detectado via URL/API: Game ${latestResult.gameId}, Número ${latestResult.number}`, 'info');
+              
+              // Processar resultado
+              const correctedColor = getColorFromNumber(latestResult.number);
+              const colorCode = latestResult.number === 0 ? 'green' : (correctedColor === 'red' ? 'R' : 'B');
+              
+              await processGameResult(userId, latestResult.gameId, latestResult.number, correctedColor);
+            }
+          
+          // Atualizar último resultado processado
+          operation.lastProcessedGameId = latestResult.gameId;
+          
+          // 🎯 NOVO: Atualizar histórico apenas quando há apostas pendentes ou modo standby
+          const hasActiveBets = operation.waitingForResult && !!operation.lastGameId;
+          const isStandbyMode = operation.isStandbyMode === true;
+          
+          if (hasActiveBets || isStandbyMode) {
+            // Atualizar histórico de resultados para o frontend
+            if (!gameResults[userId]) {
+              gameResults[userId] = [];
+            }
+            
+            gameResults[userId].unshift({
+              number: latestResult.number,
+              color: latestResult.number === 0 ? 'green' : (getColorFromNumber(latestResult.number) === 'red' ? 'R' : 'B'),
+              gameId: latestResult.gameId,
+              timestamp: new Date(latestResult.timestamp || latestResult.created_at).getTime()
+            });
+            
+            // Manter apenas os últimos 50 resultados
+            if (gameResults[userId].length > 50) {
+              gameResults[userId] = gameResults[userId].slice(0, 50);
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn(`Erro ao verificar novos resultados para usuário ${userId}:`, error);
+  }
+}
+
+// 🔄 FUNÇÃO: Parar polling da URL/API
+async function stopApiPolling(userId: string): Promise<void> {
+  const operation = operationState[userId];
+  if (!operation || !operation.apiPollingInterval) {
+    return;
+  }
+  
+  clearInterval(operation.apiPollingInterval);
+  operation.apiPollingInterval = undefined;
+  
+  // 🔇 LOG SILENCIOSO: Não logar quando para o polling
+  // addWebSocketLog(userId, `🔄 Polling da URL/API parado`, 'info');
+}
+
+// 🎯 FUNÇÃO: Determinar se deve fazer polling baseado no estado da operação
+function shouldPollForResults(userId: string): boolean {
+  const operation = operationState[userId];
+  if (!operation) return false;
+  
+  // Condições ESPECÍFICAS para fazer polling:
+  // 1. Há apostas pendentes aguardando resultado
+  // 2. Modo standby ativo (para monitorar oportunidades do auto-bot)
+  
+  const hasActiveBets = operation.waitingForResult && !!operation.lastGameId;
+  const isStandbyMode = operation.isStandbyMode === true;
+  
+  // 🎯 NOVO: Só fazer polling quando há apostas pendentes OU modo standby
+  // Não fazer polling apenas por estar "operando" sem apostas
+  return hasActiveBets || isStandbyMode;
+}
+
 // 🔍 FUNÇÃO: Processar resultado do jogo com dupla validação
 async function processGameResult(userId: string, gameId: string, number: number, color: string) {
   // 🔍 DUPLA VALIDAÇÃO: Verificar e corrigir inconsistências
   const validation = validateAndCorrectColor(number, color);
   
-  // 📋 LOG: Sempre mostrar resultado da validação
-  addWebSocketLog(userId, validation.logMessage, validation.hasConflict ? 'error' : 'success');
+  // 📋 LOG: Mostrar resultado da validação apenas se houver mensagem
+  if (validation.logMessage) {
+    addWebSocketLog(userId, validation.logMessage, validation.hasConflict ? 'error' : 'success');
+  }
   
   // 🔧 USAR SEMPRE A COR CORRIGIDA
   const correctedColor = validation.correctedColor;
   const colorCode = number === 0 ? 'green' : (correctedColor === 'red' ? 'R' : 'B');
   
+  // 🚫 REMOVIDO: Validação dupla via WebSocket
+  // Agora os resultados são processados APENAS via URL/API polling
+  
   // 💾 RECOVERY: Verificar se este resultado resolve uma aposta pendente
   const operation = operationState[userId];
   if (operation?.waitingForResult && operation.lastGameId === gameId) {
     addWebSocketLog(userId, `🔄 RECOVERY: Resultado encontrado para aposta pendente (Game: ${gameId})`, 'success');
-    addWebSocketLog(userId, `🎯 Aposta: ${operation.currentBetColor === 'R' ? 'VERMELHO' : 'PRETO'} | Resultado: ${correctedColor.toUpperCase()}`, 'info');
+    
+    // 🎯 NOVO: Log detalhado da aposta vs resultado
+    const betColorName = operation.currentBetColor === 'R' ? 'VERMELHO' : 
+                         operation.currentBetColor === 'B' ? 'PRETO' : 
+                         operation.currentBetColor === 'E' ? 'PAR' : 
+                         operation.currentBetColor === 'O' ? 'ÍMPAR' : 
+                         operation.currentBetColor === 'L' ? 'BAIXAS (1-18)' : 
+                         operation.currentBetColor === 'H' ? 'ALTAS (19-36)' : 'DESCONHECIDO';
+    
+    addWebSocketLog(userId, `🎯 Aposta: ${betColorName} | Resultado: ${correctedColor.toUpperCase()} (${number})`, 'info');
     
     // 📋 VERIFICAR: Se há entrada pendente ou enviada no histórico para atualizar
     if (detailedHistory[userId]) {
-      const pendingEntry = detailedHistory[userId].findLast(entry => 
+      const pendingEntry = detailedHistory[userId].slice().reverse().find(entry => 
         entry.gameId === gameId && (entry.resultColor === 'pending' || entry.resultColor === 'sent')
       );
       
@@ -772,16 +1111,22 @@ async function processGameResult(userId: string, gameId: string, number: number,
         addWebSocketLog(userId, `📋 Entrada pendente/enviada atualizada no histórico`, 'success');
       }
     }
+    
+    // 🔄 PROSSEGUIR: Processar o resultado da aposta
+    addWebSocketLog(userId, `🔄 Processando resultado da aposta...`, 'info');
+  } else {
+    // 🔍 LOG: Informar que não há aposta aguardando para este resultado
+    if (operation?.waitingForResult) {
+      addWebSocketLog(userId, `🔍 Resultado não resolve aposta pendente (Game atual: ${gameId}, Aguardando: ${operation.lastGameId})`, 'info');
+    } else {
+      addWebSocketLog(userId, `🔍 Resultado processado para histórico (sem aposta pendente)`, 'info');
+    }
   }
   
-  // Se for zero e há operação ativa, processa como derrota
-  if (number === 0 && operationState[userId]?.active) {
-    addWebSocketLog(userId, `🟢 Zero detectado: ${number} - processando como derrota`, 'game');
-    await processOperationResult(userId, 'green');
-    return;
-  }
+  // 📋 NOVO: Atualizar número do resultado no histórico detalhado
+  updateLastHistoryEntryNumber(userId, number, gameId);
   
-  // Adiciona aos resultados do jogo (sempre armazena, incluindo zeros)
+  // ✅ SEMPRE armazenar resultado ANTES de qualquer processamento (incluindo zeros)
   if (!gameResults[userId]) {
     gameResults[userId] = [];
   }
@@ -798,157 +1143,65 @@ async function processGameResult(userId: string, gameId: string, number: number,
     gameResults[userId].shift();
   }
   
-  // 🔍 LOG: Mostrar resultado final (corrigido se necessário)
-  const statusIcon = validation.hasConflict ? '🔧' : '🎲';
-  addWebSocketLog(userId, `${statusIcon} Resultado final: ${number} ${correctedColor} | Total: ${gameResults[userId].length}`, 'game');
-  
-  // 📋 NOVO: Atualizar número do resultado no histórico detalhado
-  updateLastHistoryEntryNumber(userId, number, gameId);
+  // Se for zero e há operação ativa, processa como derrota
+  if (number === 0 && operationState[userId]?.active) {
+    addWebSocketLog(userId, `🟢 Zero detectado: ${number} - processando como derrota`, 'game');
+    await processOperationResult(userId, 'green', number);
+    return;
+  }
   
   // Se operação ativa, processa aposta
   if (operationState[userId]?.active) {
-    await processOperationResult(userId, colorCode);
-  }
-  }
-  
-// 🎲 FUNÇÃO: Sempre apostar no vermelho (sem randomização)
-function generateRedBet(): 'R' {
-  return 'R'; // Sempre vermelho
-}
-  
-// 🔍 NOVA FUNÇÃO: Verificar se pode sair do modo análise
-function canExitAnalysisMode(userId: string): boolean {
-  const operation = operationState[userId];
-  if (!operation) return false;
-  
-  const thresholds = operation.thresholds;
-  
-  // ✅ CORREÇÃO: Usar martingaleUsageStats como fonte única da verdade
-  const martingaleStats = martingaleUsageStats[userId] || new Array(4).fill(0);
-  
-  // 🔄 MUDANÇA: Para M4, verificar derrotas ao invés de vitórias
-  const m4Losses = m4LossesCounter[userId] || 0;
-  
-  const m1Check = martingaleStats[0] >= thresholds.m1Required;
-  const m2Check = martingaleStats[1] >= thresholds.m2Required;
-  const m3Check = martingaleStats[2] >= thresholds.m3Required;
-  const m4Check = m4Losses >= thresholds.m4Required;
-  
-  // 🎯 NOVA LÓGICA: Qualquer nível que atingir o mínimo já ativa o modo real
-  return m1Check || m2Check || m3Check || m4Check;
-}
-
-// 🎯 NOVA FUNÇÃO: Ativar modo real imediatamente quando limiar for atingido
-async function checkReadyForRealMode(userId: string): Promise<void> {
-  const operation = operationState[userId];
-  
-  if (!operation) {
-    return;
-  }
-  
-  if (canExitAnalysisMode(userId)) {
-    return;
-  }
-  
-  const canExit = canExitAnalysisMode(userId);
-  
-  if (canExit) {
-    // 🎯 NOVO: Inicializar controle de ativação inteligente se não existir
-    if (!operation.smartActivation) {
-      operation.smartActivation = {
-        readyToActivate: false,
-        waitingForSequenceEnd: false
-      };
-    }
-    
-    // 🎯 NOVO: Se já está pronto para ativar, não processar novamente
-    if (operation.smartActivation.readyToActivate) {
-      return;
-    }
-    
-    const stats = martingaleUsageStats[userId];
-    const thresholds = operation.thresholds;
-    const m4Losses = m4LossesCounter[userId] || 0;
-    
-    // 🎯 IDENTIFICAR QUAL NÍVEL ATINGIU O MÍNIMO
-    const reachedLevels = [];
-    if (stats[0] >= thresholds.m1Required) reachedLevels.push(`M1=${stats[0]}/${thresholds.m1Required} vitórias`);
-    if (stats[1] >= thresholds.m2Required) reachedLevels.push(`M2=${stats[1]}/${thresholds.m2Required} vitórias`);
-    if (stats[2] >= thresholds.m3Required) reachedLevels.push(`M3=${stats[2]}/${thresholds.m3Required} vitórias`);
-    if (m4Losses >= thresholds.m4Required) reachedLevels.push(`M4=${m4Losses}/${thresholds.m4Required} derrotas`);
-    
-    // 🎯 NOVO: Marcar como pronto para ativar, mas NÃO ativar ainda
-    operation.smartActivation.readyToActivate = true;
-    operation.smartActivation.waitingForSequenceEnd = operation.martingaleLevel > 0;
-    
-    addWebSocketLog(userId, `🎯 LIMIAR ATINGIDO! ${reachedLevels.join(', ')} - Aguardando fim da sequência para ativar modo real`, 'success');
-    addWebSocketLog(userId, `📊 Todos os contadores: M1=${stats[0]}/${thresholds.m1Required}, M2=${stats[1]}/${thresholds.m2Required}, M3=${stats[2]}/${thresholds.m3Required}, M4=${m4Losses}/${thresholds.m4Required} derrotas`, 'info');
-    
-    // 🎯 NOVO: Se já está no M1, ativar imediatamente
-    if (operation.martingaleLevel === 0) {
-      activateRealModeNow(userId);
-    } else {
-      // 🎯 NOVO: Aguardar fim da sequência
-      addWebSocketLog(userId, `⏳ Aguardando fim da sequência atual (M${operation.martingaleLevel + 1}) para ativar modo real no próximo M1`, 'info');
-      operation.smartActivation.waitingForSequenceEnd = true;
-    }
+    await processOperationResult(userId, colorCode, number);
   }
 }
 
-// 🎯 NOVA FUNÇÃO: Ativar modo real imediatamente
-function activateRealModeNow(userId: string): void {
-  const operation = operationState[userId];
-  
-  if (!operation || !operation.smartActivation) {
-    return;
+// 🔍 FUNÇÃO: Verificar se aposta ganhou baseada no tipo de aposta
+function checkBetWin(betColor: 'R' | 'B' | 'E' | 'O' | 'L' | 'H', resultColor: string, resultNumber: number): boolean {
+  // Zero sempre perde (exceto se apostou diretamente no zero)
+  if (resultNumber === 0) {
+    return false;
   }
   
-  // ✅ Resetar para M1 quando modo real é ativado
-  operation.martingaleLevel = 0; // Reset para M1 no modo real
-  
-  // 🎯 NOVO: Marcar como ativado
-  operation.smartActivation.readyToActivate = false;
-  operation.smartActivation.waitingForSequenceEnd = false;
-  
-  addWebSocketLog(userId, `🚀 MODO REAL ATIVADO! Limiar atingido → Iniciando apostas reais no M1`, 'success');
-}
-
-// 🔄 NOVA FUNÇÃO: Reset contadores de análise
-function resetAnalysisCounters(userId: string): void {
-  const operation = operationState[userId];
-  if (operation) {
-    operation.analysisCounters = {
-      m1Wins: 0,
-      m2Wins: 0,
-      m3Wins: 0,
-      m4Losses: 0
-    };
-    // ✅ CORREÇÃO: Limpar cor da aposta armazenada
-    operation.currentBetColor = undefined;
-    addWebSocketLog(userId, `🔄 Contadores de análise resetados`, 'info');
+  switch (betColor) {
+    case 'R': // Vermelho
+      return resultColor === 'R';
+    case 'B': // Preto
+      return resultColor === 'B';
+    case 'E': // Par
+      return resultNumber % 2 === 0;
+    case 'O': // Ímpar
+      return resultNumber % 2 === 1;
+    case 'L': // Baixas (1-18)
+      return resultNumber >= 1 && resultNumber <= 18;
+    case 'H': // Altas (19-36)
+      return resultNumber >= 19 && resultNumber <= 36;
+    default:
+      return false;
   }
-  
-  // 🔄 TAMBÉM resetar o contador específico de derrotas M4
-  resetM4Losses(userId);
 }
 
 // NOVO: Função para processar resultado da operação (Nova Lógica de Aquecimento)
-async function processOperationResult(userId: string, resultColor: string) {
+async function processOperationResult(userId: string, resultColor: string, resultNumber: number = 0) {
   const operation = operationState[userId];
   if (!operation || !operation.active || !operation.strategy?.sequences) {
     addWebSocketLog(userId, '❌ Estado da operação inválido para processar resultado', 'error');
     return;
   }
 
-  // 🎲 CORREÇÃO: Usar cor da aposta armazenada (sempre vermelho)
+  // 🎲 CORREÇÃO: Usar cor da aposta armazenada
   const betColor = operation.currentBetColor;
   
   if (!betColor) {
+    addWebSocketLog(userId, '❌ Cor da aposta não encontrada - não é possível processar resultado', 'error');
     return;
   }
   
-  // ✅ ZERO SEMPRE CONTA COMO DERROTA - só ganha se for exatamente a cor apostada
-  const isWin = (resultColor === betColor);
+  // 🔍 LOG: Informar que o resultado está sendo processado
+  addWebSocketLog(userId, `🔍 Processando resultado: ${resultColor} (${resultNumber}) vs Aposta: ${betColor}`, 'info');
+  
+  // ✅ NOVA LÓGICA: Verificar vitória baseada no tipo de aposta
+  const isWin = checkBetWin(betColor, resultColor, resultNumber);
   
   // ✅ CORREÇÃO: Determinar modo baseado nos contadores, não na propriedade mode
   const isRealMode = canExitAnalysisMode(userId);
@@ -957,19 +1210,37 @@ async function processOperationResult(userId: string, resultColor: string) {
   if (isRealMode) {
     operation.stats.totalBets++;
   }
-  operation.waitingForResult = false; // ✅ SEMPRE libera para próxima aposta
+  
+  // ✅ CRÍTICO: Liberar estado "aguardando resultado" IMEDIATAMENTE
+  const wasWaitingForResult = operation.waitingForResult;
+  operation.waitingForResult = false;
+  
+  // 🔄 NOVO: Parar polling quando resultado é processado (se não estiver em modo standby)
+  if (wasWaitingForResult && operation.isStandbyMode !== true) {
+    await stopApiPolling(userId);
+  }
+  
+  // 🔍 LOG: Confirmar que o estado foi liberado
+  if (wasWaitingForResult) {
+    addWebSocketLog(userId, `✅ Estado "aguardando resultado" liberado para próxima aposta`, 'success');
+  }
   
   const betAmount = operation.strategy?.sequences?.[operation.martingaleLevel];
   const betColorName = COLOR_NAMES[betColor] || betColor;
   const resultColorName = COLOR_NAMES[resultColor] || resultColor;
   
+  // 🎯 NOVO: Log detalhado para apostas par/ímpar
+  let betDescription = betColorName;
+  if (betColor === 'E' || betColor === 'O') {
+    betDescription += ` (${resultNumber})`;
+  }
+  
   // 📋 CORREÇÃO: Registrar no histórico detalhado baseado nos contadores
   addDetailedHistoryEntry(userId, {
-    mode: isRealMode ? 'real' : 'analysis',
     martingaleLevel: operation.martingaleLevel,
     betColor: betColor,
     resultColor: resultColor,
-    resultNumber: 0, // Número será definido quando disponível
+    resultNumber: resultNumber,
     gameId: operation.lastGameId || 'unknown',
     isWin: isWin,
     betAmount: betAmount
@@ -984,10 +1255,25 @@ async function processOperationResult(userId: string, resultColor: string) {
     if (isRealMode) {
       operation.stats.wins++;
       operation.stats.profit += betAmount;
+      
+              // 🎯 NOVO: Verificar Meta de Lucro IMEDIATAMENTE após vitória
+      if (checkStopGainReached(userId)) {
+        const targetProfit = calculateStopGainTarget(operation.userBanca!, operation.stopGainPercentage!);
+        const currentProfit = operation.stats.profit;
+        
+                  addWebSocketLog(userId, `🎯 META DE LUCRO ATINGIDA! Meta: R$ ${targetProfit.toFixed(2)}, Lucro: R$ ${currentProfit.toFixed(2)}`, 'success');
+        addWebSocketLog(userId, `✅ Parando operação IMEDIATAMENTE após vitória!`, 'success');
+        
+        // Parar operação completamente
+                  resetOperationSafely(userId, 'Meta de Lucro atingida', true);
+        
+        return; // Parar operação imediatamente
+      }
     }
     
     const modeLabel = isRealMode ? '💰 REAL' : '🔍 ANÁLISE';
-    addWebSocketLog(userId, `✅ ${modeLabel} - VITÓRIA M${operation.martingaleLevel + 1}! Apostou ${betColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName}`, 'success');
+    // Lucro individual da aposta (sempre o valor da aposta)
+    addWebSocketLog(userId, `✅ Vitória! Lucro de R$ ${betAmount.toFixed(2)}`, 'success');
     
     // 🔍 MODO ANÁLISE: NÃO marca vitórias aqui - só marca quando perde
     
@@ -995,7 +1281,8 @@ async function processOperationResult(userId: string, resultColor: string) {
     const originalRealMode = isRealMode;
     if (!originalRealMode) {
       // Registra vitória do nível atual ANTES de avançar
-      recordMartingaleUsage(userId, operation.martingaleLevel);
+      // Registrar vitória no martingale (simplificado)
+      addWebSocketLog(userId, `📊 Vitória M${operation.martingaleLevel + 1} registrada`, 'success');
       addWebSocketLog(userId, `✅ 🔍 ANÁLISE - Vitória M${operation.martingaleLevel + 1} registrada!`, 'success');
       
       // 🎯 NOVA VERIFICAÇÃO: Após registrar vitória, verificar se limiares foram atingidos
@@ -1014,6 +1301,24 @@ async function processOperationResult(userId: string, resultColor: string) {
     
     // ✅ Verificar se atingiu M4 (máximo da sequência)
     if (operation.martingaleLevel >= 4) {
+      // 🔥 NOVO: Verificar se está em modo M4 direto
+      if (operation.m4DirectBetType) {
+        // addWebSocketLog(userId, `🔥 MODO M4 DIRETO - OBJETIVO CONCLUÍDO! Acertou M4!`, 'success');
+        addWebSocketLog(userId, `🎯 MISSÃO CUMPRIDA! Parando operação automaticamente.`, 'success');
+        
+        // 🎯 NOVO: Marcar missão como cumprida para impedir apostas futuras
+        operation.missionCompleted = true;
+        addWebSocketLog(userId, `🛡️ Proteção ativada: Sistema não apostará mais até reset manual`, 'info');
+        
+        // Parar operação completamente
+        resetOperationSafely(userId, 'MODO M4 DIRETO - Objetivo concluído', true);
+        
+        // Mostrar mensagem de sucesso específica do modo M4 direto
+        // addWebSocketLog(userId, `✅ 🔥 MODO M4 DIRETO CONCLUÍDO COM SUCESSO! 🔥`, 'success');
+        
+        return; // Parar operação
+      }
+      
       // 🔄 CORREÇÃO: Usar contadores para determinar comportamento
       const currentRealMode = canExitAnalysisMode(userId);
       
@@ -1022,11 +1327,9 @@ async function processOperationResult(userId: string, resultColor: string) {
         addWebSocketLog(userId, `✅ 🔍 ANÁLISE - M4 GANHO! Resetando análise completa`, 'success');
         addWebSocketLog(userId, `🎯 LÓGICA: M4 já saiu, chances menores de sair outro → Recomeçando análise`, 'info');
         
-        // 🔄 RESET COMPLETO: Limpar todos os contadores de análise
+        // 🔄 RESET COMPLETO: Limpar todos os contadores
         resetAnalysisCounters(userId);
-        resetMartingaleUsage(userId);
-        resetAnalysisRounds(userId);
-        resetM4Losses(userId);
+        // Removido: funções que não existem mais
         
         // Reset para início da sequência (volta para M1)
         operation.martingaleLevel = 0;
@@ -1034,10 +1337,7 @@ async function processOperationResult(userId: string, resultColor: string) {
         operation.currentBetColor = undefined;
         
         // 🎯 NOVO: Verificar se está pronto para ativar modo real após reset para M1
-        if (operation.smartActivation?.readyToActivate && operation.smartActivation?.waitingForSequenceEnd) {
-          addWebSocketLog(userId, `🎯 Sequência finalizada! Ativando modo real no próximo M1`, 'success');
-          activateRealModeNow(userId);
-        }
+        // Removido: smartActivation não existe mais
         
         addWebSocketLog(userId, `🔄 Análise resetada - Recomeçando do M1 com contadores zerados`, 'info');
         
@@ -1064,7 +1364,7 @@ async function processOperationResult(userId: string, resultColor: string) {
       // ✅ Continua operação - mostrar próxima aposta
       const currentRealMode = canExitAnalysisMode(userId);
       const modeLabel = currentRealMode ? '💰 REAL' : '🔍 ANÁLISE';
-      addWebSocketLog(userId, `🔄 ${modeLabel} - Próxima aposta: M${operation.martingaleLevel + 1}`, 'info');
+      // addWebSocketLog(userId, `🔄 ${modeLabel} - Próxima aposta: M${operation.martingaleLevel + 1}`, 'info');
       
       // ✅ Se ainda estiver no modo análise, continuar normalmente
       if (!currentRealMode) {
@@ -1081,59 +1381,128 @@ async function processOperationResult(userId: string, resultColor: string) {
     }
     
     const isGreenDefeat = resultColor === 'green';
-    const defeatReason = isGreenDefeat ? '(ZERO)' : `(${resultColorName})`;
+    const defeatReason = isGreenDefeat ? '(ZERO)' : `(${resultNumber})`;
     
     const modeLabel = isRealMode ? '💰 REAL' : '🔍 ANÁLISE';
-    addWebSocketLog(userId, `❌ ${modeLabel} - DERROTA M${operation.martingaleLevel + 1}! Apostou ${betColorName} R$ ${betAmount.toFixed(2)} → Veio ${resultColorName} ${defeatReason}`, 'error');
+    const resultCharacteristics = getNumberCharacteristics(resultNumber);
+    addWebSocketLog(userId, `❌ Derrota! Prejuízo de -R$ ${betAmount.toFixed(2)}`, 'error');
+    addWebSocketLog(userId, `🎲 Resultado: ${resultCharacteristics}`, 'info');
     
     // 🔄 DERROTA NO MODO ANÁLISE: Verificar se foi derrota no M4
     if (!isRealMode) {
       // 🔄 NOVA LÓGICA: Se perdeu no M4, registrar derrota M4
       if (operation.martingaleLevel === 3) { // M4 é índice 3
-        recordM4Loss(userId);
-        addWebSocketLog(userId, `💥 Derrota M4 registrada - Total: ${m4LossesCounter[userId] || 0}`, 'error');
+        // Removido: recordM4Loss não existe mais
+        addWebSocketLog(userId, `💥 Derrota M4 registrada`, 'error');
         
         // Verificar se atingiu o limiar de derrotas M4
-        await checkReadyForRealMode(userId);
+        // Removido: checkReadyForRealMode não existe mais
       }
     }
       
     // ✅ NOVA LÓGICA: Qualquer derrota volta para M1
-    addWebSocketLog(userId, `🔄 DERROTA: Voltando para M1`, 'info');
+    // addWebSocketLog(userId, `🔄 DERROTA: Voltando para M1`, 'info');
     
     // Reset para início da sequência
     operation.martingaleLevel = 0;
     
-    // 🎯 NOVO: Verificar se está pronto para ativar modo real após reset para M1
-    if (operation.smartActivation?.readyToActivate && operation.smartActivation?.waitingForSequenceEnd) {
-      addWebSocketLog(userId, `🎯 Sequência finalizada! Ativando modo real no próximo M1`, 'success');
-      activateRealModeNow(userId);
+    // 🎯 NOVO: Aplicar stake pendente após derrota
+    if (operation.pendingStake && operation.pendingStake > 0) {
+      const calculateSequence = (stake: number) => {
+        return [
+          stake * 1,   // M1 = 1x stake
+          stake * 4,   // M2 = 4x stake
+          stake * 10,  // M3 = 10x stake
+          stake * 22   // M4 = 22x stake
+        ];
+      };
+      
+      const newSequence = calculateSequence(operation.pendingStake);
+      operation.strategy.sequences = newSequence;
+      
+      addWebSocketLog(userId, `💰 Stake pendente aplicada após derrota: R$ ${operation.pendingStake.toFixed(2)}`, 'success');
+      addWebSocketLog(userId, `📊 Nova sequência: [${newSequence.slice(0, 4).map(v => v.toFixed(2)).join(', ')}]`, 'info');
+      
+      // Limpar stake pendente
+      operation.pendingStake = null;
     }
+    
+    // 🎯 NOVO: Verificar se está pronto para ativar modo real após reset para M1
+    // Removido: smartActivation não existe mais
     
     // 💰 REAL: Derrota → CONTINUA no modo real (não volta para análise)
     if (isRealMode) {
-      addWebSocketLog(userId, `🔄 REAL - Derrota → Continuando no modo real (objetivo: M4)`, 'info');
+      // addWebSocketLog(userId, `🔄 REAL - Derrota → Continuando no modo real (objetivo: M4)`, 'info');
       // NÃO muda para análise - continua no modo real até conseguir M4
     }
     
-    // Após processar derrota, verificar validade do token e renovar se necessário
-    const session = sessionControl[userId];
-    if (session) {
-      const now = Date.now();
-      // Considera expiração se faltam menos de 3 minutos para expirar (20min padrão)
-      const expiresIn = 20 * 60 * 1000;
-      const renewThreshold = 3 * 60 * 1000;
-      if (!session.lastRenewal || (now - session.lastRenewal) > (expiresIn - renewThreshold)) {
-        addWebSocketLog(userId, '⏳ Token próximo de expirar ou expirado, renovando...', 'info');
-        await renewSession(userId);
-      } else {
-        addWebSocketLog(userId, '🔒 Token ainda válido, não precisa renovar.', 'info');
-      }
+    // ⏰ Verificar renovação automática após derrota
+    if (shouldRenewAutomatically(userId)) {
+      addWebSocketLog(userId, '⏰ Iniciando renovação automática...', 'info');
+      setTimeout(async () => {
+        const renewed = await renewSession(userId);
+        if (renewed) {
+          addWebSocketLog(userId, '✅ Renovação automática concluída com sucesso', 'success');
+        } else {
+          addWebSocketLog(userId, '❌ Falha na renovação automática', 'error');
+        }
+      }, 1000);
     }
   }
 }
 
-// 💾 FUNÇÃO: Renovar sessão automaticamente COM BACKUP DE ESTADO
+// 🎲 FUNÇÃO: Sempre apostar no vermelho (sem randomização)
+function generateRedBet(): 'R' {
+  return 'R'; // Sempre vermelho
+}
+  
+// 🔍 NOVA FUNÇÃO: Verificar se pode sair do modo análise
+function canExitAnalysisMode(userId: string): boolean {
+  const operation = operationState[userId];
+  if (!operation) return false;
+  
+  // 🔥 NOVO: Sistema simplificado - sempre em modo real
+  return true;
+}
+
+// 🎯 NOVA FUNÇÃO: Ativar modo real imediatamente quando limiar for atingido
+async function checkReadyForRealMode(userId: string): Promise<void> {
+  const operation = operationState[userId];
+  
+  if (!operation) {
+    return;
+  }
+  
+  // Sistema simplificado - sempre em modo real
+  return;
+}
+
+// 🎯 NOVA FUNÇÃO: Ativar modo real imediatamente
+function activateRealModeNow(userId: string): void {
+  const operation = operationState[userId];
+  
+  if (!operation) {
+    return;
+  }
+  
+  addWebSocketLog(userId, `🚀 MODO REAL ATIVADO! Sistema simplificado sempre em modo real`, 'success');
+  
+  // Sistema simplificado - sempre em modo real
+  // Removido: smartActivation não existe mais
+  
+  // 🎯 NOVO: Resetar para M1 quando ativado
+  operation.martingaleLevel = 0;
+  addWebSocketLog(userId, `🔄 Resetando para M1 no modo real`, 'info');
+}
+
+// 🔄 NOVA FUNÇÃO: Reset contadores de análise
+function resetAnalysisCounters(userId: string): void {
+  // Sistema simplificado - função vazia
+  // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `🔄 Contadores resetados (sistema simplificado)`, 'info');
+}
+
+// 💾 FUNÇÃO: Renovar sessão automaticamente COM BACKUP DE ESTADO E CONTROLE DE RATE LIMITING
 async function renewSession(userId: string): Promise<boolean> {
   try {
     const session = sessionControl[userId];
@@ -1144,15 +1513,27 @@ async function renewSession(userId: string): Promise<boolean> {
 
     if (session.renewalAttempts >= session.maxRenewalAttempts) {
       addWebSocketLog(userId, '❌ Máximo de tentativas de renovação atingido', 'error');
+      // 🔧 NOVO: Forçar desconexão total quando atingir limite
+      addWebSocketLog(userId, '🔄 Forçando desconexão total - requer reinício manual', 'error');
+      stopAllConnections(userId, true, false);
       return false;
     }
+
+    // 🔧 REMOVIDO: Verificação de rate limiting - agora usa sistema programado
+    // if (!canAttemptRenewal(userId)) {
+    //   addWebSocketLog(userId, '🚫 Renovação bloqueada pelo sistema de rate limiting', 'error');
+    //   return false;
+    // }
 
     // 💾 CRIAR BACKUP antes de renovar (se operação ativa)
     if (operationState[userId]?.active) {
       // Removido: backup simplificado
     }
 
-    addWebSocketLog(userId, '🔄 Renovando sessão automaticamente...', 'info');
+    // 🔧 MODIFICADO: Log para sistema programado
+    addWebSocketLog(userId, `🔄 Renovando sessão programada (tentativa ${session.renewalAttempts + 1}/${session.maxRenewalAttempts})`, 'info');
+    addWebSocketLog(userId, `⏰ Última renovação: ${new Date(session.lastRenewal).toLocaleTimeString()}`, 'info');
+    
     session.renewalAttempts++;
 
     // ✅ USAR EDGE FUNCTION: Renovar sessão usando Supabase Edge Function
@@ -1163,8 +1544,6 @@ async function renewSession(userId: string): Promise<boolean> {
         addWebSocketLog(userId, `❌ Token da Blaze não encontrado: ${tokenResult.error}`, 'error');
         return false;
       }
-
-      addWebSocketLog(userId, `🚀 Renovando via Supabase Edge Function...`, 'info');
 
       const realBrowserHeaders = {
         'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
@@ -1177,91 +1556,126 @@ async function renewSession(userId: string): Promise<boolean> {
         'X-Requested-With': 'XMLHttpRequest'
       };
 
-      const authResponse = await fetch('https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA'
-        },
-        body: JSON.stringify({
-          action: 'generate-tokens',
-          blazeToken: tokenResult.token,
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-          acceptLanguage: 'pt-BR,pt;q=0.9,en;q=0.8',
-          selectedCurrencyType: 'BRL',
-          realBrowserHeaders: realBrowserHeaders
-        })
-      });
+      addWebSocketLog(userId, '🚀 Chamando Edge Function para renovação programada...', 'info');
+      
+      // 🔄 USAR SISTEMA DE RETRY para Edge Function
+      const authResponse = await retryBlazeRequest(async () => {
+        return await fetch('https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA'
+          },
+          body: JSON.stringify({
+            action: 'generate-tokens',
+            blazeToken: tokenResult.token,
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            acceptLanguage: 'pt-BR,pt;q=0.9,en;q=0.8',
+            selectedCurrencyType: 'BRL',
+            realBrowserHeaders: realBrowserHeaders
+          })
+        });
+      }, 'edge-function-renewal');
+
+      // 🔧 NOVO: Log detalhado da resposta da Edge Function
+      addWebSocketLog(userId, `📡 Edge Function respondeu com status: ${authResponse.status}`, 'info');
 
       if (!authResponse.ok) {
-        addWebSocketLog(userId, `❌ Erro na Edge Function: ${authResponse.status}`, 'error');
+        const errorText = await authResponse.text();
+        addWebSocketLog(userId, `❌ Edge Function falhou: ${authResponse.status} - ${errorText}`, 'error');
+        
+        // 🔧 NOVO: Verificar se é erro de bloqueio geográfico ou rate limit
+        if (authResponse.status === 451) {
+          addWebSocketLog(userId, '🌍 Erro 451: Bloqueio geográfico detectado', 'error');
+        } else if (authResponse.status === 429) {
+          addWebSocketLog(userId, '⏰ Erro 429: Rate limit - aguardando próxima janela de renovação', 'error');
+        }
+        
         return false;
       }
 
       const authResult = await authResponse.json();
       
+      // 🔧 NOVO: Log detalhado da resposta
+      addWebSocketLog(userId, `📋 Edge Function retornou: ${authResult.success ? 'SUCCESS' : 'FAILED'}`, 'info');
+      
       if (!authResult.success || !authResult.data) {
-        addWebSocketLog(userId, `❌ Falha na Edge Function: ${authResult.error}`, 'error');
+        addWebSocketLog(userId, `❌ Edge Function falhou: ${authResult.error || 'Resposta inválida'}`, 'error');
         return false;
       }
 
-      // Atualizar dados da sessão
+      // 🔧 NOVO: Validar se os tokens são válidos
+      if (!authResult.data.jsessionId || !authResult.data.ppToken) {
+        addWebSocketLog(userId, '❌ Tokens inválidos recebidos da Edge Function', 'error');
+        return false;
+      }
+
+      // Atualizar dados da sessão silenciosamente
       session.jsessionId = authResult.data.jsessionId;
       session.ppToken = authResult.data.ppToken;
       session.pragmaticUserId = authResult.data.pragmaticUserId;
       session.lastRenewal = Date.now();
-      session.renewalAttempts = 0; // Reset counter em caso de sucesso
-
-      addWebSocketLog(userId, '✅ Sessão renovada com sucesso via Edge Function', 'success');
-      addWebSocketLog(userId, `🔑 Novos tokens ativos - jsessionId: ${authResult.data.jsessionId.substring(0, 8)}...`, 'info');
+      session.renewalAttempts = 0;
+      
+      addWebSocketLog(userId, '✅ Sessão renovada com sucesso - reconectando WebSocket', 'success');
+      addWebSocketLog(userId, `🔗 jsessionId: ${authResult.data.jsessionId.substring(0, 10)}...`, 'info');
+      
+      // 🔄 CRÍTICO: Reconectar WebSocket com novo jsessionId
+      if (activeWebSockets[userId]) {
+        addWebSocketLog(userId, '🔄 Reconectando WebSocket com novo jsessionId...', 'info');
+        
+        // Fechar conexão atual
+        const currentWs = activeWebSockets[userId];
+        currentWs.ws.close();
+        delete activeWebSockets[userId];
+        
+        // Conectar com novo jsessionId (preservando todos os dados)
+        const newConfig = {
+          jsessionId: authResult.data.jsessionId,
+          pragmaticUserId: authResult.data.pragmaticUserId,
+          tableId: 'mrbras531mrbr532'
+        };
+        
+        // Pequeno delay para garantir fechamento limpo
+        setTimeout(() => {
+          startWebSocketConnection(userId, newConfig);
+          addWebSocketLog(userId, '✅ WebSocket reconectado com sucesso', 'success');
+        }, 1000);
+      }
+      
+      // ⏰ Mostrar próximo horário de renovação automática
+      const renewal = autoRenewal[userId];
+      if (renewal) {
+        const nextRenewal = new Date(renewal.nextRenewalTime).toLocaleTimeString();
+        addWebSocketLog(userId, `⏰ Próxima renovação automática: ${nextRenewal}`, 'info');
+      }
+      
       return true;
 
     } catch (edgeFunctionError) {
-      addWebSocketLog(userId, `❌ Erro na renovação via Edge Function: ${edgeFunctionError}`, 'error');
+      const errorMessage = edgeFunctionError instanceof Error ? edgeFunctionError.message : 'Erro desconhecido';
+      addWebSocketLog(userId, `❌ Erro na Edge Function: ${errorMessage}`, 'error');
       return false;
     }
 
   } catch (error) {
-    addWebSocketLog(userId, `❌ Erro na renovação: ${error instanceof Error ? error.message : 'Erro desconhecido'}`, 'error');
+    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+    addWebSocketLog(userId, `❌ Erro geral na renovação: ${errorMessage}`, 'error');
     return false;
   }
 }
 
-// NOVO: Configurar timer de renovação automática (PADRÃO @/BOTS QUE FUNCIONA)
-function setupAutoRenewal(userId: string) {
-  // Limpar timer anterior se existir
-  if (renewalTimers[userId]) {
-    clearTimeout(renewalTimers[userId]);
-  }
+// 🆕 FUNÇÃO REMOVIDA: verifyTokenAfterDefeat - substituída por sistema automático
+// A renovação agora é feita automaticamente a cada 10 minutos
+// async function verifyTokenAfterDefeat(userId: string): Promise<boolean> {
+//   return true; // Não verifica mais - usa sistema automático
+// }
 
-  // Renovar a cada 15 minutos (antes dos 20 minutos de expiração)
-  const renewalInterval = 15 * 60 * 1000; // 15 minutos em ms
-  
-  renewalTimers[userId] = setTimeout(async () => {
-    if (operationState[userId]?.active) {
-      addWebSocketLog(userId, '⏰ Timer de renovação ativado (15 min)', 'info');
-      const renewed = await renewSession(userId);
-      
-      if (renewed) {
-        // Configurar próxima renovação
-        setupAutoRenewal(userId);
-    } else {
-        addWebSocketLog(userId, '🛑 Falha na renovação - operação será pausada', 'error');
-        // Parar operação se renovação falhar
-        if (operationState[userId]) {
-          operationState[userId].active = false;
-    }
-      }
-    }
-  }, renewalInterval);
-    
-  addWebSocketLog(userId, `⏰ Renovação automática configurada (a cada 15 min)`, 'info');
-}
-    
 // NOVO: Conectar ao WebSocket
-async function connectToBettingGame(userId: string, tipValue?: number, clientIP?: string, userFingerprint?: any, clientHeaders?: any, authTokens?: { ppToken: string; jsessionId: string; pragmaticUserId: string }, forceClientSideAuth?: boolean, customMartingaleSequence?: number[], stakeBased?: boolean) {
+async function connectToBettingGame(userId: string, tipValue?: number, clientIP?: string, userFingerprint?: any, clientHeaders?: any, authTokens?: { ppToken: string; jsessionId: string; pragmaticUserId: string }, forceClientSideAuth?: boolean, customMartingaleSequence?: number[], stakeBased?: boolean, m4DirectBetType?: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high', isStandbyMode?: boolean) {
   try {
-    addWebSocketLog(userId, '🔗 Iniciando conexão...', 'info');
+    // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, '🔗 Iniciando conexão...', 'info');
     
     // Limpar status anterior e parar conexões existentes (preservando sessão se existir)
     const hasExistingSession = sessionControl[userId] != null;
@@ -1280,7 +1694,8 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       });
     }
 
-    addWebSocketLog(userId, '🔐 Usando APENAS tokens do client-side (IP real do usuário)...', 'info');
+    // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, '🔐 Usando APENAS tokens do client-side (IP real do usuário)...', 'info');
     const authResult = await validateClientTokens(userId, authTokens);
     if (!authResult.success) {
       let errorMsg = `Falha na autenticação: ${authResult.error}`;
@@ -1302,7 +1717,8 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       });
     }
 
-    addWebSocketLog(userId, 'Autenticação realizada com sucesso', 'success');
+    // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, 'Autenticação realizada com sucesso', 'success');
 
     // ✅ NOVO: Inicializar controle de sessão para renovação automática
     sessionControl[userId] = {
@@ -1315,6 +1731,9 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       maxRenewalAttempts: 3
     };
 
+    // ⏰ Inicializar sistema de renovação automática
+    initializeAutoRenewal(userId);
+
     // ✅ NOVA LÓGICA: Usar sequência personalizada se fornecida, senão calcular baseada no tipValue
     let calculatedSequence: number[];
     let strategyLabel: string;
@@ -1324,20 +1743,24 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       calculatedSequence = customMartingaleSequence;
       const stake = customMartingaleSequence[0];
       strategyLabel = `Stake R$ ${stake.toFixed(2)}`;
-      addWebSocketLog(userId, `💰 Sequência Personalizada (Stake R$ ${stake.toFixed(2)}) - M1-M4: [${calculatedSequence.map((v: number) => v.toFixed(2)).join(', ')}]`, 'info');
+      // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, `💰 Sequência Personalizada (Stake R$ ${stake.toFixed(2)}) - M1-M4: [${calculatedSequence.map((v: number) => v.toFixed(2)).join(', ')}]`, 'info');
     } else {
       // ✅ Calcular sequência baseada no tipValue (modo tradicional)
-    const calculateSequence = (baseTip: number) => {
-      const baseSequence = [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50, 1.00, 0.50];
-      const multiplier = baseTip / 20.00; // Detectar multiplicador (1x, 3x, 6x, 10x) - nova base R$ 20,00
-      return baseSequence.map(value => value * multiplier);
+    const calculateSequence = (stake: number) => {
+      return [
+        stake * 1,   // M1 = 1x stake
+        stake * 4,   // M2 = 4x stake
+        stake * 10,  // M3 = 10x stake
+        stake * 22   // M4 = 22x stake
+      ];
     };
 
-      calculatedSequence = calculateSequence(tipValue || 20.00);
-    const multiplier = (tipValue || 20.00) / 20.00;
-    const multiplierLabel = multiplier === 1 ? '1x' : multiplier === 3 ? '3x' : multiplier === 6 ? '6x' : multiplier === 10 ? '10x' : `${multiplier}x`;
-      strategyLabel = `${multiplierLabel} (R$ ${(tipValue || 20.00).toFixed(2)})`;
-      addWebSocketLog(userId, `🎯 Estratégia ${strategyLabel} - Sequência: [${calculatedSequence.slice(0, 3).map((v: number) => v.toFixed(2)).join(', ')}...]`, 'info');
+      calculatedSequence = calculateSequence(tipValue || 0.50);
+      const stake = tipValue || 0.50;
+      strategyLabel = `Stake R$ ${stake.toFixed(2)}`;
+      // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, `🎯 Estratégia ${strategyLabel} - Sequência: [${calculatedSequence.slice(0, 3).map((v: number) => v.toFixed(2)).join(', ')}...]`, 'info');
     }
 
     const strategy = {
@@ -1360,27 +1783,21 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
         sequences: calculatedSequence,
         maxMartingale: 4
       },
-      // 🔍 CONTADORES DE ANÁLISE (aquecimento)
-      analysisCounters: {
-        m1Wins: 0,
-        m2Wins: 0,
-        m3Wins: 0,
-        m4Losses: 0
-      },
-      // 📊 LIMIARES FIXOS - NOVA REGRA SIMPLIFICADA
-      thresholds: {
-        m1Required: 8,
-        m2Required: 4,
-        m3Required: 2,
-        m4Required: 1
-      },
+      // 🔍 SISTEMA SIMPLIFICADO: Removido analysisCounters
       stats: {
         totalBets: 0,
         wins: 0,
         losses: 0,
         profit: 0,
         startedAt: Date.now()
-      }
+      },
+      // 🎯 NOVO: Campos para Meta de Lucro
+      stopGainPercentage: null,
+      userBanca: null,
+      // 🔥 NOVO: Campo para M4 Direto
+      m4DirectBetType: m4DirectBetType || undefined,
+      // 🤖 NOVO: Campo para modo standby
+      isStandbyMode: isStandbyMode || false
     };
     
     // Iniciar conexão WebSocket
@@ -1392,7 +1809,8 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
 
     startWebSocketConnection(userId, config, undefined, clientIP, userFingerprint);
 
-    addWebSocketLog(userId, 'WebSocket iniciado para coleta de dados', 'success');
+    // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, 'WebSocket iniciado para coleta de dados', 'success');
       
       return NextResponse.json({
         success: true,
@@ -1426,6 +1844,15 @@ async function startSimpleOperation(userId: string) {
       });
     }
     
+    // ✅ NOVO: Limpar logs antigos para evitar confusão
+    websocketLogs[userId] = [];
+    
+    // 🚀 PRIMEIRO LOG: Iniciando operações
+    addWebSocketLog(userId, '🚀 Iniciando operações...', 'success');
+    
+    // 🎯 NOVO: Informar sobre proteção contra missão cumprida
+    addWebSocketLog(userId, '🛡️ Proteção ativa: Sistema para automaticamente após missão cumprida', 'info');
+    
     // 🔧 CORREÇÃO: Usar reset seguro que preserva autenticação
     const isFirstConn = isFirstConnection[userId] || false;
     resetOperationSafely(userId, 'Nova operação iniciada', isFirstConn);
@@ -1441,20 +1868,51 @@ async function startSimpleOperation(userId: string) {
       martingaleLevel: 0, // Inicia no M1
       waitingForResult: false,
       currentBetColor: undefined, // ✅ CORREÇÃO: Limpar cor da aposta
+      missionCompleted: false, // 🎯 NOVO: Resetar flag de missão cumprida
       
     };
     
-    addWebSocketLog(userId, `🔍 ANÁLISE - Operação iniciada em modo aquecimento!`, 'success');
-    addWebSocketLog(userId, `🎯 NOVA REGRA: Qualquer nível que atingir o mínimo ativa o modo real IMEDIATAMENTE!`, 'info');
-    addWebSocketLog(userId, `📊 Limiares: M1≥8 vitórias, M2≥4 vitórias, M3≥2 vitórias, M4≥1 DERROTA`, 'info');
-    addWebSocketLog(userId, `🔴 Apostará sempre no VERMELHO (estratégia fixa)`, 'info');
+    // 🔄 INICIAR: Polling da URL/API apenas se modo standby ativo
+    if (operationState[userId]?.isStandbyMode === true) {
+      await startApiPolling(userId);
+      addWebSocketLog(userId, `🔄 Iniciando polling da URL/API para detectar resultados (modo standby)`, 'info');
+    }
+    // 📊 NOVO: Polling será iniciado automaticamente quando houver apostas pendentes
     
-    // ✅ Ativar renovação automática de sessão
-    setupAutoRenewal(userId);
+    // Logs de modo análise removidos - sistema simplificado
+    // addWebSocketLog(userId, `🔍 ANÁLISE - Operação iniciada em modo aquecimento!`, 'success');
+    // addWebSocketLog(userId, `🎯 NOVA REGRA: Qualquer nível que atingir o mínimo ativa o modo real IMEDIATAMENTE!`, 'info');
+    // addWebSocketLog(userId, `📊 Limiares: M1≥8 vitórias, M2≥4 vitórias, M3≥2 vitórias, M4≥1 DERROTA`, 'info');
+    
+    // Mostrar tipo de aposta selecionado ao invés de fixo
+    const betTypeNames = {
+      'red': 'VERMELHO',
+      'black': 'PRETO', 
+      'even': 'PAR',
+      'odd': 'ÍMPAR',
+      'low': 'BAIXAS (1-18)',
+      'high': 'ALTAS (19-36)'
+    };
+    const selectedBetType = operationState[userId]?.m4DirectBetType || 'red';
+    // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, `🎯 Tipo de aposta selecionado: ${betTypeNames[selectedBetType as keyof typeof betTypeNames]}`, 'info');
     
     // ✅ Tentar apostar imediatamente se as apostas estão abertas
     const bettingWindow = bettingWindowState[userId];
     if (bettingWindow?.isOpen && bettingWindow.currentGameId) {
+      // 🎯 VERIFICAÇÃO: Não apostar se missão já foi cumprida
+      if (operationState[userId]?.missionCompleted) {
+        addWebSocketLog(userId, `🛡️ Missão cumprida - não executando apostas automáticas`, 'info');
+        return NextResponse.json({
+          success: true,
+          data: {
+            operationActive: false,
+            missionCompleted: true,
+            message: 'Missão cumprida - sistema protegido'
+          }
+        });
+      }
+      
       addWebSocketLog(userId, `🎯 Apostas abertas detectadas - tentando apostar imediatamente`, 'success');
       
       // Buscar WebSocket ativo para executar aposta
@@ -1465,7 +1923,8 @@ async function startSimpleOperation(userId: string) {
         addWebSocketLog(userId, `⚠️ WebSocket não disponível para aposta imediata`, 'error');
       }
     } else {
-      addWebSocketLog(userId, `⏳ Aguardando próxima rodada para apostar`, 'info');
+      // Log removido: muito verboso, usuário já sabe que está aguardando
+      // addWebSocketLog(userId, `⏳ Aguardando próxima rodada para apostar`, 'info');
     }
     
     return NextResponse.json({
@@ -1494,7 +1953,12 @@ async function stopSimpleOperation(userId: string) {
       operationState[userId].active = false;
       operationState[userId].waitingForResult = false;
       operationState[userId].currentBetColor = undefined; // ✅ CORREÇÃO: Limpar cor da aposta
+      // 🎯 NOVO: Resetar flag de missão cumprida quando usuário para manualmente
+      operationState[userId].missionCompleted = false;
     }
+    
+    // 🔄 PARAR: Polling da URL/API
+    stopApiPolling(userId);
     
     // Parar todas as conexões
     stopAllConnections(userId, true);
@@ -1526,7 +1990,8 @@ async function reconnectWithNewTokens(userId: string, userIP?: string, userFinge
       // Removido: backup simplificado
     }
 
-    addWebSocketLog(userId, `🔑 Gerando novos tokens para reconexão...`, 'info');
+    // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, `🔑 Gerando novos tokens para reconexão...`, 'info');
     
     // ✅ USAR FUNÇÃO EXISTENTE: getUserBlazeToken do auth.ts
     const tokenResult = await getUserBlazeToken(userId);
@@ -1538,8 +2003,9 @@ async function reconnectWithNewTokens(userId: string, userIP?: string, userFinge
       return;
     }
 
-    addWebSocketLog(userId, `🚀 Gerando novos tokens via Supabase Edge Function...`, 'info');
-    addWebSocketLog(userId, `🌍 Edge Function resolve bloqueio geográfico`, 'info');
+    // Logs removidos: informações técnicas desnecessárias
+    // addWebSocketLog(userId, `🚀 Gerando novos tokens via Supabase Edge Function...`, 'info');
+    // addWebSocketLog(userId, `🌍 Edge Function resolve bloqueio geográfico`, 'info');
 
     const realBrowserHeaders = {
       'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
@@ -1552,22 +2018,24 @@ async function reconnectWithNewTokens(userId: string, userIP?: string, userFinge
       'X-Requested-With': 'XMLHttpRequest'
     };
 
-    // ✅ USAR EDGE FUNCTION: Chamar diretamente a Supabase Edge Function
-    const authResponse = await fetch('https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA'
-      },
-      body: JSON.stringify({
-        action: 'generate-tokens',
-        blazeToken: tokenResult.token,
-        userAgent: userFingerprint?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        acceptLanguage: userFingerprint?.language || 'pt-BR,pt;q=0.9,en;q=0.8',
-        selectedCurrencyType: 'BRL',
-        realBrowserHeaders: realBrowserHeaders
-      })
-    });
+    // ✅ USAR EDGE FUNCTION COM RETRY: Chamar diretamente a Supabase Edge Function
+    const authResponse = await retryBlazeRequest(async () => {
+      return await fetch('https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA'
+        },
+        body: JSON.stringify({
+          action: 'generate-tokens',
+          blazeToken: tokenResult.token,
+          userAgent: userFingerprint?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          acceptLanguage: userFingerprint?.language || 'pt-BR,pt;q=0.9,en;q=0.8',
+          selectedCurrencyType: 'BRL',
+          realBrowserHeaders: realBrowserHeaders
+        })
+      });
+    }, 'edge-function-reconnect');
 
     if (!authResponse.ok) {
       const errorText = await authResponse.text();
@@ -1648,10 +2116,11 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     const baseUrl = customServerUrl || 'wss://gs9.pragmaticplaylive.net/game';
     const wsUrl = `${baseUrl}?JSESSIONID=${config.jsessionId}&tableId=${config.tableId}`;
     
-    addWebSocketLog(userId, `🔗 Conectando ao WebSocket (tentativa ${control.attempts}/${control.maxAttempts}): ${wsUrl}`, 'info');
-    if (userIP) {
-      addWebSocketLog(userId, `🌐 IP do usuário detectado: ${userIP}`, 'info');
-    }
+    // Logs removidos: informações técnicas desnecessárias
+    // addWebSocketLog(userId, `🔗 Conectando ao WebSocket (tentativa ${control.attempts}/${control.maxAttempts}): ${wsUrl}`, 'info');
+    // if (userIP) {
+    //   addWebSocketLog(userId, `🌐 IP do usuário detectado: ${userIP}`, 'info');
+    // }
     
     // ✅ MELHORADO: Headers completamente realistas usando dados do usuário
     const realHeaders = {
@@ -1687,15 +2156,15 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
       ...(userFingerprint?.connectionType && { 'X-User-Connection': userFingerprint.connectionType })
     };
     
-    // ✅ Log headers apenas na primeira conexão (não em reconexões)
-    if (!activeWebSockets[userId]) {
-      addWebSocketLog(userId, `🌐 Headers enviados para Pragmatic (primeira conexão):`, 'info');
-      addWebSocketLog(userId, `📱 User-Agent: ${realHeaders['User-Agent']}`, 'info');
-      addWebSocketLog(userId, `🌍 IP Headers: ${userIP ? 'Enviado' : 'Indisponível'}`, 'info');
-      addWebSocketLog(userId, `🗣️ Idioma: ${realHeaders['Accept-Language']}`, 'info');
-      if (userFingerprint?.timezone) addWebSocketLog(userId, `🕐 Timezone: ${userFingerprint.timezone}`, 'info');
-      if (userFingerprint?.platform) addWebSocketLog(userId, `🖥️ Plataforma: ${userFingerprint.platform}`, 'info');
-    }
+    // Logs removidos: informações técnicas desnecessárias sobre headers
+    // if (!activeWebSockets[userId]) {
+    //   addWebSocketLog(userId, `🌐 Headers enviados para Pragmatic (primeira conexão):`, 'info');
+    //   addWebSocketLog(userId, `📱 User-Agent: ${realHeaders['User-Agent']}`, 'info');
+    //   addWebSocketLog(userId, `🌍 IP Headers: ${userIP ? 'Enviado' : 'Indisponível'}`, 'info');
+    //   addWebSocketLog(userId, `🗣️ Idioma: ${realHeaders['Accept-Language']}`, 'info');
+    //   if (userFingerprint?.timezone) addWebSocketLog(userId, `🕐 Timezone: ${userFingerprint.timezone}`, 'info');
+    //   if (userFingerprint?.platform) addWebSocketLog(userId, `🖥️ Plataforma: ${userFingerprint.platform}`, 'info');
+    // }
 
     const ws = new WebSocket(wsUrl, {
       headers: realHeaders
@@ -1706,7 +2175,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     let pingInterval: NodeJS.Timeout | null = null;
     
     ws.on('open', () => {
-      addWebSocketLog(userId, '🔗 WebSocket conectado com sucesso', 'success');
+      // Log removido: informação técnica desnecessária
+      // addWebSocketLog(userId, '🔗 WebSocket conectado com sucesso', 'success');
       updateConnectionStatus(userId, true);
       
       // Removido: restore simplificado
@@ -1717,7 +2187,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
       }
       
       // Não é necessário enviar login neste servidor
-      addWebSocketLog(userId, 'Conexão estabelecida - aguardando mensagens...', 'info');
+      // Log removido: informação técnica desnecessária
+      // addWebSocketLog(userId, 'Conexão estabelecida - aguardando mensagens...', 'info');
       
       // Enviar primeiro ping imediatamente após conexão
       setTimeout(() => {
@@ -1726,7 +2197,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           const pingMessage = `<ping time='${timestamp}'></ping>`;
           ws.send(pingMessage);
           
-          addWebSocketLog(userId, `🏓 Ping inicial enviado: ${timestamp}`, 'info');
+          // Log removido: informação técnica desnecessária
+          // addWebSocketLog(userId, `🏓 Ping inicial enviado: ${timestamp}`, 'info');
         }
       }, 1000); // Aguardar 1 segundo após conexão
       
@@ -1737,7 +2209,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           const pingMessage = `<ping time='${timestamp}'></ping>`;
           ws.send(pingMessage);
           
-          addWebSocketLog(userId, `🏓 Ping enviado: ${timestamp}`, 'info');
+          // Log removido: informação técnica desnecessária
+          // addWebSocketLog(userId, `🏓 Ping enviado: ${timestamp}`, 'info');
           
           // Verificar saúde da conexão
           const timeSincePong = Date.now() - lastPong;
@@ -1751,7 +2224,7 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             }
           }
         } else {
-          addWebSocketLog(userId, '⚠️ WebSocket não está aberto para ping', 'error');
+          // Log removido: informação técnica desnecessária
         }
       }, 30000); // Ping a cada 30 segundos
     });
@@ -1760,12 +2233,12 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
       try {
         const message = data.toString().trim();
         
-        // Log de todas as mensagens recebidas (para debug)
-        if (message.length < 200) {
-          addWebSocketLog(userId, `📨 Mensagem recebida: ${message}`, 'info');
-        } else {
-          addWebSocketLog(userId, `📨 Mensagem recebida: ${message.substring(0, 100)}...`, 'info');
-        }
+        // Logs removidos: mensagens técnicas desnecessárias
+        // if (message.length < 200) {
+        //   addWebSocketLog(userId, `📨 Mensagem recebida: ${message}`, 'info');
+        // } else {
+        //   addWebSocketLog(userId, `📨 Mensagem recebida: ${message.substring(0, 100)}...`, 'info');
+        // }
 
         // 💾 DETECÇÃO: Sessão offline = tokens expirados COM BACKUP
         if (message.includes('<session>offline</session>')) {
@@ -1773,7 +2246,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           
           // Removido: backup simplificado
           
-          addWebSocketLog(userId, `🔄 Gerando novos tokens automaticamente...`, 'info');
+          // Log removido: informação técnica desnecessária
+          // addWebSocketLog(userId, `🔄 Gerando novos tokens automaticamente...`, 'info');
           
           // Limpar ping interval
           if (pingInterval) {
@@ -1798,7 +2272,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
         connectionHealthy = true;
           const timeMatch = message.match(/time="([^"]*)"/);
         const seqMatch = message.match(/seq="([^"]*)"/);
-          addWebSocketLog(userId, `💓 Pong recebido (time: ${timeMatch?.[1]}, seq: ${seqMatch?.[1]})`, 'success');
+          // Log removido: informação técnica desnecessária
+          // addWebSocketLog(userId, `💓 Pong recebido (time: ${timeMatch?.[1]}, seq: ${seqMatch?.[1]})`, 'success');
           return;
       }
 
@@ -1811,7 +2286,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             const newServer = gameServerMatch[1];
             const newWsAddress = wsAddressMatch[1];
             
-            addWebSocketLog(userId, `🔄 Switch de servidor detectado: ${newServer} (${newWsAddress})`, 'info');
+            // Log removido: informação técnica desnecessária
+          // addWebSocketLog(userId, `🔄 Switch de servidor detectado: ${newServer} (${newWsAddress})`, 'info');
             
             // Limpar ping interval
             if (pingInterval) {
@@ -1824,7 +2300,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             
             // ✅ CORREÇÃO: Switch de servidor usando nova arquitetura de proxy
             setTimeout(async () => {
-              addWebSocketLog(userId, `🔑 Gerando novos tokens para switch de servidor...`, 'info');
+              // Log removido: informação técnica desnecessária
+          // addWebSocketLog(userId, `🔑 Gerando novos tokens para switch de servidor...`, 'info');
               
               try {
                 // ✅ USAR EDGE FUNCTION: Gerar novos tokens via Supabase Edge Function
@@ -1836,8 +2313,9 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
                   return;
                 }
 
-                addWebSocketLog(userId, `🚀 Gerando novos tokens via Supabase Edge Function...`, 'info');
-                addWebSocketLog(userId, `🌍 Edge Function resolve bloqueio geográfico`, 'info');
+                // Logs removidos: informações técnicas desnecessárias
+                // addWebSocketLog(userId, `🚀 Gerando novos tokens via Supabase Edge Function...`, 'info');
+                // addWebSocketLog(userId, `🌍 Edge Function resolve bloqueio geográfico`, 'info');
 
                 const realBrowserHeaders = {
                   'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
@@ -1850,22 +2328,24 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
                   'X-Requested-With': 'XMLHttpRequest'
                 };
 
-                // ✅ Chamar diretamente a Supabase Edge Function
-                const authResponse = await fetch('https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth', {
-                  method: 'POST',
-                  headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA'
-                  },
-                  body: JSON.stringify({
-                    action: 'generate-tokens',
-                    blazeToken: tokenResult.token,
-                    userAgent: userFingerprint?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                    acceptLanguage: userFingerprint?.language || 'pt-BR,pt;q=0.9,en;q=0.8',
-                    selectedCurrencyType: 'BRL',
-                    realBrowserHeaders: realBrowserHeaders
-                  })
-                });
+                // ✅ Chamar diretamente a Supabase Edge Function COM RETRY
+                const authResponse = await retryBlazeRequest(async () => {
+                  return await fetch('https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth', {
+                    method: 'POST',
+                    headers: { 
+                      'Content-Type': 'application/json',
+                      'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA'
+                    },
+                    body: JSON.stringify({
+                      action: 'generate-tokens',
+                      blazeToken: tokenResult.token,
+                      userAgent: userFingerprint?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                      acceptLanguage: userFingerprint?.language || 'pt-BR,pt;q=0.9,en;q=0.8',
+                      selectedCurrencyType: 'BRL',
+                      realBrowserHeaders: realBrowserHeaders
+                    })
+                  });
+                }, 'edge-function-switch-server');
 
                 if (!authResponse.ok) {
                   const errorText = await authResponse.text();
@@ -1882,7 +2362,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
                   return;
                 }
 
-                addWebSocketLog(userId, `✅ Novos tokens gerados via Edge Function com sucesso`, 'success');
+                // Log removido: informação técnica desnecessária
+                // addWebSocketLog(userId, `✅ Novos tokens gerados via Edge Function com sucesso`, 'success');
                 
                 // ✅ RECONECTAR: Usar novos tokens para switch de servidor
                 const newConfig = {
@@ -1897,7 +2378,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
                   delete activeWebSockets[userId];
                 }
 
-                addWebSocketLog(userId, `🔄 Reconectando ao novo servidor: ${newWsAddress}`, 'info');
+                // Log removido: informação técnica desnecessária
+                // addWebSocketLog(userId, `🔄 Reconectando ao novo servidor: ${newWsAddress}`, 'info');
                 
                 // Conectar ao novo servidor
                 startWebSocketConnection(userId, newConfig, newWsAddress, userIP, userFingerprint);
@@ -1936,9 +2418,22 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             
             // Se operação ativa e pronto para apostar (normal flow)
             if (operationState[userId]?.active && !operationState[userId]?.waitingForResult) {
+              // 🎯 VERIFICAÇÃO: Não apostar se missão foi cumprida
+              if (operationState[userId]?.missionCompleted) {
+                addWebSocketLog(userId, `🛡️ Missão cumprida - não executando apostas automáticas via WebSocket`, 'info');
+                return; // Não apostar se missão cumprida
+              }
+              
+              // 🤖 NOVO: Verificar se está em modo standby antes de apostar
+              if (operationState[userId]?.isStandbyMode) {
+                addWebSocketLog(userId, `🤖 Modo standby ativo - aguardando limiar ser atingido`, 'info');
+                return; // Não apostar ainda
+              }
+              
               const isRealMode = canExitAnalysisMode(userId);
               const currentMode = isRealMode ? 'real' : 'analysis';
-              addWebSocketLog(userId, `🎯 Operação ativa detectada - executando aposta automaticamente (modo: ${currentMode})`, 'success');
+              // Log removido: informação técnica desnecessária
+      // addWebSocketLog(userId, `🎯 Operação ativa detectada - executando aposta automaticamente (modo: ${currentMode})`, 'success');
               executeSimpleBet(userId, gameId, ws);
             }
           }
@@ -1965,7 +2460,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             const channel = channelMatch?.[1] || '';
             
             if (status === 'success') {
-              addWebSocketLog(userId, `✅ Aposta aceita pelo servidor`, 'success');
+              addWebSocketLog(userId, `📨 Aposta aceita pelo servidor`, 'info');
+              addWebSocketLog(userId, `⏳ Aguardando resultado...`, 'info');
             } else if (status === 'error' || status === 'fail' || status === 'denied' || status === 'refused' || status === 'rejected') {
               addWebSocketLog(userId, `❌ Aposta REJEITADA pelo servidor (${status})`, 'error');
               // ✅ SIMPLIFICADO: Sem renovação automática - deixar timer de 18min cuidar disso
@@ -1973,7 +2469,7 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           }
         }
 
-        // 💾 CORREÇÃO: Detectar betValidationError com códigos de sessão/autenticação COM BACKUP
+        // 💾 CORREÇÃO: Detectar betValidationError com códigos de sessão/autenticação - SISTEMA PROGRAMADO
         if (message.includes('<betValidationError')) {
           // Códigos relacionados a sessão/autenticação que exigem renovação
           const sessionErrorCodes = ['1039', '1040', '1001', '1002', '1003'];
@@ -1983,48 +2479,16 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             const codeMatch = message.match(/code="([^"]*)"/);
             const errorCode = codeMatch?.[1] || 'unknown';
             
-            addWebSocketLog(userId, `🚨 ERRO DE SESSÃO detectado (code ${errorCode}) - Renovando IMEDIATAMENTE!`, 'error');
-            addWebSocketLog(userId, `📋 Erro completo: ${message}`, 'error');
+            addWebSocketLog(userId, `🔑 Erro de sessão detectado (code ${errorCode}) - usando sistema automático`, 'error');
+            addWebSocketLog(userId, `📋 Renovação automática a cada 10 minutos`, 'info');
             
-            // 💾 CRIAR BACKUP antes de renovar
-            // Removido: backup simplificado
+            // Pausar operação e aguardar renovação automática
+            if (operationState[userId]) {
+              operationState[userId].active = false;
+              operationState[userId].waitingForResult = false;
+              addWebSocketLog(userId, `⏸️ Operação pausada devido a erro de sessão - aguardando renovação automática`, 'info');
+            }
             
-            // Renovar sessão imediatamente
-            setTimeout(async () => {
-              const renewed = await renewSession(userId);
-              if (renewed) {
-                addWebSocketLog(userId, `✅ Sessão renovada após erro ${errorCode} - operação continua`, 'success');
-                
-                // 🔧 CORREÇÃO CRÍTICA: Reconectar WebSocket com novos tokens
-                addWebSocketLog(userId, `🔄 Reconectando WebSocket com tokens renovados...`, 'info');
-                
-                const session = sessionControl[userId];
-                if (session) {
-                  // Fechar conexão atual
-                  if (activeWebSockets[userId]) {
-                    activeWebSockets[userId].ws.close();
-                    delete activeWebSockets[userId];
-                  }
-                  
-                  // Conectar com novos tokens
-                  const newConfig = {
-                    jsessionId: session.jsessionId,
-                    pragmaticUserId: session.pragmaticUserId,
-                    tableId: 'mrbras531mrbr532'
-                  };
-                  
-                  startWebSocketConnection(userId, newConfig);
-                }
-                
-                // Reconfigurar timer
-                setupAutoRenewal(userId);
-              } else {
-                addWebSocketLog(userId, `❌ Falha na renovação - operação pausada`, 'error');
-                if (operationState[userId]) {
-                  operationState[userId].active = false;
-                }
-              }
-            }, 1000);
             return; // Não processar mais esta mensagem
           } else {
             // Outros erros de validação de aposta (não relacionados à sessão)
@@ -2034,71 +2498,44 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           }
         }
         
-        // 💾 Detectar outros erros de sessão COM BACKUP
+        // 💾 Detectar outros erros de sessão - SISTEMA PROGRAMADO
         if (message.includes('invalid session') || message.includes('session expired') || 
             message.includes('session timeout') || message.includes('unauthorized access') ||
             message.includes('authentication failed') || message.includes('token expired')) {
-          addWebSocketLog(userId, `🔑 Erro de sessão detectado: ${message.substring(0, 100)}...`, 'error');
+          addWebSocketLog(userId, `🔑 Erro de sessão detectado - usando sistema automático`, 'error');
+          addWebSocketLog(userId, `📋 Renovação automática a cada 10 minutos`, 'info');
           
-          // 💾 CRIAR BACKUP antes de renovar
-          if (operationState[userId]?.active) {
-            // Removido: backup simplificado
+          // Pausar operação e aguardar renovação automática
+          if (operationState[userId]) {
+            operationState[userId].active = false;
+            operationState[userId].waitingForResult = false;
+            addWebSocketLog(userId, `⏸️ Operação pausada devido a erro de sessão - aguardando renovação automática`, 'info');
           }
           
-          // Renovar sessão automaticamente
-          setTimeout(async () => {
-            const renewed = await renewSession(userId);
-            if (renewed) {
-              addWebSocketLog(userId, `✅ Sessão renovada automaticamente`, 'success');
-              setupAutoRenewal(userId);
-            } else {
-              addWebSocketLog(userId, `❌ Falha na renovação automática`, 'error');
-              if (operationState[userId]) {
-                operationState[userId].active = false;
-              }
-            }
-          }, 1000);
           return;
         }
 
-        // 🔍 RESULTADO DO JOGO: Múltiplos formatos com validação detalhada
-        if (message.includes('<result') || message.includes('<gameresult')) {
-          const scoreMatch = message.match(/score="([^"]*)"/);
-          const gameMatch = message.match(/game="([^"]*)"/);
-          
-          if (scoreMatch) {
-            const number = parseInt(scoreMatch[1]);
-            const gameId = gameMatch?.[1] || '';
-            
-            // 🔍 LOG: Mostrar mensagem original do WebSocket (primeiros 150 chars)
-            addWebSocketLog(userId, `📨 WebSocket raw: ${message.substring(0, 150)}...`, 'info');
-            
-            // 🔍 VERIFICAR: Se WebSocket enviou cor explícita (alguns servers fazem isso)
-            const explicitColorMatch = message.match(/color="([^"]*)"/);
-            const webSocketColor = explicitColorMatch?.[1];
-            
-            // Calcular cor esperada baseada no número
-            const expectedColor = getColorFromNumber(number);
-            
-            // 🔍 LOG: Comparar cores se WebSocket enviou explicitamente
-            if (webSocketColor) {
-              addWebSocketLog(userId, `🔍 WebSocket cor: ${webSocketColor} | Calculada: ${expectedColor}`, 'info');
-              
-              // Se há conflito, alertar imediatamente
-              if (webSocketColor.toLowerCase() !== expectedColor.toLowerCase()) {
-                addWebSocketLog(userId, `⚠️ CONFLITO DETECTADO: WebSocket=${webSocketColor}, Esperado=${expectedColor}`, 'error');
+        // ⏰ Verificação de renovação automática a cada mensagem
+        if (shouldRenewAutomatically(userId)) {
+          addWebSocketLog(userId, '⏰ Iniciando renovação automática...', 'info');
+          setTimeout(async () => {
+            const renewed = await renewSession(userId);
+            if (renewed) {
+              addWebSocketLog(userId, '✅ Renovação automática concluída com sucesso', 'success');
+              // Reativar operação se estava pausada
+              if (operationState[userId] && !operationState[userId].active) {
+                operationState[userId].active = true;
+                addWebSocketLog(userId, '▶️ Operação reativada após renovação automática', 'success');
               }
+            } else {
+              addWebSocketLog(userId, '❌ Falha na renovação automática', 'error');
             }
-            
-            // 🔧 PROCESSAR: Usar sempre cor calculada matematicamente
-            addWebSocketLog(userId, `🎯 Processando: ${number} → ${expectedColor}`, 'game');
-            await processGameResult(userId, gameId, number, expectedColor);
-          } else {
-            // 🚨 ERRO: Não conseguiu extrair número
-            addWebSocketLog(userId, `❌ Erro: Não conseguiu extrair número da mensagem`, 'error');
-            addWebSocketLog(userId, `📨 Mensagem: ${message}`, 'error');
-          }
+          }, 1000);
         }
+
+        // 🚫 REMOVIDO: Processamento de resultados via WebSocket
+        // WebSocket agora é EXCLUSIVO para apostas (apostas abertas/fechadas)
+        // Resultados são processados via URL/API polling
         
       } catch (parseError) {
         addWebSocketLog(userId, `❌ Erro ao processar mensagem: ${parseError}`, 'error');
@@ -2117,7 +2554,8 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
     });
     
     ws.on('close', (code, reason) => {
-      addWebSocketLog(userId, `🔌 WebSocket desconectado (código: ${code}, razão: ${reason})`, 'error');
+      // Log removido: informação técnica desnecessária
+      // addWebSocketLog(userId, `🔌 WebSocket desconectado (código: ${code}, razão: ${reason})`, 'error');
       updateConnectionStatus(userId, false);
       
       // Limpar ping interval
@@ -2157,16 +2595,54 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
   }
 }
 
-// Mapeamento de cores para códigos de aposta (conforme API de referência)
+// 🔥 NOVO: Mapeamento completo de tipos de aposta para códigos (CORRIGIDO)
+const BET_TYPE_TO_CODE: { [key: string]: string } = {
+  'red': '48',    // vermelho
+  'black': '49',  // preto
+  'odd': '50',    // ímpar
+  'even': '47',   // par
+  'low': '46',    // baixas
+  'high': '51',   // altas
+};
+
+// 🔥 NOVO: Mapeamento de tipos de aposta para nomes em português
+const BET_TYPE_NAMES: { [key: string]: string } = {
+  'red': 'VERMELHO',
+  'black': 'PRETO',
+  'even': 'PAR',
+  'odd': 'ÍMPAR',
+  'low': 'BAIXAS (1-18)',
+  'high': 'ALTAS (19-36)',
+};
+
+// 🔥 NOVO: Mapeamento de tipos de aposta para códigos de cores (para retrocompatibilidade)
+const BET_TYPE_TO_COLOR: { [key: string]: string } = {
+  'red': 'R',
+  'black': 'B',
+  'even': 'E',
+  'odd': 'O',
+  'low': 'L',
+  'high': 'H',
+};
+
+// Mapeamento de cores para códigos de aposta (conforme API de referência) - CORRIGIDO
 const COLOR_TO_BET_CODE: { [key: string]: string } = {
   'R': '48', // Vermelho (Red)
   'B': '49', // Preto (Black)
+  'E': '47', // Par (Even)
+  'O': '50', // Ímpar (Odd)
+  'L': '46', // Baixas (Low)
+  'H': '51', // Altas (High)
 };
 
-// Mapeamento de cores para nomes em português
+// Mapeamento de cores para nomes em português - EXPANDIDO
 const COLOR_NAMES: { [key: string]: string } = {
   'R': 'VERMELHO',
   'B': 'PRETO',
+  'E': 'PAR',
+  'O': 'ÍMPAR',
+  'L': 'BAIXAS (1-18)',
+  'H': 'ALTAS (19-36)',
 };
 
 // Função robusta para enviar mensagens via WebSocket
@@ -2183,12 +2659,42 @@ async function sendWebSocketMessage(ws: any, message: string, userId: string): P
     // Método 1: Tentar envio direto (funciona em desenvolvimento)
     try {
       ws.send(message);
-      
       return { success: true };
     } catch (directError: any) {
       
-      // Fallbacks simplificados
-      return { success: false, error: 'Erro no WebSocket' };
+      // Método 2: Tentar com Buffer (para compatibilidade com diferentes implementações)
+      try {
+        const buffer = Buffer.from(message, 'utf8');
+        ws.send(buffer);
+        return { success: true };
+      } catch (bufferError: any) {
+        
+        // Método 3: Tentar forçar como string
+        try {
+          const stringMessage = String(message);
+          ws.send(stringMessage, { binary: false });
+          return { success: true };
+        } catch (stringError: any) {
+          
+          // Método 4: Tentar usando _socket diretamente (último recurso)
+          try {
+            if (ws._socket && ws._socket.write) {
+              const frame = createWebSocketFrame(message);
+              ws._socket.write(frame);
+              return { success: true };
+            } else {
+              throw new Error('_socket.write não disponível');
+            }
+          } catch (socketError: any) {
+            addWebSocketLog(userId, `❌ Erro crítico no WebSocket: ${socketError.message}`, 'error');
+            
+            return {
+              success: false,
+              error: `Erro ao enviar mensagem WebSocket: ${socketError.message}`
+            };
+          }
+        }
+      }
     }
   } catch (error: any) {
     return {
@@ -2236,41 +2742,69 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     return;
   }
   
+  // 🎯 VERIFICAÇÃO CRÍTICA: Não apostar se missão foi cumprida
+  if (operation.missionCompleted) {
+    addWebSocketLog(userId, '🛡️ Missão já cumprida - sistema protegido contra apostas automáticas', 'info');
+    addWebSocketLog(userId, '💡 Use "Parar Operação" e "Iniciar Operação" para resetar se necessário', 'info');
+    return;
+  }
+  
+  // 🤖 VERIFICAÇÃO CRÍTICA: Não apostar em modo standby
+  if (operation.isStandbyMode) {
+    addWebSocketLog(userId, '🤖 Modo standby ativo - não apostando', 'info');
+    return;
+  }
+  
   // 🎲 CORREÇÃO: Sempre aposta no vermelho (igual ao @/bots)
   const redBet = generateRedBet();
   
+  // 🎲 NOVO: Usar função atualizada que suporta modo M4 direto
+  const betColor = generateBet(userId);
+  
+  // 🔥 NOVO: Log para debug do modo M4 direto
+  if (operation.m4DirectBetType) {
+    // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `🔥 MODO M4 DIRETO ATIVO - Apostando em ${COLOR_NAMES[betColor]}`, 'info');
+  }
+  
   // ✅ CORREÇÃO: Armazenar cor da aposta atual no estado da operação
-  operation.currentBetColor = redBet;
+  operation.currentBetColor = betColor;
   
   // ✅ Usar valor do martingale atual (M1, M2, M3, M4)
   const betAmount = operation.strategy?.sequences?.[operation.martingaleLevel];
-  const betCode = COLOR_TO_BET_CODE[redBet];
-  const colorName = COLOR_NAMES[redBet];
+  const betCode = COLOR_TO_BET_CODE[betColor];
+  const colorName = COLOR_NAMES[betColor];
   
   if (!betCode || !colorName) {
-    addWebSocketLog(userId, `❌ Cor inválida para aposta: ${redBet}`, 'error');
+    addWebSocketLog(userId, `❌ Cor inválida para aposta: ${betColor}`, 'error');
     return;
   }
 
   try {
     // 📊 Registrar rodada analisada no nível atual
-    recordAnalysisRound(userId, operation.martingaleLevel);
+    // Removido: recordAnalysisRound não existe mais no sistema simplificado
     
-    // ✅ CORREÇÃO: Verificar se deve apostar de verdade baseado nos contadores
-    const martingaleStats = martingaleUsageStats[userId] || new Array(4).fill(0);
-    const m4Losses = m4LossesCounter[userId] || 0;
-    const isRealMode = canExitAnalysisMode(userId);
-    const modeLabel = isRealMode ? '💰 REAL' : '🔍 ANÁLISE';
-    
-    if (!isRealMode) {
-      // 🔍 ANÁLISE: Só simula, NÃO envia aposta real
-      operation.waitingForResult = true;
-      operation.lastGameId = gameId;
-      
-      addWebSocketLog(userId, `🔍 ${modeLabel} M${operation.martingaleLevel + 1}: ${colorName} SIMULADO → Game ${gameId}`, 'success');
-      
-      return; // NÃO envia aposta real no modo análise
-    }
+    // 🎯 NOVO: Manter dados de análise para interface
+    const analysisData = {
+      // Removido: martingaleUsageStats não existe mais
+      m1: 0,
+      m2: 0,
+      m3: 0,
+      m4: 0,
+      // Removido: m4LossesCounter não existe mais
+      m4Losses: 0,
+      // Removido: thresholds não existe mais
+      m1Required: 8,
+      m2Required: 4,
+      m3Required: 2,
+      m4Required: 1,
+      // Removido: smartActivation não existe mais
+      smartActivation: {
+        enabled: false,
+        readyToActivate: false,
+        waitingForSequenceEnd: false
+      }
+    };
     
     // 💰 REAL: Envia aposta verdadeira (limiares atingidos)
     const timestamp = Date.now().toString();
@@ -2280,9 +2814,22 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     const pragmaticUserId = session?.pragmaticUserId || `ppc${timestamp}`;
     
     if (session?.pragmaticUserId) {
-      addWebSocketLog(userId, `🔑 Usando tokens da sessão renovada (${session.pragmaticUserId.substring(0, 8)}...)`, 'info');
+      // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `🔑 Usando tokens da sessão renovada (${session.pragmaticUserId.substring(0, 8)}...)`, 'info');
     } else {
       addWebSocketLog(userId, `⚠️ Gerando novo pragmaticUserId (sessão não encontrada)`, 'error');
+    }
+    
+    // 🔍 NOVA VERIFICAÇÃO: Estado detalhado do WebSocket
+    const wsState = ws.readyState;
+    const stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+    // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `🔌 WebSocket State: ${wsState} (${stateNames[wsState] || 'UNKNOWN'})`, 'info');
+    
+    // 🚨 VERIFICAÇÃO CRÍTICA: WebSocket deve estar OPEN para enviar apostas
+    if (wsState !== 1) { // 1 = OPEN
+      addWebSocketLog(userId, `❌ WebSocket não está OPEN! Estado: ${stateNames[wsState] || 'UNKNOWN'}`, 'error');
+      return;
     }
     
     const betXml = `<command channel="table-mrbras531mrbr532">
@@ -2290,8 +2837,12 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     <bet amt="${betAmount}" bc="${betCode}" ck="${timestamp}" />
   </lpbet>
 </command>`;
+
+    // Log da mensagem XML que será enviada
+    // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `📤 Enviando XML: ${betXml.replace(/\n/g, ' ').replace(/\s+/g, ' ')}`, 'info');
           
-    // 📤 NOVO: Enviar aposta com sistema de pending bets
+    // 📤 Enviar aposta com sistema de fallback robusto
     const sendResult = await sendWebSocketMessage(ws, betXml, userId);
     if (!sendResult.success) {
       addWebSocketLog(userId, `❌ Falha ao enviar aposta: ${sendResult.error}`, 'error');
@@ -2302,7 +2853,18 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     operation.waitingForResult = true;
     operation.lastGameId = gameId;
     
-    addWebSocketLog(userId, `🎯 ${modeLabel} M${operation.martingaleLevel + 1}: ${colorName} R$ ${betAmount.toFixed(2)} → Game ${gameId}`, 'success');
+    // 🔄 NOVO: Iniciar polling quando aposta é feita
+    await startApiPolling(userId);
+    
+    // Log removido: informação técnica desnecessária
+    // addWebSocketLog(userId, `✅ Aposta enviada com sucesso via WebSocket!`, 'success');
+    const modeLabel = '💰 REAL';
+    addWebSocketLog(userId, `🎯 Aposta realizada: R$ ${betAmount.toFixed(2)} no ${colorName}`, 'game');
+    
+    // ✅ NOVO: Marcar timestamp da primeira aposta após conexão
+    if (!firstBetTimestamp[userId]) {
+      firstBetTimestamp[userId] = Date.now();
+    }
     
     // TODO: Debitar créditos quando necessário
     // await debitUserCredits(userId, betAmount);
@@ -2354,7 +2916,8 @@ function validateAndCorrectColor(number: number, receivedColor: string): {
   if (hasConflict) {
     logMessage = `🔧 CORREÇÃO: ${number} - WebSocket disse ${receivedColor}, corrigido para ${expectedColor}`;
   } else {
-    logMessage = `✅ VALIDADO: ${number} = ${expectedColor}`;
+    // Log removido: informação técnica desnecessária
+    logMessage = ''; // String vazia para evitar erro de compilação
   }
   
   return {
@@ -2368,6 +2931,16 @@ function getColorFromNumber(number: number): string {
   if (number === 0) return 'green';
   const redNumbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
   return redNumbers.includes(number) ? 'red' : 'black';
+}
+
+function getNumberCharacteristics(number: number): string {
+  if (number === 0) return '0 Verde';
+  
+  const color = getColorFromNumber(number) === 'red' ? 'Vermelho' : 'Preto';
+  const parity = number % 2 === 0 ? 'Par' : 'Ímpar';
+  const range = number <= 18 ? 'Baixo (1-18)' : 'Alto (19-36)';
+  
+  return `${number} ${color}, ${parity}, ${range}`;
 }
 
 async function debitUserCredits(userId: string, amount: number) {
@@ -2403,51 +2976,65 @@ function resetReconnectionControl(userId: string) {
 
 // 🔧 CORREÇÃO: Função para reset seguro que preserva autenticação
 function resetOperationSafely(userId: string, reason: string = 'Reset automático', isFirstConnectionReset: boolean = false) {
+  // 🔄 PARAR: Polling da URL/API
+  stopApiPolling(userId);
+  
   // Parar apenas a operação, sem afetar a autenticação
   if (operationState[userId]) {
     operationState[userId].active = false;
     operationState[userId].waitingForResult = false;
     operationState[userId].currentBetColor = undefined;
     operationState[userId].martingaleLevel = 0;
+    // 🔧 NOVO: Limpar stake pendente quando operação reseta
+    operationState[userId].pendingStake = null;
+    // 🎯 NOVO: Manter flag de missão cumprida (não resetar automaticamente)
+    // O usuário precisa iniciar nova operação para resetar
   }
 
   // Resetar dados de análise
   resetAnalysisCounters(userId);
-  resetMartingaleUsage(userId);
-  resetAnalysisRounds(userId);
-  resetM4Losses(userId);
+  // Removido: funções de análise que não existem mais no sistema simplificado
   // ✅ CORREÇÃO: NÃO resetar histórico detalhado aqui - só limpa quando página recarrega
   // resetDetailedHistory(userId);
 
   // 🔧 CORREÇÃO: Coleta de resultados sempre ativa (não precisa aguardar primeiro "apostas fechadas")
-  addWebSocketLog(userId, `🔄 ${reason} - Coleta de resultados sempre ativa`, 'info');
+  // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `🔄 ${reason} - Coleta de resultados sempre ativa`, 'info');
 
   // Resetar estado da janela de apostas
   if (bettingWindowState[userId]) {
     delete bettingWindowState[userId];
   }
 
-  addWebSocketLog(userId, `🔄 ${reason} - Dados resetados, autenticação e histórico preservados`, 'info');
+  // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `🔄 ${reason} - Dados resetados, autenticação e histórico preservados`, 'info');
 }
 
 function stopAllConnections(userId: string, setErrorStatus: boolean = true, preserveSession: boolean = false) {
-  addWebSocketLog(userId, `🛑 Parando todas as conexões para usuário ${userId}`, 'info');
+  // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `🛑 Parando todas as conexões para usuário ${userId}`, 'info');
   
-  // Parar timer de reconexão automática
-  stopAutoReconnectionTimer(userId);
+  // 🔄 PARAR: Polling da URL/API
+  stopApiPolling(userId);
+  
+  // 🔄 REMOVIDO: Timer automático - agora usa sistema programado
+  // stopAutoReconnectionTimer(userId);
   
   // Parar operação
   if (operationState[userId]) {
     operationState[userId].active = false;
     operationState[userId].waitingForResult = false;
     operationState[userId].currentBetColor = undefined;
+    // 🔧 NOVO: Limpar stake pendente quando operação para
+    operationState[userId].pendingStake = null;
   }
   
   // Fechar WebSocket
   if (activeWebSockets[userId]) {
     try {
       activeWebSockets[userId].ws.close();
-      addWebSocketLog(userId, `🔌 WebSocket fechado`, 'info');
+      // Log removido: informação técnica desnecessária
+      // addWebSocketLog(userId, `🔌 WebSocket fechado`, 'info');
     } catch (error) {
       addWebSocketLog(userId, `⚠️ Erro ao fechar WebSocket: ${error}`, 'error');
     }
@@ -2455,11 +3042,6 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true, pres
   }
   
   // Limpar timers de renovação
-  if (renewalTimers[userId]) {
-    clearTimeout(renewalTimers[userId]);
-    delete renewalTimers[userId];
-  }
-  
   if (autoRenewalIntervals[userId]) {
     clearInterval(autoRenewalIntervals[userId]);
     delete autoRenewalIntervals[userId];
@@ -2467,6 +3049,15 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true, pres
   
   // Resetar controle de reconexão
   resetReconnectionControl(userId);
+  
+  // 🔧 NOVO: Limpar controle de renovação quando parar conexões
+  if (renewalControl[userId]) {
+    addWebSocketLog(userId, '🔧 Limpando controle de renovação', 'info');
+    delete renewalControl[userId];
+  }
+  
+  // ⏰ Limpar sistema de renovação automática
+  clearAutoRenewal(userId);
   
   // Não preservar sessão se não especificado
   if (!preserveSession) {
@@ -2478,12 +3069,18 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true, pres
     delete isFirstConnection[userId];
   }
   
+  // ✅ NOVO: Limpar timestamp da primeira aposta
+  if (firstBetTimestamp[userId]) {
+    delete firstBetTimestamp[userId];
+  }
+  
   // Atualizar status
   if (setErrorStatus) {
     updateConnectionStatus(userId, false, 'Conexão encerrada');
   }
   
-  addWebSocketLog(userId, `✅ Todas as conexões foram encerradas`, 'info');
+  // Log removido: informação técnica desnecessária
+  // addWebSocketLog(userId, `✅ Todas as conexões foram encerradas`, 'info');
 }
 
 // Obter logs do WebSocket
@@ -2499,29 +3096,49 @@ async function getWebSocketLogs(userId: string) {
     const bettingWindowOpen = bettingWindow?.isOpen || false;
     const canStartOperation = bettingWindowOpen && !operation?.active;
 
+    // 🚀 NOVO: Incluir dados do operation report diretamente
+    const operationReport = operation ? {
+      summary: {
+        totalBets: operation.stats.totalBets,
+        wins: operation.stats.wins,
+        losses: operation.stats.losses,
+        profit: operation.stats.profit,
+        winRate: operation.stats.totalBets > 0 ? parseFloat(((operation.stats.wins / operation.stats.totalBets) * 100).toFixed(2)) : 0,
+        startedAt: operation.stats.startedAt
+      }
+    } : null;
+
     return NextResponse.json({
       success: true,
       data: {
         logs,
         connectionStatus: status,
         gameResults: results,
+        lastTenResults: (() => {
+          // 🤖 CORREÇÃO: Sempre mostrar resultados quando conectado (independente se apostou ou não)
+          if (results.length === 0) {
+            return []; // Não há resultados para mostrar
+          }
+          
+          // 🚀 NOVO: Mostrar últimos 10 resultados, mais recente primeiro
+          return results.slice(-10).reverse().map((result: any) => ({
+            number: result.number,
+            color: result.color,
+            gameId: result.gameId,
+            timestamp: result.timestamp
+          }));
+        })(),
         operationActive: operation?.active || false,
         operationState: operation ? {
           mode: canExitAnalysisMode(userId) ? 'real' : 'analysis',
           martingaleLevel: operation.martingaleLevel,
           waitingForResult: operation.waitingForResult,
           stats: operation.stats,
-          // 🔍 NOVO: Status de análise
-          analysisStatus: !canExitAnalysisMode(userId) ? {
-            counters: {
-              m1Wins: martingaleUsageStats[userId]?.[0] || 0,
-              m2Wins: martingaleUsageStats[userId]?.[1] || 0,
-              m3Wins: martingaleUsageStats[userId]?.[2] || 0,
-              m4Losses: m4LossesCounter[userId] || 0
-            },
-            thresholds: operation.thresholds,
-            canExitAnalysis: canExitAnalysisMode(userId)
-          } : null,
+          // 🤖 NOVO: Informações do modo standby
+          isStandbyMode: operation.isStandbyMode || false,
+          m4DirectBetType: operation.m4DirectBetType || 'red',
+          // 🔍 NOVO: Status de análise (sistema simplificado)
+          analysisStatus: null,
           // 💰 Status de lucro em tempo real
           profitStatus: {
             current: operation.stats.profit,
@@ -2544,19 +3161,29 @@ async function getWebSocketLogs(userId: string) {
           currentGameId: bettingWindow?.currentGameId,
           lastUpdate: bettingWindow?.lastUpdate
         },
-        // 📊 Estatísticas de uso de martingale
-        martingaleUsage: martingaleUsageStats[userId] || new Array(4).fill(0),
-        // 📊 Estatísticas de rodadas analisadas por nível
-        analysisRounds: analysisRoundsStats[userId] || new Array(4).fill(0),
+        // 📊 Estatísticas de uso de martingale (sistema simplificado)
+        martingaleUsage: [0, 0, 0, 0],
+        // 📊 Estatísticas de rodadas analisadas por nível (sistema simplificado)
+        analysisRounds: [0, 0, 0, 0],
         // 📋 Histórico detalhado de análises e apostas reais
         detailedHistory: getDetailedHistory(userId),
-        // ✅ Status da sessão para monitoramento
-        sessionStatus: sessionControl[userId] ? {
-          createdAt: sessionControl[userId].createdAt,
-          lastRenewal: sessionControl[userId].lastRenewal,
-          renewalAttempts: sessionControl[userId].renewalAttempts,
+        // 🚀 NOVO: Operation report incluído para otimizar requisições
+        operationReport: operationReport,
+        // 🔧 NOVO: Informação sobre stake pendente
+        pendingStakeInfo: operation?.pendingStake ? {
+          hasPendingStake: true,
+          pendingStake: operation.pendingStake
+        } : {
+          hasPendingStake: false,
+          pendingStake: null
+        },
+        // Debugging info - removido
+        debugInfo: null,
+        sessionInfo: sessionControl[userId] ? {
+          hasSession: true,
+          pragmaticUserId: sessionControl[userId].pragmaticUserId?.substring(0, 8) + '...',
           timeSinceLastRenewal: Date.now() - sessionControl[userId].lastRenewal,
-          nextRenewalIn: renewalTimers[userId] ? 'Ativo' : 'Inativo'
+          nextRenewalIn: 'Inativo'
         } : null,
         // Estatísticas de humanização removidas
         humanizationStats: null,
@@ -2629,9 +3256,8 @@ async function resetOperationReport(userId: string) {
       };
     }
 
-    // 📊 IMPORTANTE: Resetar também as estatísticas de martingale e rodadas analisadas
-    resetMartingaleUsage(userId);
-    resetAnalysisRounds(userId);
+    // 📊 IMPORTANTE: Resetar também as estatísticas (sistema simplificado)
+    resetAnalysisCounters(userId);
 
     return NextResponse.json({
       success: true,
@@ -2659,7 +3285,8 @@ async function getConnectionStatus(userId: string) {
         lastUpdate: status.lastUpdate,
         error: status.error,
         resultsCount: results.length,
-        operationActive: operation?.active || false
+        operationActive: operation?.active || false,
+        missionCompleted: operation?.missionCompleted || false
       }
     });
   } catch (error) {
@@ -2696,37 +3323,10 @@ export async function GET(request: NextRequest) {
   });
 } 
 
-// 🔄 NOVO: Função para iniciar timer de reconexão automática
-function startAutoReconnectionTimer(userId: string) {
-  // Limpar timer existente se houver
-  if (reconnectionTimers[userId]) {
-    clearTimeout(reconnectionTimers[userId]);
-  }
-  
-  // Criar novo timer para reconexão a cada 10 minutos
-  reconnectionTimers[userId] = setTimeout(async () => {
-    const operation = operationState[userId];
-    
-    // Verificar se não está aguardando resultado (meio do martingale)
-    if (operation && operation.active && operation.waitingForResult) {
-      addWebSocketLog(userId, `🔄 Reconexão adiada - aguardando resultado de aposta`, 'info');
-      // Reagendar para daqui a 2 minutos
-      setTimeout(() => startAutoReconnectionTimer(userId), 2 * 60 * 1000);
-      return;
-    }
-    
-    // Reconectar apenas se não estiver no meio de uma aposta
-    if (operation && operation.active) {
-      addWebSocketLog(userId, `🔄 Reconexão automática iniciada (10 minutos)`, 'info');
-      await reconnectWithNewTokens(userId);
-      
-      // Reagendar próxima reconexão
-      startAutoReconnectionTimer(userId);
-    }
-  }, 10 * 60 * 1000); // 10 minutos
-  
-  addWebSocketLog(userId, `⏰ Timer de reconexão automática iniciado (10 minutos)`, 'info');
-}
+// 🔄 REMOVIDO: Timer automático de reconexão - agora usa sistema programado baseado em derrota
+// function startAutoReconnectionTimer(userId: string) {
+//   // Sistema de renovação programada substituiu esta função
+// }
 
 // 🔄 NOVO: Função para parar timer de reconexão automática
 function stopAutoReconnectionTimer(userId: string) {
@@ -2736,3 +3336,159 @@ function stopAutoReconnectionTimer(userId: string) {
     addWebSocketLog(userId, `⏰ Timer de reconexão automática parado`, 'info');
   }
 }
+
+// 🎲 FUNÇÃO: Gerar aposta baseada no modo M4 direto ou padrão (vermelho)
+function generateBet(userId: string): 'R' | 'B' | 'E' | 'O' | 'L' | 'H' {
+  const operation = operationState[userId];
+  if (!operation) return 'R';
+  
+  // 🔥 NOVO: Sistema simplificado - sempre apostar no tipo configurado
+  const betType = operation.m4DirectBetType || 'red';
+  
+  switch (betType) {
+    case 'red': return 'R';
+    case 'black': return 'B';
+    case 'even': return 'E';
+    case 'odd': return 'O';
+    case 'low': return 'L';
+    case 'high': return 'H';
+    default: return 'R';
+  }
+}
+
+// 🔧 NOVO: Sistema de controle de renovação para evitar rate limiting
+interface RenewalControlState {
+  lastRenewalAttempt: number;
+  renewalCooldown: number; // Tempo em ms para aguardar entre renovações
+  consecutiveFailures: number;
+  blocked: boolean;
+  blockedUntil: number;
+}
+
+// Mapa para controlar renovações por usuário
+const renewalControl: { [userId: string]: RenewalControlState } = {};
+
+// Função para verificar se pode tentar renovar
+function canAttemptRenewal(userId: string): boolean {
+  const control = renewalControl[userId];
+  if (!control) {
+    // Primeira tentativa - permitir
+    renewalControl[userId] = {
+      lastRenewalAttempt: 0,
+      renewalCooldown: 30000, // 30 segundos inicial
+      consecutiveFailures: 0,
+      blocked: false,
+      blockedUntil: 0
+    };
+    return true;
+  }
+
+  const now = Date.now();
+  
+  // Verificar se está bloqueado temporariamente
+  if (control.blocked && now < control.blockedUntil) {
+    const remainingTime = Math.ceil((control.blockedUntil - now) / 1000);
+    addWebSocketLog(userId, `⏰ Renovação bloqueada temporariamente por ${remainingTime}s (rate limit)`, 'error');
+    return false;
+  }
+  
+  // Desbloquear se passou o tempo
+  if (control.blocked && now >= control.blockedUntil) {
+    control.blocked = false;
+    control.renewalCooldown = 30000; // Reset cooldown
+    addWebSocketLog(userId, '🔓 Bloqueio temporário removido - renovação permitida', 'info');
+  }
+
+  // Verificar cooldown
+  const timeSinceLastAttempt = now - control.lastRenewalAttempt;
+  if (timeSinceLastAttempt < control.renewalCooldown) {
+    const remainingTime = Math.ceil((control.renewalCooldown - timeSinceLastAttempt) / 1000);
+    addWebSocketLog(userId, `⏰ Aguardando cooldown: ${remainingTime}s até próxima tentativa`, 'error');
+    return false;
+  }
+
+  return true;
+}
+
+// Função para registrar resultado da renovação
+function recordRenewalResult(userId: string, success: boolean) {
+  const control = renewalControl[userId];
+  if (!control) return;
+
+  const now = Date.now();
+  control.lastRenewalAttempt = now;
+
+  if (success) {
+    // Sucesso - resetar contadores
+    control.consecutiveFailures = 0;
+    control.renewalCooldown = 30000; // Reset para 30s
+    control.blocked = false;
+    addWebSocketLog(userId, '✅ Renovação bem-sucedida - cooldown resetado', 'success');
+  } else {
+    // Falha - aumentar cooldown e contador
+    control.consecutiveFailures++;
+    
+    if (control.consecutiveFailures >= 3) {
+      // Bloquear temporariamente após 3 falhas consecutivas
+      control.blocked = true;
+      control.blockedUntil = now + (5 * 60 * 1000); // Bloquear por 5 minutos
+      addWebSocketLog(userId, '🚫 Muitas falhas consecutivas - bloqueando renovações por 5 minutos', 'error');
+    } else {
+      // Aumentar cooldown progressivamente
+      control.renewalCooldown = Math.min(control.renewalCooldown * 2, 300000); // Max 5 minutos
+      addWebSocketLog(userId, `⏰ Falha na renovação - cooldown aumentado para ${control.renewalCooldown / 1000}s`, 'error');
+    }
+  }
+}
+
+// ⏰ Sistema de renovação automática simples - a cada 10 minutos
+interface SimpleRenewalState {
+  nextRenewalTime: number;
+  lastRenewalTime: number;
+}
+
+// Mapa para controlar renovações automáticas por usuário
+const autoRenewal: { [userId: string]: SimpleRenewalState } = {};
+
+// ⏰ Função para inicializar renovação automática
+function initializeAutoRenewal(userId: string) {
+  const now = Date.now();
+  autoRenewal[userId] = {
+    nextRenewalTime: now + (10 * 60 * 1000), // 10 minutos
+    lastRenewalTime: now
+  };
+  addWebSocketLog(userId, '⏰ Renovação automática iniciada - próxima em 10 minutos', 'info');
+}
+
+// ⏰ Função para verificar se deve renovar automaticamente
+function shouldRenewAutomatically(userId: string): boolean {
+  const renewal = autoRenewal[userId];
+  if (!renewal) {
+    initializeAutoRenewal(userId);
+    return false;
+  }
+
+  const now = Date.now();
+  
+  if (now >= renewal.nextRenewalTime) {
+    // Renovar e agendar próxima
+    renewal.lastRenewalTime = now;
+    renewal.nextRenewalTime = now + (10 * 60 * 1000); // Próxima em 10 minutos
+    
+    addWebSocketLog(userId, '⏰ Renovação automática ativada (10 minutos)', 'info');
+    return true;
+  }
+  
+  return false;
+}
+
+// ⏰ Função para limpar renovação automática
+function clearAutoRenewal(userId: string) {
+  if (autoRenewal[userId]) {
+    delete autoRenewal[userId];
+    addWebSocketLog(userId, '⏰ Renovação automática limpa', 'info');
+  }
+}
+
+
+

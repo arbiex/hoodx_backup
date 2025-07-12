@@ -61,6 +61,22 @@ export const authHelpers = {
   // Função para ouvir mudanças de autenticação
   onAuthStateChange(callback: (event: string, session: any) => void) {
     return supabase.auth.onAuthStateChange(callback)
+  },
+
+  // Função para solicitar reset de senha
+  async resetPassword(email: string, redirectTo?: string) {
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectTo || `${window.location.origin}/reset-password`
+    })
+    return { data, error }
+  },
+
+  // Função para atualizar senha
+  async updatePassword(password: string) {
+    const { data, error } = await supabase.auth.updateUser({
+      password
+    })
+    return { data, error }
   }
 }
 

@@ -41,12 +41,11 @@ export default function ConfigPage() {
 
   return (
     <div className="px-4">
-      {/* User Profile */}
       <Card className="mb-6 border-green-500/30 backdrop-blur-lg shadow-2xl shadow-green-500/10">
         <CardHeader>
           <CardTitle className="text-green-400 font-mono">PERFIL_USUÁRIO</CardTitle>
           <CardDescription className="text-gray-400 font-mono text-xs">
-            // Informações da conta e configurações
+            Informações da conta e configurações
           </CardDescription>
         </CardHeader>
         <CardContent>

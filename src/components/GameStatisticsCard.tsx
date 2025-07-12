@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Card, CardContent } from '@/components/ui/card'
-import { RefreshCw, ChevronDown } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { RefreshCw, ChevronDown, Activity } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 interface HistoryRecord {
@@ -58,11 +58,7 @@ export default function GameStatisticsCard({
       const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000)
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
 
-      // Debug: Log dos timestamps
-      console.log('Consultando dados de:', {
-        agora: now.toISOString(),
-        '30minAtrás': thirtyMinutesAgo.toISOString()
-      })
+      // Debug: Log dos timestamps removido
 
       // Buscar dados dos últimos 30 minutos (tentativa com timestamp)
       let { data: data30min, error: error30min } = await supabase
@@ -73,7 +69,6 @@ export default function GameStatisticsCard({
 
       // Se der erro, tentar com created_at
       if (error30min) {
-        console.log('Erro com timestamp, tentando created_at:', error30min)
         const { data: dataCreatedAt, error: errorCreatedAt } = await supabase
           .from('history-megaroulettebr')
           .select('*')
@@ -85,19 +80,13 @@ export default function GameStatisticsCard({
       }
 
       if (error30min) {
-        console.error('Erro ao carregar dados de 30 minutos:', error30min)
         return
       }
 
-      // Debug: Log dos dados brutos
-      console.log('Dados brutos 30min:', {
-        total: data30min?.length || 0,
-        primeiros5: data30min?.slice(0, 5)
-      })
+      // Debug: Log dos dados brutos removido
 
       // Se não há dados nos últimos 30 min, buscar últimos 100 registros para teste
       if (!data30min || data30min.length === 0) {
-        console.log('Sem dados recentes, buscando últimos 100 registros...')
         const { data: dataFallback, error: errorFallback } = await supabase
           .from('history-megaroulettebr')
           .select('*')
@@ -106,7 +95,6 @@ export default function GameStatisticsCard({
         
         if (!errorFallback && dataFallback && dataFallback.length > 0) {
           data30min = dataFallback.slice(0, 30) // Usar últimos 30 como se fossem dos últimos 30min
-          console.log('Usando dados fallback:', data30min.length, 'registros')
         }
       }
 
@@ -118,7 +106,6 @@ export default function GameStatisticsCard({
         .order('timestamp', { ascending: false })
 
       if (error1hour) {
-        console.error('Erro ao carregar dados de 1 hora:', error1hour)
         return
       }
 
@@ -126,13 +113,7 @@ export default function GameStatisticsCard({
       const stats30min = calculateStatistics(data30min || [])
       setStatistics30min(stats30min)
       
-      // Debug: Log dos dados dos últimos 30 minutos
-      console.log('Dados últimos 30min:', {
-        total: data30min?.length || 0,
-        vermelho: stats30min.redCount,
-        porcentagem: stats30min.total > 0 ? ((stats30min.redCount / stats30min.total) * 100).toFixed(1) + '%' : '0%',
-        status: getStatusFromRedPercentage(stats30min.redCount, stats30min.total).status
-      })
+      // Debug: Log dos dados dos últimos 30 minutos removido
 
       // Calcular estatísticas para 1 hora
       const stats1hour = calculateStatistics(data1hour || [])
@@ -140,7 +121,7 @@ export default function GameStatisticsCard({
 
       setLastUpdate(new Date())
     } catch (error) {
-      console.error('Erro ao carregar estatísticas:', error)
+      // Error handling silenciado
     } finally {
       setLoading(false)
     }
@@ -230,6 +211,15 @@ export default function GameStatisticsCard({
 
   return (
     <Card className="border-cyan-500/30 backdrop-blur-sm">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-cyan-400 font-mono">
+          <Activity className="h-5 w-5" />
+          STATUS_ATUAL
+        </CardTitle>
+        <CardDescription className="text-gray-400 font-mono text-xs">
+          // Análise em tempo real do cenário de apostas
+        </CardDescription>
+      </CardHeader>
       <CardContent className="space-y-4">
         {/* Indicador de carregamento */}
         {loading && (
@@ -239,19 +229,10 @@ export default function GameStatisticsCard({
           </div>
         )}
 
-
-        {/* Seção de Status */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></div>
-            <span className="text-sm font-mono text-indigo-400">STATUS_ATUAL</span>
-          </div>
-          
-          {/* Card do Status */}
-          <div className={`p-3 border rounded-lg text-center ${getStatusFromRedPercentage(statistics30min.redCount, statistics30min.total).bgColor} border-gray-600/30`}>
-            <div className={`text-lg font-bold font-mono ${getStatusFromRedPercentage(statistics30min.redCount, statistics30min.total).color}`}>
-              CENÁRIO {getStatusFromRedPercentage(statistics30min.redCount, statistics30min.total).status.toUpperCase()}
-            </div>
+        {/* Card do Status */}
+        <div className={`p-3 border rounded-lg text-center ${getStatusFromRedPercentage(statistics30min.redCount, statistics30min.total).bgColor} border-gray-600/30`}>
+          <div className={`text-lg font-bold font-mono ${getStatusFromRedPercentage(statistics30min.redCount, statistics30min.total).color}`}>
+            CENÁRIO {getStatusFromRedPercentage(statistics30min.redCount, statistics30min.total).status.toUpperCase()}
           </div>
         </div>
 

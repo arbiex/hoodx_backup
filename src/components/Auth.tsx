@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import Image from 'next/image'
-import { Terminal, Lock, User, Crown } from 'lucide-react'
+import { Terminal, Lock, User, Crown, Mail, ArrowLeft, Eye, EyeOff } from 'lucide-react'
 import MatrixRain from '@/components/MatrixRain'
 import { useNetwork } from '@/hooks/useNetwork'
 
@@ -31,7 +31,8 @@ const translateSupabaseError = (errorMessage: string): string => {
     'Access denied': 'Acesso negado',
     'Session expired': 'Sessão expirada',
     'Invalid token': 'Token inválido',
-    'Token expired': 'Token expirado'
+    'Token expired': 'Token expirado',
+    'For security purposes, you can only request this once every 60 seconds': 'Por segurança, você só pode solicitar isso uma vez a cada 60 segundos'
   }
   
   // Procurar por traduções exatas primeiro
@@ -58,6 +59,8 @@ interface AuthProps {
 
 export default function Auth({ onAuthSuccess, defaultMode = 'login', initialReferralCode }: AuthProps) {
   const [isLogin, setIsLogin] = useState(defaultMode === 'login')
+  const [isForgotPassword, setIsForgotPassword] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const isInviteOnly = defaultMode === 'invite-only'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -131,6 +134,38 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
       })
     }
   }, [getSponsorInfo, isInviteOnly, initialReferralCode])
+
+  const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setLoading(true)
+
+    try {
+      const { supabase } = await import('@/lib/supabase')
+      
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`
+      })
+
+      if (error) {
+        console.error('Password reset error:', error)
+        toast.error("ERRO_RESET_SENHA", {
+          description: translateSupabaseError(error.message)
+        })
+      } else {
+        toast.success("EMAIL_ENVIADO", {
+          description: "Verifique seu email para redefinir sua senha"
+        })
+        setIsForgotPassword(false)
+        setEmail('')
+      }
+    } catch (error: unknown) {
+      toast.error("FALHA_SISTEMA", {
+        description: "Erro inesperado ao enviar email de reset"
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -225,10 +260,8 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
           )}
         </div>
 
-
-
         {/* Regular sponsor card for non-invite mode */}
-        {!isInviteOnly && sponsorInfo && !isLogin && (
+        {!isInviteOnly && sponsorInfo && !isLogin && !isForgotPassword && (
           <Card className="border-yellow-500/30 bg-black/80 backdrop-blur-lg shadow-2xl shadow-yellow-500/10 mb-4">
             <CardHeader className="text-center">
               <CardTitle className="text-lg font-mono text-yellow-400 flex items-center justify-center gap-2">
@@ -250,110 +283,177 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
         <Card className={`${isInviteOnly ? 'border-green-500/40 bg-gradient-to-br from-green-900/10 to-black/90' : 'border-green-500/30 bg-black/80'} backdrop-blur-lg shadow-2xl shadow-green-500/10`}>
           <CardHeader className="text-center">
             <CardTitle className="text-xl font-mono text-green-400 flex items-center justify-center gap-2">
-              <Terminal className="h-5 w-5" />
-              {isInviteOnly ? 'PROTOCOLO_INICIAÇÃO' : isLogin ? 'LOGIN_SISTEMA' : 'REGISTRO_USUÁRIO'}
+              {isForgotPassword ? (
+                <>
+                  <Mail className="h-5 w-5" />
+                  RESET_SENHA
+                </>
+              ) : (
+                <>
+                  <Terminal className="h-5 w-5" />
+                  {isInviteOnly ? 'PROTOCOLO_INICIAÇÃO' : isLogin ? 'LOGIN_SISTEMA' : 'REGISTRO_USUÁRIO'}
+                </>
+              )}
             </CardTitle>
             <CardDescription className="text-gray-400 font-mono text-xs">
-              {isInviteOnly 
-                ? '// Entre no Círculo Interno - Convite Obrigatório'
-                : isLogin 
-                  ? '// Autenticação de controle de acesso necessária' 
-                  : sponsorInfo 
-                    ? '// Junte-se à rede e comece a ganhar comissões'
-                    : '// Inicialização de nova conta de usuário'
+              {isForgotPassword 
+                ? '// Redefinir senha de acesso via email'
+                : isInviteOnly 
+                  ? '// Entre no Círculo Interno - Convite Obrigatório'
+                  : isLogin 
+                    ? '// Autenticação de controle de acesso necessária' 
+                    : sponsorInfo 
+                      ? '// Junte-se à rede e comece a ganhar comissões'
+                      : '// Inicialização de nova conta de usuário'
               }
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {isInviteOnly && (
+            {isForgotPassword ? (
+              <form onSubmit={handleForgotPassword} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="inviteCode" className="text-gray-300 font-mono text-sm flex items-center gap-2">
-                    <Crown className="h-4 w-4" />
-                    CÓDIGO_CONVITE
+                  <Label htmlFor="email" className="text-gray-300 font-mono text-sm flex items-center gap-2">
+                    <Mail className="h-4 w-4" />
+                    ENDEREÇO_EMAIL
                   </Label>
                   <Input
-                    id="inviteCode"
-                    type="text"
-                    value={referralCode}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      const code = e.target.value.toUpperCase()
-                      setReferralCode(code)
-                      if (code.length >= 6) {
-                        getSponsorInfo(code).then(sponsor => {
-                          if (sponsor) {
-                            setSponsorInfo(sponsor)
-                            toast.success("CÓDIGO_VÁLIDO", {
-                              description: `Agente encontrado: ${sponsor.email}`
-                            })
-                          } else {
-                            setSponsorInfo(null)
-                            toast.error("CÓDIGO_INVÁLIDO", {
-                              description: "Código não encontrado ou inativo"
-                            })
-                          }
-                        }).catch(error => {
-                          console.error('Error in input getSponsorInfo:', error)
-                          setSponsorInfo(null)
-                          toast.error("ERRO_VALIDAÇÃO", {
-                            description: "Erro ao validar código"
-                          })
-                        })
-                      } else {
-                        setSponsorInfo(null)
-                      }
-                    }}
-                    placeholder="Digite o código de convite"
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+                    placeholder="user@hoodx.ai"
                     required
-                    className="bg-black/50 border-green-500/30 text-green-400 placeholder:text-gray-600 font-mono focus:border-green-400 focus:ring-green-400/20 uppercase tracking-wider"
+                    className="bg-black/50 border-green-500/30 text-green-400 placeholder:text-gray-600 font-mono focus:border-green-400 focus:ring-green-400/20"
                   />
                 </div>
-              )}
-              
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-gray-300 font-mono text-sm flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  ENDEREÇO_EMAIL
-                </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-                  placeholder="user@hoodx.ai"
-                  required
-                  className="bg-black/50 border-green-500/30 text-green-400 placeholder:text-gray-600 font-mono focus:border-green-400 focus:ring-green-400/20"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-gray-300 font-mono text-sm flex items-center gap-2">
-                  <Lock className="h-4 w-4" />
-                  SENHA_HASH
-                </Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  required
-                  minLength={6}
-                  className="bg-black/50 border-green-500/30 text-green-400 placeholder:text-gray-600 font-mono focus:border-green-400 focus:ring-green-400/20"
-                />
-              </div>
 
-              <Button 
-                type="submit" 
-                className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono uppercase tracking-wide disabled:opacity-50"
-                disabled={loading || (isInviteOnly && (!referralCode || !sponsorInfo))}
-                variant="outline"
-              >
-                {loading ? 'PROCESSANDO...' : isInviteOnly ? 'ENTRAR_NO_CÍRCULO' : (isLogin ? 'AUTENTICAR' : 'REGISTRAR_USUÁRIO')}
-              </Button>
-            </form>
+                <Button 
+                  type="submit" 
+                  className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono uppercase tracking-wide disabled:opacity-50"
+                  disabled={loading}
+                  variant="outline"
+                >
+                  {loading ? 'ENVIANDO...' : 'ENVIAR_EMAIL_RESET'}
+                </Button>
 
-            {!isInviteOnly && defaultMode !== 'login' && (
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsForgotPassword(false)
+                      setEmail('')
+                    }}
+                    className="text-sm text-gray-500 hover:text-green-400 font-mono transition-colors flex items-center justify-center gap-2"
+                  >
+                    <ArrowLeft className="h-3 w-3" />
+                    // Voltar para login
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {isInviteOnly && (
+                  <div className="space-y-2">
+                    <Label htmlFor="inviteCode" className="text-gray-300 font-mono text-sm flex items-center gap-2">
+                      <Crown className="h-4 w-4" />
+                      CÓDIGO_CONVITE
+                    </Label>
+                    <Input
+                      id="inviteCode"
+                      type="text"
+                      value={referralCode}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        const code = e.target.value.toUpperCase()
+                        setReferralCode(code)
+                        if (code.length >= 6) {
+                          getSponsorInfo(code).then(sponsor => {
+                            if (sponsor) {
+                              setSponsorInfo(sponsor)
+                              toast.success("CÓDIGO_VÁLIDO", {
+                                description: `Agente encontrado: ${sponsor.email}`
+                              })
+                            } else {
+                              setSponsorInfo(null)
+                              toast.error("CÓDIGO_INVÁLIDO", {
+                                description: "Código não encontrado ou inativo"
+                              })
+                            }
+                          }).catch(error => {
+                            console.error('Error in input getSponsorInfo:', error)
+                            setSponsorInfo(null)
+                            toast.error("ERRO_VALIDAÇÃO", {
+                              description: "Erro ao validar código"
+                            })
+                          })
+                        } else {
+                          setSponsorInfo(null)
+                        }
+                      }}
+                      placeholder="Digite o código de convite"
+                      required
+                      className="bg-black/50 border-green-500/30 text-green-400 placeholder:text-gray-600 font-mono focus:border-green-400 focus:ring-green-400/20 uppercase tracking-wider"
+                    />
+                  </div>
+                )}
+                
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-gray-300 font-mono text-sm flex items-center gap-2">
+                    <User className="h-4 w-4" />
+                    ENDEREÇO_EMAIL
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+                    placeholder="user@hoodx.ai"
+                    required
+                    className="bg-black/50 border-green-500/30 text-green-400 placeholder:text-gray-600 font-mono focus:border-green-400 focus:ring-green-400/20"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="password" className="text-gray-300 font-mono text-sm flex items-center gap-2">
+                    <Lock className="h-4 w-4" />
+                    SENHA_HASH
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      required
+                      minLength={6}
+                      className="bg-black/50 border-green-500/30 text-green-400 placeholder:text-gray-600 font-mono focus:border-green-400 focus:ring-green-400/20 pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-green-400 transition-colors"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <Button 
+                  type="submit" 
+                  className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono uppercase tracking-wide disabled:opacity-50"
+                  disabled={loading || (isInviteOnly && (!referralCode || !sponsorInfo))}
+                  variant="outline"
+                >
+                  {loading ? 'PROCESSANDO...' : isInviteOnly ? 'ENTRAR_NO_CÍRCULO' : (isLogin ? 'AUTENTICAR' : 'REGISTRAR_USUÁRIO')}
+                </Button>
+              </form>
+            )}
+
+            {!isInviteOnly && !isForgotPassword && defaultMode !== 'login' && (
               <div className="mt-6 text-center">
                 <button
                   type="button"
@@ -368,7 +468,19 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
               </div>
             )}
 
-            {defaultMode === 'login' && (
+            {!isInviteOnly && !isForgotPassword && isLogin && (
+              <div className="mt-4 text-center">
+                <button
+                  type="button"
+                  onClick={() => setIsForgotPassword(true)}
+                  className="text-sm text-gray-500 hover:text-green-400 font-mono transition-colors"
+                >
+                  // Esqueceu a senha? Redefinir acesso
+                </button>
+              </div>
+            )}
+
+            {defaultMode === 'login' && !isForgotPassword && (
               <div className="mt-6 text-center">
                 <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                   <p className="text-xs text-yellow-400 font-mono">
@@ -382,7 +494,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
               </div>
             )}
 
-                        {isInviteOnly && (
+            {isInviteOnly && (
               <div className="mt-6 text-center">
                 <p className="text-xs text-green-500/60 font-mono italic">
                   &ldquo;O caminho para a riqueza está oculto das massas&rdquo;

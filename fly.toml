@@ -8,6 +8,9 @@ primary_region = "gru"
     NEXT_PUBLIC_APP_URL = "https://hoodx.fly.dev"
     NEXT_MATRIXX_AUTHORIZED_IDS = "7a3972f5-d603-4420-af55-4852ba61032e,de8aa205-318b-4890-8731-b2463185c885"
 
+[env]
+  NEXT_MATRIXX_AUTHORIZED_IDS = "7a3972f5-d603-4420-af55-4852ba61032e,de8aa205-318b-4890-8731-b2463185c885"
+
 [http_service]
 auto_start_machines = true
 auto_stop_machines = true

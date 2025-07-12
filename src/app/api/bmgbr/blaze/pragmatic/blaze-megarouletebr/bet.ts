@@ -1,26 +1,16 @@
-/**
- * 🧪 BOTS2 - BET - VERSÃO DE TESTES
- * 
- * Esta é uma cópia do sistema de apostas original para testes
- * de novas funcionalidades sem interferir no sistema em produção.
- * 
- * API: /api/bots2/blaze/pragmatic/blaze-megarouletebr/bet
- */
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getBaseUrl } from '@/lib/utils';
 
-// Interface para requisição de aposta
 interface BetRequest {
   userId: string;
   amount: number;
   betCode?: string;
   prediction?: 'red' | 'black' | 'green' | 'even' | 'odd' | 'low' | 'high';
   tableId?: string;
-  maxWaitTime?: number; // tempo máximo para aguardar abertura (default: 30s)
+  maxWaitTime?: number;
 }
 
-// Interface para resultado da aposta
 interface BetResult {
   success: boolean;
   data?: {
@@ -36,24 +26,20 @@ interface BetResult {
   logs?: string[];
 }
 
-// Mapeamento de predições para códigos
 const BET_CODES: { [key: string]: string } = {
-  'red': '46',      // Vermelho
-  'black': '47',    // Preto  
-  'even': '48',     // Par
-  'odd': '49',      // Ímpar
-  'low': '50',      // 1-18
-  'high': '51',     // 19-36
-  'green': '0',     // Zero (número direto)
-  // Números diretos: '0' a '36'
+  'red': '46',
+  'black': '47',
+  'even': '48',
+  'odd': '49',
+  'low': '50',
+  'high': '51',
+  'green': '0',
 };
 
-// Função principal para fazer apostas usando conexão ativa
 export async function POST(request: NextRequest) {
   try {
     const { userId, amount, betCode, prediction, tableId = 'mrbras531mrbr532', maxWaitTime = 30000 }: BetRequest = await request.json();
 
-    // Validações obrigatórias
     if (!userId) {
       return NextResponse.json({
         success: false,
@@ -68,7 +54,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Determinar código da aposta
     let finalBetCode = betCode;
     if (prediction && BET_CODES[prediction]) {
       finalBetCode = BET_CODES[prediction];
@@ -81,7 +66,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Validar código de aposta
     if (!isValidBetCode(finalBetCode)) {
       return NextResponse.json({
         success: false,
@@ -89,7 +73,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 1. Verificar se já existe conexão ativa para o usuário
     const connectionCheckResult = await checkActiveConnection(userId);
     if (!connectionCheckResult.success) {
       return NextResponse.json({
@@ -98,7 +81,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 2. Aguardar próxima janela de apostas e enviar aposta via conexão ativa
     const betResult = await placeBetViaActiveConnection({
       userId,
       amount,
@@ -107,7 +89,6 @@ export async function POST(request: NextRequest) {
       maxWaitTime
     });
 
-    // 3. Se aposta foi bem-sucedida, debitar créditos
     if (betResult.success && betResult.data?.betSent) {
       await debitUserCredits(userId, amount);
     }
@@ -122,10 +103,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Função para verificar se existe conexão ativa (usando a API principal)
 async function checkActiveConnection(userId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    // Chamar a API principal para verificar logs/status da conexão
     const response = await fetch(`${getBaseUrl()}/api/bots2/blaze/pragmatic/blaze-megarouletebr`, {
       method: 'POST',
       headers: {
@@ -155,9 +134,8 @@ async function checkActiveConnection(userId: string): Promise<{ success: boolean
       };
     }
 
-    // Verificar se conexão está saudável (último update recente)
     const timeSinceUpdate = Date.now() - connectionStatus.lastUpdate;
-    if (timeSinceUpdate > 60000) { // 1 minuto
+    if (timeSinceUpdate > 60000) {
       return {
         success: false,
         error: 'Conexão pode estar inativa (sem atividade recente)'
@@ -174,7 +152,6 @@ async function checkActiveConnection(userId: string): Promise<{ success: boolean
   }
 }
 
-// Função para fazer aposta via conexão WebSocket ativa (integrada com route.ts)
 async function placeBetViaActiveConnection(config: {
   userId: string;
   amount: number;
@@ -190,14 +167,12 @@ async function placeBetViaActiveConnection(config: {
       logs.push('🔗 Usando conexão WebSocket ativa existente');
       logs.push(`💰 Preparando aposta: R$ ${config.amount} no código ${config.betCode}`);
 
-      // Variáveis de controle
       let bettingWindowDetected = false;
       let betSent = false;
       let currentGameId = '';
       let betResult = '';
       let monitoringActive = true;
 
-      // Timeout de segurança
       const timeout = setTimeout(() => {
         monitoringActive = false;
         if (!betSent) {

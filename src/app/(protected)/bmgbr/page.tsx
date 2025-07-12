@@ -9,23 +9,37 @@
  */
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, Square, RefreshCw, Zap, Key, Settings, BarChart3 } from 'lucide-react';
+import { Play, Square, RefreshCw, Zap, Key, Settings, BarChart3, Power, Target, TrendingUp } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
 import CreditDisplay from '@/components/CreditDisplay';
 
 import OperationsCard from '@/components/OperationsCard';
-import DetailedHistoryCard from '@/components/DetailedHistoryCard';
-import GameStatisticsCard from '@/components/GameStatisticsCard';
 
+// import GameStatisticsCard from '@/components/GameStatisticsCard'; // 🛑 DESATIVADO
 
-
-
+/**
+ * 🔇 SISTEMA DE POLLING ULTRA-SILENCIOSO - Versão 3.0
+ * 
+ * 🛑 TODOS OS POLLING REMOVIDOS:
+ *    - GameStatisticsCard: 30s ❌ (REMOVIDO)
+ *    - Update interval histórico: 30s ❌ (REMOVIDO)
+ *    - Hash comparisons & gap recovery ❌ (REMOVIDO)
+ *    - FrequencyAnalysisCard auto-refresh ❌ (REMOVIDO)
+ *    - Logs e console.warn ❌ (REMOVIDO)
+ *
+ * ✅ ÚNICO POLLING ATIVO:
+ *    - Insights polling: 3s (Monitoramento URL silencioso)
+ *    - Só dispara atualizações quando gameId muda
+ *    - Zero logs, zero re-renders desnecessários
+ *
+ * 🎯 RESULTADO: Sistema ultra-eficiente, polling verdadeiramente silencioso
+ */
 
 export default function BMGBR() {
   // Estados básicos
@@ -40,15 +54,13 @@ export default function BMGBR() {
     pragmaticUserId?: string;
   } | null>(null);
 
-  // 💰 NOVO: Estados para sistema de banca e sugestão de stake
-  const [userBanca, setUserBanca] = useState<number>(150); // Banca inicial do usuário
-  const [userBancaFormatted, setUserBancaFormatted] = useState<string>('150,00'); // Valor formatado para o input
-  const [suggestedStake, setSuggestedStake] = useState<number>(0.50); // Stake sugerido baseado na banca
+  // 💰 NOVO: Estados para sistema de stake simplificado
   const [selectedStake, setSelectedStake] = useState<number>(0.50);
   const [martingaleSequence, setMartingaleSequence] = useState<number[]>([]);
   const [totalMartingaleAmount, setTotalMartingaleAmount] = useState<number>(0);
   
-  // Valores de stake: R$ 0,50 até R$ 200,00 (múltiplos de 0.50)
+  // 💰 NOVO: Valores de stake predefinidos
+  const STAKE_OPTIONS = [0.50, 1.00, 1.50, 2.00, 2.50, 3.00, 3.50, 4.00, 4.50, 5.00, 6.00, 7.00, 8.00, 9.00, 10.00];
 
   // Estados para WebSocket logs
   const [websocketLogs, setWebsocketLogs] = useState<Array<{ 
@@ -57,8 +69,8 @@ export default function BMGBR() {
     type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' 
   }>>([]);
 
-  // Estados para últimos 7 resultados (nova estratégia)
-  const [lastSevenResults, setLastSevenResults] = useState<Array<{ 
+  // Estados para últimos 10 resultados (nova estratégia)
+  const [lastTenResults, setLastTenResults] = useState<Array<{ 
     number: number; 
       color: string;
     gameId: string; 
@@ -96,6 +108,9 @@ export default function BMGBR() {
       profit: number;
       startedAt: number;
     };
+    // 🤖 NOVO: Propriedades do Auto Bot
+    isStandbyMode?: boolean;
+    m4DirectBetType?: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
   } | null>(null);
 
   // Estados de conexão
@@ -168,21 +183,46 @@ export default function BMGBR() {
     created_at: string
   }>>([]);
 
-  // 📋 NOVO: Estado para histórico detalhado de análises e apostas reais
-  const [detailedHistory, setDetailedHistory] = useState<Array<{
-    id: string;
-    timestamp: number;
-    mode: 'analysis' | 'real';
-    martingaleLevel: number;
-    betColor: 'R' | 'B';
-    resultColor: string;
-    resultNumber: number;
-    gameId: string;
-    isWin: boolean;
-    betAmount: number;
-    profit: number;
-    sequencePosition: string;
+  // 📊 NOVO: Estados para análise de sequências (para o card comparativo)
+  const [fullHistoryRecords, setFullHistoryRecords] = useState<Array<{
+    id: number
+    game_id: string
+    number: number
+    color: string
+    game_result: string
+    timestamp: string
+    created_at: string
   }>>([]);
+
+  // 🔥 NOVO: Estados para o sistema de insights local
+  const [insightsData, setInsightsData] = useState<{
+    results: Array<{
+      id: string;
+      gameId: string;
+      number: number;
+      color: string;
+      timestamp: number;
+      gameResult: string;
+    }>;
+    totalResults: number;
+    lastUpdate: number;
+    isActive: boolean;
+    isOnline: boolean;
+    lastGameId: string;
+  } | null>(null);
+
+  // 🔇 ESTADO MINIMALISTA: Apenas o essencial para comparação
+  const [lastKnownGameId, setLastKnownGameId] = useState<string | null>(null);
+
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
+  const [isInsightsActive, setIsInsightsActive] = useState(false);
+  const insightsPollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 🔥 NOVO: Estado para controlar quantos resultados mostrar
+  const [visibleResultsCount, setVisibleResultsCount] = useState(20); // 20 resultados fixos
+
+
 
   // ✅ NOVO: Estado para controlar quando é seguro parar
   const [canSafelyStop, setCanSafelyStop] = useState(true);
@@ -199,16 +239,79 @@ export default function BMGBR() {
   // ✅ NOVO: Estado para forçar exibição como operando (evita piscar)
   const [forceOperatingDisplay, setForceOperatingDisplay] = useState(false);
 
-  // 🛡️ NOVO: Estados para controle de segurança baseado em status
-  const [allowedStatuses, setAllowedStatuses] = useState<string[]>([]); // Status permitidos para operar
-  const [waitingForSafeStatus, setWaitingForSafeStatus] = useState(false); // Se está aguardando status seguro
-  const [currentGameStatus, setCurrentGameStatus] = useState<string>('Aguardando'); // Status atual do jogo (vem do GameStatisticsCard)
+  // Estados para controle de segurança baseado em status foram removidos - apenas M4 Direto
 
-  // 🎯 NOVO: Estado para controlar Stop Gain (null = desabilitado)
+  // 🎯 NOVO: Estado para controlar Meta de Lucro (null = desabilitado)
   const [stopGainPercentage, setStopGainPercentage] = useState<number | null>(null);
 
-  // 🎯 NOVO: Flag para identificar parada automática por stop gain
+  // 🤖 NOVO: Estados para Auto Bot
+  const [autoBotEnabled, setAutoBotEnabled] = useState(false);
+  const [autoBotThreshold, setAutoBotThreshold] = useState(50);
+  const [autoBotCurrentOpportunity, setAutoBotCurrentOpportunity] = useState<string | null>(null);
+  
+  // 🤖 NOVO: Contadores em tempo real para Auto Bot
+  const [autoBotCounters, setAutoBotCounters] = useState<{
+    red: number;
+    black: number;
+    even: number;
+    odd: number;
+    low: number;
+    high: number;
+  } | null>(null);
+  
+  // 🤖 NOVO: Último resultado processado para evitar duplicatas
+  const [lastProcessedGameId, setLastProcessedGameId] = useState<string | null>(null);
+  
+  // 🤖 NOVO: Indicador de atualização recente dos contadores
+  const [recentCounterUpdate, setRecentCounterUpdate] = useState<boolean>(false);
+  
+  // 🤖 NOVO: Indicador de zero detectado (não conta nos contadores)
+  const [recentZeroDetected, setRecentZeroDetected] = useState<boolean>(false);
+  
+  // 🔧 NOVO: Estados para controlar se debug está rodando
+  const [debugRunning, setDebugRunning] = useState<boolean>(false);
+  const [syncRunning, setSyncRunning] = useState<boolean>(false);
+  const [lastDebugAction, setLastDebugAction] = useState<string | null>(null);
+  const [previousWaitingState, setPreviousWaitingState] = useState<boolean>(false);
+  const [debugHidden, setDebugHidden] = useState<boolean>(false);
+  const [lastProcessedInsightGameId, setLastProcessedInsightGameId] = useState<string | null>(null);
+  
+  // 📈 NOVO: Estados para Progressão de Stake por Rodadas
+  const [stakeProgressionEnabled, setStakeProgressionEnabled] = useState(false);
+  const [stakeProgressionRounds, setStakeProgressionRounds] = useState(30);
+  const [stakeProgressionMultiplier, setStakeProgressionMultiplier] = useState(2);
+  const [stakeProgressionMaxMultiplications, setStakeProgressionMaxMultiplications] = useState(3);
+  const [stakeProgressionCurrentMultiplications, setStakeProgressionCurrentMultiplications] = useState(0);
+  const [stakeProgressionRoundCounter, setStakeProgressionRoundCounter] = useState(0);
+  const [stakeProgressionInitialStake, setStakeProgressionInitialStake] = useState(0.50);
+
+  // 🎯 NOVO: Estados para slider da Meta de Lucro
+  const [stopGainEnabled, setStopGainEnabled] = useState(false);
+  const [stopGainSliderValue, setStopGainSliderValue] = useState(50);
+
+  // 🎯 NOVO: Flag para identificar parada automática por meta de lucro
   const [isStopGainTriggered, setIsStopGainTriggered] = useState(false);
+
+  // Estado para controlar regra de frequência foi removido - apenas M4 Direto
+
+  // 🔥 NOVO: Modo M4 direto sempre habilitado nativamente
+  const m4DirectModeEnabled = true;
+
+  // 🔥 NOVO: Estado para tipo de aposta do modo M4 direto
+  const [m4DirectBetType, setM4DirectBetType] = useState<'red' | 'black' | 'even' | 'odd' | 'low' | 'high'>('red');
+
+  // 🔄 NOVO: Estado para controlar última atualização dos dados históricos
+  const [lastHistoryUpdate, setLastHistoryUpdate] = useState<Date | null>(null);
+
+  // 🔥 NOVO: Estado para controlar ativação automática do modo real
+  const [realModeActivationAttempted, setRealModeActivationAttempted] = useState(false);
+  
+  // 🔥 NOVO: Timestamp da última verificação de ativação (para throttling)
+  const lastActivationCheckRef = useRef<number>(0);
+
+  // Estados removidos - stake agora é aplicada diretamente
+
+  // Função checkFrequencyThresholds removida - não mais necessária no modo M4 direto
 
   // 💰 NOVA FUNÇÃO: Calcular sequência de martingale baseada no stake
   const calculateMartingaleSequence = (stake: number): number[] => {
@@ -216,20 +319,20 @@ export default function BMGBR() {
     
     const sequence: number[] = [];
     
-    // M1 = 1 stake
+    // M1 = 1x stake
     const m1 = stake;
     sequence.push(m1);
     
-    // M2 = Dobra o valor do M1 + 2 stakes
-    const m2 = (m1 * 2) + (stake * 2);
+    // M2 = 4x stake
+    const m2 = stake * 4;
     sequence.push(m2);
     
-    // M3 = Dobra o valor M2 + 2 stakes
-    const m3 = (m2 * 2) + (stake * 2);
+    // M3 = 10x stake
+    const m3 = stake * 10;
     sequence.push(m3);
     
-    // M4 = Dobra o valor do M3 + 2 stakes
-    const m4 = (m3 * 2) + (stake * 2);
+    // M4 = 22x stake
+    const m4 = stake * 22;
     sequence.push(m4);
     
     return sequence;
@@ -247,12 +350,12 @@ export default function BMGBR() {
     setTotalMartingaleAmount(calculateTotalAmount(newSequence));
   }, [selectedStake]);
 
-  // 💰 EFEITO: Recalcular melhor stake quando banca muda
+  // 💰 EFEITO: Recalcular sequência quando stake muda (simplificado)
   useEffect(() => {
-    const newSuggestedStake = calculateBestStake(userBanca);
-    setSuggestedStake(newSuggestedStake);
-    setSelectedStake(newSuggestedStake); // Aplicar automaticamente a sugestão
-  }, [userBanca]);
+    const newSequence = calculateMartingaleSequence(selectedStake);
+    setMartingaleSequence(newSequence);
+    setTotalMartingaleAmount(calculateTotalAmount(newSequence));
+  }, [selectedStake]);
 
   // 💰 EFEITO: Inicializar sequência na primeira renderização
   useEffect(() => {
@@ -263,10 +366,20 @@ export default function BMGBR() {
     }
   }, []);
 
-  // 🎯 EFEITO: Monitorar Stop Gain e parar automaticamente
+  // 🎯 EFEITO: Sincronizar slider da Meta de Lucro com o estado usado na API
   useEffect(() => {
-    if (stopGainPercentage !== null && (isOperating || forceOperatingDisplay) && operationReport) {
-      const targetProfit = calculateStopGainTarget(userBanca, stopGainPercentage);
+    if (stopGainEnabled) {
+      setStopGainPercentage(stopGainSliderValue);
+    } else {
+      setStopGainPercentage(null);
+    }
+  }, [stopGainEnabled, stopGainSliderValue]);
+
+  // 🎯 EFEITO: Monitorar Meta de Lucro e parar automaticamente
+  useEffect(() => {
+    if (stopGainEnabled && (isOperating || forceOperatingDisplay) && operationReport) {
+      const baseAmount = totalMartingaleAmount * 6; // Base para cálculo
+      const targetProfit = (baseAmount * stopGainSliderValue) / 100;
       const currentProfit = operationReport.summary.profit;
       
       if (currentProfit >= targetProfit) {
@@ -277,41 +390,67 @@ export default function BMGBR() {
         if (isOperating || forceOperatingDisplay) {
           handleOperate();
           
-          // Mostrar mensagem de sucesso específica para stop gain
+          // Mostrar mensagem de sucesso específica para meta de lucro
           setTimeout(() => {
-            setOperationSuccess(`🎯 Stop Gain atingido! Meta: ${formatCurrency(targetProfit)}, Lucro: ${formatCurrency(currentProfit)}`);
+            setOperationSuccess(`🎯 Meta de Lucro atingida! Meta: ${formatCurrency(targetProfit)}, Lucro: ${formatCurrency(currentProfit)}`);
             setIsStopGainTriggered(false); // Resetar flag após mostrar mensagem
           }, 1000);
         }
       }
     }
-  }, [stopGainPercentage, isOperating, forceOperatingDisplay, operationReport?.summary.profit, userBanca]);
+  }, [stopGainEnabled, stopGainSliderValue, isOperating, forceOperatingDisplay, operationReport?.summary.profit, totalMartingaleAmount]);
 
-  // 🛡️ NOVO: Função para enviar configuração de status seguro para API
-  const updateSafetyConfig = async (config: { allowedStatuses: string[]; waitingForSafeStatus: boolean; currentGameStatus: string }) => {
-    try {
+  // 🔥 NOVO: Inicializar coleta de insights automaticamente
+  useEffect(() => {
+    const initializeInsights = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          action: 'update-strategy',
-          safetyConfig: config
-        }),
-      });
-
-      if (!response.ok) {
-        console.error('Erro ao atualizar configuração de segurança:', response.statusText);
+      if (user) {
+        // Verificar se o usuário tem token configurado
+        const { data: userTokens } = await supabase
+          .from('user_tokens')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('casino_code', 'BLAZE');
+        
+        // Se tem token configurado, iniciar coleta automaticamente
+        if (userTokens && userTokens.length > 0 && userTokens.some(token => token.is_active && token.token && token.token.trim() !== '')) {
+          console.log('🔥 Iniciando coleta de insights automaticamente...');
+          await startInsightsCollection();
+        }
       }
-    } catch (error) {
-      console.error('Erro ao atualizar configuração de segurança:', error);
-    }
-  };
+    };
+
+    initializeInsights();
+  }, []);
+
+  // 🔥 REMOVIDO: Funções para carregar mais resultados - agora fixo em 20 resultados
+  // const loadMoreResults = () => {
+  //   setVisibleResultsCount(prev => prev + 20);
+  // };
+
+  // const resetToStart = () => {
+  //   setVisibleResultsCount(19);
+  // };
+
+  // 🔥 REMOVIDO: Não resetar contador quando novos dados chegam - agora fixo em 20
+  // useEffect(() => {
+  //   // ✅ CORREÇÃO: Verificar insightsData.results em vez de insightsData diretamente
+  //   if (insightsData && insightsData.results && Array.isArray(insightsData.results) && insightsData.results.length > 0) {
+  //     // ✅ Debug: Verificar se dados estão na ordem correta no estado
+  //     console.log('🔄 Dados no estado após atualização:', {
+  //       totalResults: insightsData.results.length,
+  //       primeiros3: insightsData.results.slice(0, 3).map((r: any) => `${r.number} (${r.game_id})`),
+  //       lastGameId: insightsData.lastGameId,
+  //       lastUpdate: new Date(insightsData.lastUpdate).toLocaleTimeString()
+  //     });
+  //     
+  //     setVisibleResultsCount(20); // Mantém fixo em 20
+  //   }
+  // }, [insightsData]);
+
+
+
+  // Função updateSafetyConfig removida - não mais necessária no modo M4 direto
 
   // 💰 NOVA FUNÇÃO: Formatar valor monetário
   const formatCurrency = (value: number): string => {
@@ -355,48 +494,10 @@ export default function BMGBR() {
     return parseFloat(cleanValue) || 0;
   };
 
-  // 💰 NOVA FUNÇÃO: Calcular banca ideal arredondando para cima no próximo múltiplo de 50
-  const calculateBancaIdeal = (totalAmount: number): number => {
-    const baseValue = totalAmount * 6; // x6 conforme configurado
-    return Math.ceil(baseValue / 50) * 50; // Arredonda para cima no próximo múltiplo de 50
-  };
-
-  // 💰 NOVA FUNÇÃO: Calcular melhor stake baseado na banca do usuário
-  const calculateBestStake = (banca: number): number => {
-    // Banca deve ser pelo menos 6x o valor total do martingale
-    // Vamos encontrar o maior stake possível onde (total * 6) <= banca
-    
-    // Começar com um stake inicial e testar
-    let bestStake = 0.50;
-    
-    // Testar stakes de 0.50 até 200.00
-    for (let stake = 0.50; stake <= 200.00; stake += 0.50) {
-      const sequence = calculateMartingaleSequence(stake);
-      const totalAmount = calculateTotalAmount(sequence);
-      const requiredBanca = totalAmount * 6;
-      
-      if (requiredBanca <= banca) {
-        bestStake = stake;
-      } else {
-        break; // Parar quando ultrapassar a banca
-      }
-    }
-    
-    return bestStake;
-  };
-
-  // 💰 NOVA FUNÇÃO: Calcular aproveitamento da banca (%)
-  const calculateBancaUtilization = (banca: number, stake: number): number => {
-    const sequence = calculateMartingaleSequence(stake);
-    const totalAmount = calculateTotalAmount(sequence);
-    const requiredBanca = totalAmount * 6;
-    
-    return (requiredBanca / banca) * 100;
-  };
-
-  // 🎯 NOVA FUNÇÃO: Calcular valor alvo do Stop Gain
-  const calculateStopGainTarget = (banca: number, percentage: number): number => {
-    return (banca * percentage) / 100;
+  // 🎯 NOVA FUNÇÃO: Calcular valor alvo do Stop Gain baseado no stake
+  const calculateStopGainTarget = (percentage: number): number => {
+    const baseAmount = totalMartingaleAmount * 6; // 6x o total do martingale como base
+    return (baseAmount * percentage) / 100;
   };
 
   // 📊 FUNÇÃO SIMPLIFICADA: Agora os dados vêm diretamente da API
@@ -429,7 +530,7 @@ export default function BMGBR() {
     setWebsocketLogs([]);
     setOperationReport(null);
     setOperationState(null);
-    setLastSevenResults([]);
+    setLastTenResults([]);
   };
 
   // 📈 NOVA FUNÇÃO: Processar logs para identificar vitórias e derrotas
@@ -473,6 +574,19 @@ export default function BMGBR() {
           );
           
           if (!exists) {
+            // 📈 NOVO: Aplicar progressão de stake se Auto Bot estiver ativo
+            if (autoBotEnabled && stakeProgressionEnabled && isWin) {
+              // Vitória: resetar progressão de stake
+              setTimeout(() => {
+                resetStakeProgression();
+              }, 1000);
+            } else if (autoBotEnabled && stakeProgressionEnabled && isLoss) {
+              // Derrota: aplicar progressão de stake
+              setTimeout(() => {
+                applyStakeProgression();
+              }, 1000);
+            }
+            
             return [...prev, newBet];
           }
           return prev;
@@ -515,6 +629,23 @@ export default function BMGBR() {
     checkCanSafelyStop();
   }, [isOperating, operationActive, operationState, bettingWindow, stopButtonControl]);
 
+  // 🔄 NOVO: Função para resetar configurações de segurança
+  const resetSafetySettings = () => {
+    // Estados de status seguro e frequência removidos - apenas M4 direto
+    // 🔥 MODO M4 DIRETO: sempre habilitado nativamente
+    setM4DirectBetType('red'); // 🔥 NOVO: Resetar tipo de aposta do modo M4 direto
+    setRealModeActivationAttempted(false);
+    // 🔄 NOVO: Limpar também mensagens de erro/sucesso
+    setOperationError(null);
+    setOperationSuccess(null);
+    console.log('🔄 Configurações resetadas - Bot funcionará em modo M4 direto');
+  };
+
+  // 🔄 NOVO: Resetar configurações de segurança na inicialização
+  useEffect(() => {
+    resetSafetySettings();
+  }, []);
+
   // ✅ NOVO: Verificar estado quando conexão mudar
   useEffect(() => {
     // Se desconectado e ainda operando, forçar parada
@@ -528,7 +659,31 @@ export default function BMGBR() {
     checkUser();
     checkBlazeConfiguration();
     loadHistoryRecords();
+    loadFullHistoryRecords();
   }, []);
+
+  // 🔄 NOVO: Atualizar timestamp quando fullHistoryRecords mudarem (similar ao GameStatisticsCard)
+  useEffect(() => {
+    if (fullHistoryRecords.length > 0) {
+      setLastHistoryUpdate(new Date());
+    }
+  }, [fullHistoryRecords]);
+
+  // 🛑 POLLING DESATIVADO: Dados atualizados apenas via insights polling
+  // useEffect(() => {
+  //   if (historyRecords.length > 0) {
+  //     const updateInterval = setInterval(() => {
+  //       loadFullHistoryRecords();
+  //     }, 30000);
+  //     return () => clearInterval(updateInterval);
+  //   }
+  // }, [historyRecords]);
+
+  // 🤖 REMOVIDO: Monitoramento de limiares não é mais necessário - agora é em tempo real via WebSocket
+
+  // 🚀 REMOVIDO: Verificações complexas não são mais necessárias
+
+  // 🎯 REMOVIDO: Verificação imediata não é mais necessária
 
   // Função para buscar dados históricos do Supabase
   const loadHistoryRecords = async () => {
@@ -548,6 +703,639 @@ export default function BMGBR() {
     }
   };
 
+  // 📊 NOVO: Carregar ~7000 registros das últimas 72h para análise comparativa
+  const loadFullHistoryRecords = async () => {
+    try {
+      const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+      
+      let allRecords: any[] = [];
+      let offset = 0;
+      const limit = 1000;
+      const targetRecords = 7000;
+      let hasMore = true;
+      
+      while (hasMore && allRecords.length < targetRecords) {
+        const { data, error } = await supabase
+          .from('history-megaroulettebr')
+          .select('id, game_id, number, color, game_result, timestamp, created_at')
+          .gte('timestamp', seventyTwoHoursAgo)
+          .order('timestamp', { ascending: false })
+          .range(offset, offset + limit - 1);
+        
+        if (error) {
+          break;
+        }
+        
+        const recordsReceived = data?.length || 0;
+        
+        if (recordsReceived > 0) {
+          allRecords = [...allRecords, ...data];
+          offset += limit;
+          hasMore = recordsReceived === limit;
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      // Filtrar duplicatas
+      const uniqueRecords = allRecords.filter((record, index, arr) => 
+        arr.findIndex(r => r.id === record.id) === index
+      );
+      
+      setFullHistoryRecords(uniqueRecords);
+      
+    } catch (error) {
+      console.error('❌ Erro ao carregar histórico das últimas 72h:', error);
+    }
+  };
+
+  // 🔥 NOVO: Funções para o sistema de insights local
+  const startInsightsCollection = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    try {
+      setInsightsLoading(true);
+      setInsightsError(null);
+
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr/insights', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          action: 'start'
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setIsInsightsActive(true);
+        startInsightsPolling();
+      } else {
+        setInsightsError(result.error || 'Erro ao iniciar coleta');
+      }
+    } catch (error) {
+      setInsightsError('Erro de conexão');
+    } finally {
+      setInsightsLoading(false);
+    }
+  };
+
+  const stopInsightsCollection = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    try {
+      setInsightsLoading(true);
+
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr/insights', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          action: 'stop'
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setIsInsightsActive(false);
+        stopInsightsPolling();
+        setInsightsData(null);
+      } else {
+        setInsightsError(result.error || 'Erro ao parar coleta');
+      }
+    } catch (error) {
+      setInsightsError('Erro de conexão');
+    } finally {
+      setInsightsLoading(false);
+    }
+  };
+
+  const startInsightsPolling = () => {
+    // Limpar polling anterior se existir
+    if (insightsPollingRef.current) {
+      clearInterval(insightsPollingRef.current);
+    }
+
+    // Fazer primeira requisição imediatamente
+    pollInsightsData();
+
+    // 🔇 POLLING ULTRA-SILENCIOSO: Só dispara quando há mudanças REAIS
+    insightsPollingRef.current = setInterval(pollInsightsData, 3000); // 3s balanceado
+  };
+
+  const stopInsightsPolling = () => {
+    if (insightsPollingRef.current) {
+      clearInterval(insightsPollingRef.current);
+      insightsPollingRef.current = null;
+    }
+  };
+
+  // 🔇 POLLING ULTRA-SILENCIOSO: Zero logs, só dispara quando há mudanças REAIS
+  const pollInsightsData = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    try {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr/insights', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          action: 'get'
+        })
+      });
+
+      const result = await response.json();
+      
+      // 🔇 SILENCIOSO TOTAL: Ignorar TODOS os erros sem logs
+      if (!result.success) return;
+
+      if (result.success && result.data) {
+        // 🚀 HASH ULTRA-RÁPIDO: Apenas gameId do primeiro resultado
+        const latestGameId = result.data.results[0]?.gameId || '';
+        
+        // ✅ COMPARAÇÃO INSTANTÂNEA: Só gameId mais recente
+        if (latestGameId !== lastKnownGameId && latestGameId !== '') {
+          
+          // 🎯 ATUALIZAÇÃO BATCHED: Processar e atualizar de uma vez
+        const formattedData = result.data.results.map((item: any) => ({
+          id: item.id,
+          game_id: item.gameId,
+          number: item.number,
+          color: item.color,
+          game_result: item.gameResult,
+          timestamp: new Date(item.timestamp).toISOString(),
+          created_at: new Date(item.timestamp).toISOString()
+        }));
+        
+        const sortedData = formattedData.sort((a: any, b: any) => {
+          return parseInt(b.game_id) - parseInt(a.game_id);
+        });
+        
+          // 🔇 ATUALIZAÇÃO INTELIGENTE: Sem dupla verificação desnecessária
+          setInsightsData({
+            results: sortedData,
+            totalResults: result.data.totalResults || sortedData.length,
+            lastUpdate: Date.now(),
+            isActive: result.data.isActive || true,
+            isOnline: result.data.isOnline || true,
+            lastGameId: latestGameId
+          });
+          
+          setLastKnownGameId(latestGameId);
+          setInsightsError(null);
+          
+          // 🎯 SISTEMA AUTOMÁTICO: O backend já processa automaticamente quando gameId corresponde
+          // Não há necessidade de processamento manual no frontend
+        }
+        // ✅ DADOS IGUAIS: Retorno silencioso absoluto, zero re-renders
+      }
+    } catch (error) {
+      // 🔇 SILENCIOSO TOTAL: Zero logs, zero console
+    }
+  };
+
+  // 📊 NOVA FUNÇÃO: Calcular sequências para todos os tipos de aposta
+  const calculateSequences = (dataRecords: any[]) => {
+    // ✅ CORREÇÃO: Não ordenar os dados aqui - manter ordem original da API
+    // A API Pragmatic já entrega ordenada (gameId decrescente = mais recente primeiro)
+    const sortedRecords = dataRecords; // Usar dados na ordem original
+    
+    // ✅ Debug: Verificar se dados estão na ordem correta aqui
+    
+    let redSequenceCount = 0;
+    let blackSequenceCount = 0;
+    let evenSequenceCount = 0;
+    let oddSequenceCount = 0;
+    let lowSequenceCount = 0;
+    let highSequenceCount = 0;
+    
+    let currentRedSequence = 0;
+    let currentBlackSequence = 0;
+    let currentEvenSequence = 0;
+    let currentOddSequence = 0;
+    let currentLowSequence = 0;
+    let currentHighSequence = 0;
+    
+    sortedRecords.forEach(record => {
+      const number = record.number;
+      const isRed = record.color === 'red' || record.color === 'R';
+      const isBlack = record.color === 'black' || record.color === 'B';
+      const isEven = number % 2 === 0;
+      const isOdd = number % 2 === 1;
+      const isLow = number >= 1 && number <= 18;
+      const isHigh = number >= 19 && number <= 36;
+      
+      // Verificar se é verde (reseta tudo)
+      if (number === 0) {
+        // Finalizar sequências se >= 4
+        if (currentRedSequence >= 4) redSequenceCount++;
+        if (currentBlackSequence >= 4) blackSequenceCount++;
+        if (currentEvenSequence >= 4) evenSequenceCount++;
+        if (currentOddSequence >= 4) oddSequenceCount++;
+        if (currentLowSequence >= 4) lowSequenceCount++;
+        if (currentHighSequence >= 4) highSequenceCount++;
+        
+        // Resetar tudo
+        currentRedSequence = 0;
+        currentBlackSequence = 0;
+        currentEvenSequence = 0;
+        currentOddSequence = 0;
+        currentLowSequence = 0;
+        currentHighSequence = 0;
+        return;
+      }
+      
+      // Cores - Red/Black
+      if (isRed) {
+        currentRedSequence++;
+        if (currentBlackSequence >= 4) blackSequenceCount++;
+        currentBlackSequence = 0;
+      } else if (isBlack) {
+        currentBlackSequence++;
+        if (currentRedSequence >= 4) redSequenceCount++;
+        currentRedSequence = 0;
+      }
+      
+      // Paridade - Even/Odd
+      if (isEven) {
+        currentEvenSequence++;
+        if (currentOddSequence >= 4) oddSequenceCount++;
+        currentOddSequence = 0;
+      } else if (isOdd) {
+        currentOddSequence++;
+        if (currentEvenSequence >= 4) evenSequenceCount++;
+        currentEvenSequence = 0;
+      }
+      
+      // Intervalos - Low/High
+      if (isLow) {
+        currentLowSequence++;
+        if (currentHighSequence >= 4) highSequenceCount++;
+        currentHighSequence = 0;
+      } else if (isHigh) {
+        currentHighSequence++;
+        if (currentLowSequence >= 4) lowSequenceCount++;
+        currentLowSequence = 0;
+      }
+    });
+    
+    // Verificar últimas sequências
+    if (currentRedSequence >= 4) redSequenceCount++;
+    if (currentBlackSequence >= 4) blackSequenceCount++;
+    if (currentEvenSequence >= 4) evenSequenceCount++;
+    if (currentOddSequence >= 4) oddSequenceCount++;
+    if (currentLowSequence >= 4) lowSequenceCount++;
+    if (currentHighSequence >= 4) highSequenceCount++;
+    
+    return {
+      redSequenceCount,
+      blackSequenceCount,
+      evenSequenceCount,
+      oddSequenceCount,
+      lowSequenceCount,
+      highSequenceCount,
+      totalRounds: sortedRecords.length,
+      redFrequency: redSequenceCount > 0 ? Math.round(sortedRecords.length / redSequenceCount) : 0,
+      blackFrequency: blackSequenceCount > 0 ? Math.round(sortedRecords.length / blackSequenceCount) : 0,
+      evenFrequency: evenSequenceCount > 0 ? Math.round(sortedRecords.length / evenSequenceCount) : 0,
+      oddFrequency: oddSequenceCount > 0 ? Math.round(sortedRecords.length / oddSequenceCount) : 0,
+      lowFrequency: lowSequenceCount > 0 ? Math.round(sortedRecords.length / lowSequenceCount) : 0,
+      highFrequency: highSequenceCount > 0 ? Math.round(sortedRecords.length / highSequenceCount) : 0,
+    };
+  };
+
+  // 📊 NOVA FUNÇÃO: Calcular comparativo dos últimos 4 períodos
+  const calculateYesterdayComparison = () => {
+    const now = new Date();
+    
+    // Período da última 1 hora (agora - 1h até agora)
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const todayStart = oneHourAgo;
+    const todayEnd = now;
+    
+    // Mesmo período de 1h há 24 horas atrás
+    const yesterdayStart = new Date(oneHourAgo.getTime() - 24 * 60 * 60 * 1000);
+    const yesterdayEnd = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    
+    // Mesmo período de 1h há 48 horas atrás
+    const dayBeforeYesterdayStart = new Date(oneHourAgo.getTime() - 48 * 60 * 60 * 1000);
+    const dayBeforeYesterdayEnd = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+    
+    // Buscar registros dos períodos
+    const yesterdayRecords = fullHistoryRecords.filter((record: any) => {
+      const recordTime = new Date(record.timestamp);
+      return recordTime >= yesterdayStart && recordTime <= yesterdayEnd;
+    });
+    
+    const dayBeforeYesterdayRecords = fullHistoryRecords.filter((record: any) => {
+      const recordTime = new Date(record.timestamp);
+      return recordTime >= dayBeforeYesterdayStart && recordTime <= dayBeforeYesterdayEnd;
+    });
+    
+    const todayRecords = fullHistoryRecords.filter((record: any) => {
+      const recordTime = new Date(record.timestamp);
+      return recordTime >= todayStart && recordTime <= todayEnd;
+    });
+    
+    // Calcular rodadas desde a última sequência
+    const calculateRoundsSinceLastSequence = () => {
+      const findLastSequence = (type: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high') => {
+        // ✅ CORREÇÃO: Ordenar apenas para análise histórica (não afeta dados principais)
+        const sortedRecords = [...fullHistoryRecords].sort((a, b) => 
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        
+        let currentSequence = 0;
+        let sequenceStartPosition = -1;
+        
+        for (let i = 0; i < sortedRecords.length; i++) {
+          const record = sortedRecords[i];
+          const number = record.number;
+          
+          let matches = false;
+          if (type === 'red') {
+            matches = record.color === 'red' || record.color === 'R';
+          } else if (type === 'black') {
+            matches = record.color === 'black' || record.color === 'B';
+          } else if (type === 'even') {
+            matches = number % 2 === 0 && number !== 0;
+          } else if (type === 'odd') {
+            matches = number % 2 === 1 && number !== 0;
+          } else if (type === 'low') {
+            matches = number >= 1 && number <= 18;
+          } else if (type === 'high') {
+            matches = number >= 19 && number <= 36;
+          }
+          
+          if (matches) {
+            if (currentSequence === 0) {
+              sequenceStartPosition = i;
+            }
+            currentSequence++;
+          } else {
+            if (currentSequence >= 4) {
+              return sequenceStartPosition;
+            }
+            currentSequence = 0;
+            sequenceStartPosition = -1;
+          }
+        }
+        
+        if (currentSequence >= 4 && sequenceStartPosition === 0) {
+          return 0;
+        }
+        
+        return sequenceStartPosition >= 0 ? sequenceStartPosition : -1;
+      };
+
+      return {
+        red: findLastSequence('red') >= 0 ? `${findLastSequence('red')}r` : '--',
+        black: findLastSequence('black') >= 0 ? `${findLastSequence('black')}r` : '--',
+        even: findLastSequence('even') >= 0 ? `${findLastSequence('even')}r` : '--',
+        odd: findLastSequence('odd') >= 0 ? `${findLastSequence('odd')}r` : '--',
+        low: findLastSequence('low') >= 0 ? `${findLastSequence('low')}r` : '--',
+        high: findLastSequence('high') >= 0 ? `${findLastSequence('high')}r` : '--',
+      };
+    };
+
+    const roundsSinceLastSequence = calculateRoundsSinceLastSequence();
+    
+    const hasMinimumData = yesterdayRecords.length > 0 || dayBeforeYesterdayRecords.length > 0 || todayRecords.length > 0;
+    
+    if (!hasMinimumData) {
+      return {
+        currentTime: `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`,
+        hasData: false,
+        redFrequency: 0,
+        blackFrequency: 0,
+        evenFrequency: 0,
+        oddFrequency: 0,
+        lowFrequency: 0,
+        highFrequency: 0,
+        redComparison: 0,
+        blackComparison: 0,
+        totalRounds: 0,
+        redSequenceCount: 0,
+        blackSequenceCount: 0,
+        evenSequenceCount: 0,
+        oddSequenceCount: 0,
+        lowSequenceCount: 0,
+        highSequenceCount: 0,
+        todayFrequency: { red: 0, black: 0, even: 0, odd: 0, low: 0, high: 0 },
+        todayRounds: todayRecords.length,
+        todaySequences: { red: 0, black: 0, even: 0, odd: 0, low: 0, high: 0 },
+        dayBeforeYesterdayFrequency: { red: 0, black: 0, even: 0, odd: 0, low: 0, high: 0 },
+        dayBeforeYesterdayRounds: 0,
+        dayBeforeYesterdaySequences: { red: 0, black: 0, even: 0, odd: 0, low: 0, high: 0 },
+        roundsSinceLastSequence: roundsSinceLastSequence
+      };
+    }
+    
+    const yesterdayStats = yesterdayRecords.length > 0 ? calculateSequences(yesterdayRecords) : {
+      redSequenceCount: 0, blackSequenceCount: 0, evenSequenceCount: 0, oddSequenceCount: 0, lowSequenceCount: 0, highSequenceCount: 0,
+      totalRounds: 0, redFrequency: 0, blackFrequency: 0, evenFrequency: 0, oddFrequency: 0, lowFrequency: 0, highFrequency: 0
+    };
+    
+    const todayStats = todayRecords.length > 0 ? calculateSequences(todayRecords) : {
+      redSequenceCount: 0, blackSequenceCount: 0, evenSequenceCount: 0, oddSequenceCount: 0, lowSequenceCount: 0, highSequenceCount: 0,
+      totalRounds: 0, redFrequency: 0, blackFrequency: 0, evenFrequency: 0, oddFrequency: 0, lowFrequency: 0, highFrequency: 0
+    };
+    
+    const dayBeforeYesterdayStats = dayBeforeYesterdayRecords.length > 0 ? calculateSequences(dayBeforeYesterdayRecords) : {
+      redSequenceCount: 0, blackSequenceCount: 0, evenSequenceCount: 0, oddSequenceCount: 0, lowSequenceCount: 0, highSequenceCount: 0,
+      totalRounds: 0, redFrequency: 0, blackFrequency: 0, evenFrequency: 0, oddFrequency: 0, lowFrequency: 0, highFrequency: 0
+    };
+    
+    const idealFrequency = 35;
+    const redComparison = yesterdayStats.redFrequency > 0 ? yesterdayStats.redFrequency - idealFrequency : 0;
+    const blackComparison = yesterdayStats.blackFrequency > 0 ? yesterdayStats.blackFrequency - idealFrequency : 0;
+    
+    return {
+      currentTime: `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`,
+      hasData: true,
+      redFrequency: yesterdayStats.redFrequency,
+      blackFrequency: yesterdayStats.blackFrequency,
+      evenFrequency: yesterdayStats.evenFrequency,
+      oddFrequency: yesterdayStats.oddFrequency,
+      lowFrequency: yesterdayStats.lowFrequency,
+      highFrequency: yesterdayStats.highFrequency,
+      redComparison,
+      blackComparison,
+      totalRounds: yesterdayStats.totalRounds,
+      redSequenceCount: yesterdayStats.redSequenceCount,
+      blackSequenceCount: yesterdayStats.blackSequenceCount,
+      evenSequenceCount: yesterdayStats.evenSequenceCount,
+      oddSequenceCount: yesterdayStats.oddSequenceCount,
+      lowSequenceCount: yesterdayStats.lowSequenceCount,
+      highSequenceCount: yesterdayStats.highSequenceCount,
+      todayFrequency: {
+        red: todayStats.redFrequency,
+        black: todayStats.blackFrequency,
+        even: todayStats.evenFrequency,
+        odd: todayStats.oddFrequency,
+        low: todayStats.lowFrequency,
+        high: todayStats.highFrequency
+      },
+      todayRounds: todayStats.totalRounds,
+      todaySequences: {
+        red: todayStats.redSequenceCount,
+        black: todayStats.blackSequenceCount,
+        even: todayStats.evenSequenceCount,
+        odd: todayStats.oddSequenceCount,
+        low: todayStats.lowSequenceCount,
+        high: todayStats.highSequenceCount
+      },
+      dayBeforeYesterdayFrequency: {
+        red: dayBeforeYesterdayStats.redFrequency,
+        black: dayBeforeYesterdayStats.blackFrequency,
+        even: dayBeforeYesterdayStats.evenFrequency,
+        odd: dayBeforeYesterdayStats.oddFrequency,
+        low: dayBeforeYesterdayStats.lowFrequency,
+        high: dayBeforeYesterdayStats.highFrequency
+      },
+      dayBeforeYesterdayRounds: dayBeforeYesterdayStats.totalRounds,
+      dayBeforeYesterdaySequences: {
+        red: dayBeforeYesterdayStats.redSequenceCount,
+        black: dayBeforeYesterdayStats.blackSequenceCount,
+        even: dayBeforeYesterdayStats.evenSequenceCount,
+        odd: dayBeforeYesterdayStats.oddSequenceCount,
+        low: dayBeforeYesterdayStats.lowSequenceCount,
+        high: dayBeforeYesterdayStats.highSequenceCount
+      },
+      roundsSinceLastSequence: roundsSinceLastSequence
+    };
+  };
+
+  // 🔥 NOVA FUNÇÃO: Calcular insights usando os 500 resultados do edge function
+  const calculateInsightsComparison = () => {
+    if (!insightsData || !insightsData.results || !Array.isArray(insightsData.results) || insightsData.results.length === 0) {
+      return {
+        currentTime: `${new Date().getHours()}:${String(new Date().getMinutes()).padStart(2, '0')}`,
+        hasData: false,
+        redFrequency: 0,
+        blackFrequency: 0,
+        evenFrequency: 0,
+        oddFrequency: 0,
+        lowFrequency: 0,
+        highFrequency: 0,
+        redComparison: 0,
+        blackComparison: 0,
+        totalRounds: 0,
+        redSequenceCount: 0,
+        blackSequenceCount: 0,
+        evenSequenceCount: 0,
+        oddSequenceCount: 0,
+        lowSequenceCount: 0,
+        highSequenceCount: 0,
+        roundsSinceLastSequence: {
+          red: '--',
+          black: '--',
+          even: '--',
+          odd: '--',
+          low: '--',
+          high: '--'
+        }
+      };
+    }
+
+    // Calcular rodadas desde a última sequência usando os 500 resultados
+    const calculateRoundsSinceLastSequenceFromInsights = () => {
+      const findLastSequence = (type: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high') => {
+        // ✅ CORREÇÃO: Não ordenar - usar ordem original da API Pragmatic
+        // A API já entrega ordenada (gameId decrescente = mais recente primeiro)
+        const sortedRecords = [...insightsData.results]; // Usar ordem original
+        
+        let currentSequence = 0;
+        let sequenceStartPosition = -1;
+        
+        for (let i = 0; i < sortedRecords.length; i++) {
+          const record = sortedRecords[i];
+          const number = record.number;
+          
+          let matches = false;
+          if (type === 'red') {
+            matches = record.color === 'red' || record.color === 'R';
+          } else if (type === 'black') {
+            matches = record.color === 'black' || record.color === 'B';
+          } else if (type === 'even') {
+            matches = number % 2 === 0 && number !== 0;
+          } else if (type === 'odd') {
+            matches = number % 2 === 1 && number !== 0;
+          } else if (type === 'low') {
+            matches = number >= 1 && number <= 18;
+          } else if (type === 'high') {
+            matches = number >= 19 && number <= 36;
+          }
+          
+          if (matches) {
+            if (currentSequence === 0) {
+              sequenceStartPosition = i;
+            }
+            currentSequence++;
+          } else {
+            if (currentSequence >= 4) {
+              return sequenceStartPosition;
+            }
+            currentSequence = 0;
+            sequenceStartPosition = -1;
+          }
+        }
+        
+        if (currentSequence >= 4 && sequenceStartPosition === 0) {
+          return 0;
+        }
+        
+        return sequenceStartPosition >= 0 ? sequenceStartPosition : -1;
+      };
+
+      return {
+        red: findLastSequence('red') >= 0 ? `${findLastSequence('red')}r` : '--',
+        black: findLastSequence('black') >= 0 ? `${findLastSequence('black')}r` : '--',
+        even: findLastSequence('even') >= 0 ? `${findLastSequence('even')}r` : '--',
+        odd: findLastSequence('odd') >= 0 ? `${findLastSequence('odd')}r` : '--',
+        low: findLastSequence('low') >= 0 ? `${findLastSequence('low')}r` : '--',
+        high: findLastSequence('high') >= 0 ? `${findLastSequence('high')}r` : '--',
+      };
+    };
+
+    // Calcular estatísticas dos 500 resultados
+    const stats = calculateSequences(insightsData.results);
+    const roundsSinceLastSequence = calculateRoundsSinceLastSequenceFromInsights();
+
+    const now = new Date();
+    return {
+      currentTime: `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`,
+      hasData: true,
+      redFrequency: stats.redFrequency,
+      blackFrequency: stats.blackFrequency,
+      evenFrequency: stats.evenFrequency,
+      oddFrequency: stats.oddFrequency,
+      lowFrequency: stats.lowFrequency,
+      highFrequency: stats.highFrequency,
+      redComparison: stats.redFrequency - 35, // Comparação com frequência ideal
+      blackComparison: stats.blackFrequency - 35,
+      totalRounds: stats.totalRounds,
+      redSequenceCount: stats.redSequenceCount,
+      blackSequenceCount: stats.blackSequenceCount,
+      evenSequenceCount: stats.evenSequenceCount,
+      oddSequenceCount: stats.oddSequenceCount,
+      lowSequenceCount: stats.lowSequenceCount,
+      highSequenceCount: stats.highSequenceCount,
+      roundsSinceLastSequence: roundsSinceLastSequence
+    };
+  };
+
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user?.email) {
@@ -555,6 +1343,371 @@ export default function BMGBR() {
       userIdRef.current = user.id;
     }
   };
+
+  // 🚀 ULTRA-OTIMIZADO: Memoização profunda com hash específico para evitar re-cálculos
+  const insightsComparison = useMemo(() => {
+    if (!insightsData || !insightsData.results || !Array.isArray(insightsData.results) || insightsData.results.length === 0) {
+      return {
+        hasData: false,
+        roundsSinceLastSequence: {
+          red: '--',
+          black: '--',
+          even: '--',
+          odd: '--',
+          low: '--',
+          high: '--'
+        }
+      };
+    }
+    
+    return calculateInsightsComparison();
+  }, [
+    // 🔥 DEPENDÊNCIAS ULTRA-ESPECÍFICAS: Só recalcular se essenciais mudaram
+    insightsData?.results?.slice(0, 10)?.map(r => `${r.gameId}-${r.number}-${r.color}`).join('|'),
+    insightsData?.lastUpdate
+  ]);
+
+  // 🔧 CORREÇÃO ANTI-PISCAR: Memorizar tooltips baseado em valores específicos, não na referência do objeto
+  const tooltipContents = useMemo(() => {
+    // Extrair valores específicos para evitar dependência de referência de objeto
+    const redValue = insightsComparison.roundsSinceLastSequence?.red;
+    const blackValue = insightsComparison.roundsSinceLastSequence?.black;
+    const evenValue = insightsComparison.roundsSinceLastSequence?.even;
+    const oddValue = insightsComparison.roundsSinceLastSequence?.odd;
+    const lowValue = insightsComparison.roundsSinceLastSequence?.low;
+    const highValue = insightsComparison.roundsSinceLastSequence?.high;
+    
+    return {
+      red: `${(redValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
+      black: `${(blackValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
+      even: `${(evenValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
+      odd: `${(oddValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
+      low: `${(lowValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
+      high: `${(highValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`
+    };
+  }, [
+    // Dependências específicas por valor, não por referência de objeto
+    insightsComparison.roundsSinceLastSequence?.red,
+    insightsComparison.roundsSinceLastSequence?.black,
+    insightsComparison.roundsSinceLastSequence?.even,
+    insightsComparison.roundsSinceLastSequence?.odd,
+    insightsComparison.roundsSinceLastSequence?.low,
+    insightsComparison.roundsSinceLastSequence?.high
+  ]);
+
+  // ✅ CORREÇÃO DEFINITIVA: PRÉ-CALCULAR TOOLTIPS IMUTÁVEIS (ANTI-PISCAR)
+  const memoizedInsightsResults = useMemo(() => {
+    if (!insightsData || !insightsData.results || !Array.isArray(insightsData.results)) {
+      return [];
+    }
+    
+    return insightsData.results.slice(0, visibleResultsCount).map((result: any, index: number) => {
+      const isRed = result.color === 'red' || result.color === 'R';
+      const isGreen = result.color === 'green' || result.color === 'G' || result.number === 0;
+      
+      // 🔇 PRÉ-CALCULAR TOOLTIP FIXO: Evita recálculos desnecessários
+      const characteristics = (() => {
+        const number = result.number;
+        const color = isRed ? 'red' : (isGreen ? 'green' : 'black');
+        const characteristics = [];
+        
+        if (isGreen) {
+          characteristics.push('verde');
+        } else if (isRed) {
+          characteristics.push('vermelho');
+        } else {
+          characteristics.push('preto');
+        }
+        
+        if (number === 0) {
+          characteristics.push('zero');
+        } else {
+          const isEven = number % 2 === 0;
+          const isLow = number >= 1 && number <= 18;
+          
+          if (isEven) {
+            characteristics.push('par');
+          } else {
+            characteristics.push('ímpar');
+          }
+          
+          if (isLow) {
+            characteristics.push('baixa (1-18)');
+          } else {
+            characteristics.push('alta (19-36)');
+          }
+        }
+        
+        return characteristics.join(', ');
+      })();
+      
+      const timeFormatted = new Date(result.timestamp).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+      
+      return {
+        id: `insight-${index}-${result.game_id}`,
+        number: result.number,
+        color: result.color,
+        gameId: result.game_id,
+        timestamp: result.timestamp,
+        index: index,
+        isRed,
+        isGreen,
+        // 🔇 TOOLTIP FIXO PRÉ-CALCULADO: Nunca mais recalcula!
+        tooltipContent: `${timeFormatted} | ${characteristics}`
+      };
+    });
+  }, [
+    // 🔇 DEPENDÊNCIAS BALANCEADAS: Detecta novos dados mas evita re-renders desnecessários
+    insightsData?.results?.length,
+    insightsData?.lastUpdate,
+    visibleResultsCount
+  ]);
+
+  // ✅ CORREÇÃO DEFINITIVA: PRÉ-CALCULAR TOOLTIPS IMUTÁVEIS PARA SMALL RESULTS
+  const memoizedSmallResults = useMemo(() => {
+    return lastTenResults.map((result: any, index: number) => {
+      const isRed = result.color === 'R';
+      const isGreen = result.color === 'green' || result.color === 'G' || result.number === 0;
+      
+      // 🔇 PRÉ-CALCULAR TOOLTIP FIXO: Evita recálculos desnecessários
+      const characteristics = (() => {
+        const number = result.number;
+    const characteristics = [];
+    
+    if (isGreen) {
+      characteristics.push('verde');
+    } else if (isRed) {
+      characteristics.push('vermelho');
+        } else {
+      characteristics.push('preto');
+    }
+    
+    if (number === 0) {
+      characteristics.push('zero');
+    } else {
+          const isEven = number % 2 === 0;
+          const isLow = number >= 1 && number <= 18;
+          
+      if (isEven) {
+        characteristics.push('par');
+          } else {
+        characteristics.push('ímpar');
+      }
+      
+      if (isLow) {
+        characteristics.push('baixa (1-18)');
+          } else {
+        characteristics.push('alta (19-36)');
+      }
+    }
+    
+    return characteristics.join(', ');
+      })();
+
+      const timeFormatted = new Date(result.timestamp).toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+      
+      return {
+        id: `result-${index}-${result.gameId}`,
+        number: result.number,
+        color: result.color,
+        gameId: result.gameId,
+        timestamp: result.timestamp,
+        index: index,
+        isRed,
+        isGreen,
+        // 🔇 TOOLTIP FIXO PRÉ-CALCULADO: Nunca mais recalcula!
+        tooltipContent: `${timeFormatted} | ${characteristics}`
+      };
+    });
+  }, [
+    // 🔇 DEPENDÊNCIAS BALANCEADAS: Detecta novos dados mas evita re-renders desnecessários
+    lastTenResults.length,
+    lastTenResults[0]?.gameId, // Primeiro resultado (mais recente)
+    lastTenResults[0]?.timestamp // Timestamp do mais recente
+  ]);
+
+  // ✅ CORREÇÃO: Função getTemperatureStatus memorizada
+  const getTemperatureStatus = useCallback((rounds: number | string) => {
+    if (rounds === '--' || rounds === '') return { text: '', color: 'text-gray-400' };
+    
+    const numRounds = typeof rounds === 'string' ? parseInt(rounds.replace('r', '')) : rounds;
+    
+    if (numRounds < 10) {
+      return { text: 'muito frio', color: 'text-cyan-400' };
+    } else if (numRounds >= 10 && numRounds <= 34) {
+      return { text: 'frio', color: 'text-cyan-400' };
+    } else if (numRounds >= 35 && numRounds <= 55) {
+      return { text: 'morno', color: 'text-yellow-400' };
+    } else if (numRounds >= 56 && numRounds <= 100) {
+      return { text: 'quente', color: 'text-orange-400' };
+    } else {
+      return { text: 'muito quente', color: 'text-red-400' };
+    }
+  }, []);
+
+  // 🔇 FUNÇÕES REMOVIDAS: getNumberCharacteristics e formatTimestamp 
+  // não são mais necessárias - tooltips são pré-calculados!
+
+  // ✅ CORREÇÃO: Componente memorizado para cada tipo de aposta
+  // Este componente resolve o problema do "piscar" durante o polling:
+  // 1. React.memo previne re-renders quando props não mudaram
+  // 2. Tooltip integrado evita componentes aninhados desnecessários
+  // 3. Usa função getTemperatureStatus memorizada para performance
+  const InsightCard = React.memo<{
+    title: string;
+    color: string;
+    bgColor: string;
+    borderColor: string;
+    hoverColor: string;
+    rounds: string | number;
+    tooltip: string;
+  }>(({ title, color, bgColor, borderColor, hoverColor, rounds, tooltip }) => {
+    const [isVisible, setIsVisible] = useState(false);
+    const temperatureStatus = getTemperatureStatus(rounds);
+    const roundsDisplay = rounds.toString().replace('r', '');
+
+    return (
+      <div className="w-full h-full flex flex-col space-y-2">
+        <div className={`text-xs font-mono ${color} font-bold text-center`}>{title}</div>
+        <div className="relative inline-block">
+          <div
+            onMouseEnter={() => setIsVisible(true)}
+            onMouseLeave={() => setIsVisible(false)}
+            className={`w-full h-full px-3 py-4 ${bgColor} border ${borderColor} rounded-lg ${hoverColor} transition-all cursor-help flex flex-col items-center justify-center min-h-[80px]`}
+          >
+            <div className={`text-2xl font-bold font-mono ${temperatureStatus.color}`}>
+              {roundsDisplay}
+            </div>
+            <div className={`text-xs font-mono uppercase ${temperatureStatus.color} mt-1`}>
+              {temperatureStatus.text || 'rodadas'}
+            </div>
+          </div>
+          {isVisible && (
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 z-50">
+              <div className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-600 w-[150px] text-center break-words">
+                {tooltip}
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800"></div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  });
+
+  // 🔇 COMPONENTE ANTI-PISCAR DEFINITIVO: Tooltip completamente estático
+  const ResultRouletteSlot = React.memo<{
+    number: number;
+    gameId: string;
+    timestamp: number;
+    index: number;
+    isRed: boolean;
+    isGreen: boolean;
+    tooltipContent: string;
+  }>(({ number, gameId, timestamp, index, isRed, isGreen, tooltipContent }) => {
+    const [isVisible, setIsVisible] = useState(false);
+
+    // 🔇 TOOLTIP COMPLETAMENTE ESTÁTICO: Nunca muda após renderização inicial
+
+    return (
+      <div className="relative inline-block">
+        <div
+          onMouseEnter={() => setIsVisible(true)}
+          onMouseLeave={() => setIsVisible(false)}
+          className={`aspect-square rounded-lg flex items-center justify-center text-sm font-bold transition-all hover:scale-105 cursor-pointer relative ${
+            isRed 
+              ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' 
+              : isGreen
+                ? 'bg-green-500 text-white shadow-lg shadow-green-500/20'
+                : 'bg-gray-800 text-white border border-gray-600 shadow-lg shadow-gray-800/20'
+          }`}
+        >
+          {number}
+        </div>
+        {isVisible && (
+          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 z-50">
+            <div className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-600 w-[160px] text-center break-words">
+              {tooltipContent}
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800"></div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }, (prevProps, nextProps) => {
+    // 🔇 COMPARAÇÃO ESPECÍFICA: Só re-renderizar se props essenciais mudaram
+    return (
+      prevProps.number === nextProps.number &&
+      prevProps.gameId === nextProps.gameId &&
+      prevProps.tooltipContent === nextProps.tooltipContent &&
+      prevProps.isRed === nextProps.isRed &&
+      prevProps.isGreen === nextProps.isGreen
+    );
+  });
+
+  // 🔇 COMPONENTE ANTI-PISCAR DEFINITIVO: Tooltip completamente estático
+  const SmallResultRouletteSlot = React.memo<{
+    number: number;
+    gameId: string;
+    timestamp: number;
+    autoBotEnabled: boolean;
+    index: number;
+    isRed: boolean;
+    isGreen: boolean;
+    tooltipContent: string;
+  }>(({ number, gameId, timestamp, autoBotEnabled, index, isRed, isGreen, tooltipContent }) => {
+    const [isVisible, setIsVisible] = useState(false);
+
+    // 🔇 TOOLTIP COMPLETAMENTE ESTÁTICO: Nunca muda após renderização inicial
+
+    return (
+      <div className="relative inline-block">
+        <div
+          onMouseEnter={() => setIsVisible(true)}
+          onMouseLeave={() => setIsVisible(false)}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold relative cursor-pointer transition-all hover:scale-105 ${
+            isRed 
+              ? 'bg-red-500 text-white' 
+              : isGreen
+                ? 'bg-green-500 text-white'
+                : 'bg-gray-800 text-white border border-gray-600'
+          } ${isGreen && autoBotEnabled ? 'ring-2 ring-green-400 ring-opacity-30' : ''}`}
+        >
+          {number}
+          {/* 🤖 NOVO: Indicador de zero (não contabilizado) */}
+          {isGreen && autoBotEnabled && (
+            <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-green-400 rounded-full opacity-70"></div>
+          )}
+        </div>
+        {isVisible && (
+          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 z-50">
+            <div className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-600 w-[160px] text-center break-words">
+              {tooltipContent}
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800"></div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }, (prevProps, nextProps) => {
+    // 🔇 COMPARAÇÃO ESPECÍFICA: Só re-renderizar se props essenciais mudaram
+    return (
+      prevProps.number === nextProps.number &&
+      prevProps.gameId === nextProps.gameId &&
+      prevProps.tooltipContent === nextProps.tooltipContent &&
+      prevProps.isRed === nextProps.isRed &&
+      prevProps.isGreen === nextProps.isGreen &&
+      prevProps.autoBotEnabled === nextProps.autoBotEnabled
+    );
+  });
 
   const checkBlazeConfiguration = async () => {
     try {
@@ -629,7 +1782,7 @@ export default function BMGBR() {
   };
 
   // 💰 NOVA FUNÇÃO: Atualizar função de início de operação para usar a sequência personalizada
-  const startOperation = async (tipValue: number) => {
+  const startOperation = async (tipValue: number, forcedBetType?: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | 'standby') => {
     try {
     setOperationLoading(true);
     setOperationError(null);
@@ -640,8 +1793,21 @@ export default function BMGBR() {
         throw new Error('Usuário não autenticado');
       }
 
+      // 🤖 NOVO: Determinar tipo de aposta (forcedBetType tem prioridade sobre Auto Bot)
+      const finalBetType = forcedBetType === 'standby' ? null : (forcedBetType || m4DirectBetType);
+      const isStandbyMode = forcedBetType === 'standby';
+      
+      // 🤖 REMOVIDO: Lógica de monitoramento de oportunidades não é mais necessária - usa foto inicial e tempo real
+
       // 🔄 Resetar gráficos para nova sessão
       await resetAllGraphs();
+
+      // 🔥 NOVO: Resetar flag de tentativa de ativação do modo real
+      setRealModeActivationAttempted(false);
+
+      // ✅ LOG: Confirmar tipo de aposta que será usado
+      
+      // 🤖 REMOVIDO: Log de oportunidades não é mais necessário - usa contadores em tempo real
 
       // ✅ ETAPA 1: Buscar token da Blaze
       const tokenResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
@@ -702,6 +1868,8 @@ export default function BMGBR() {
       const authData = authResult.data;
       setAuthTokens(authData);
       
+      // ✅ Debug: Mostrar que os tokens foram atualizados
+      
       // ✅ ETAPA 3: Conectar usando tokens gerados via Edge Function
       const connectResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
@@ -733,7 +1901,13 @@ export default function BMGBR() {
             hardwareConcurrency: navigator.hardwareConcurrency,
             connectionType: (navigator as any).connection?.effectiveType
           },
-          stopGainPercentage: stopGainPercentage // <-- Enviar o estado do Stop Gain
+          stopGainPercentage: stopGainPercentage, // <-- Enviar o estado da Meta de Lucro
+          // 🔥 NOVO: Enviar configuração do modo M4 direto
+          m4DirectModeEnabled: m4DirectModeEnabled,
+          // 🔥 CORREÇÃO: Não enviar tipo de aposta em modo standby
+          m4DirectBetType: isStandbyMode ? null : finalBetType,
+          // 🤖 NOVO: Enviar flag de modo standby
+          isStandbyMode: isStandbyMode
         }),
       });
 
@@ -818,11 +1992,14 @@ export default function BMGBR() {
         setForceOperatingDisplay(false); // ✅ NOVO: Liberar exibição forçada
         setOperationActive(false);
         setOperationState(null);
-        setWaitingForSafeStatus(false); // 🛡️ NOVO: Resetar estado de aguardo
+        // Estado de aguardo removido - modo M4 direto
+        setRealModeActivationAttempted(false); // 🔥 NOVO: Resetar flag de tentativa de ativação
+        // Estados pendentes removidos
         monitoringRef.current = false;
         
-        // 🎯 NOVO: Resetar stop gain apenas se não foi parada automática
+        // 🎯 NOVO: Resetar meta de lucro apenas se não foi parada automática
         if (!isStopGainTriggered) {
+          setStopGainEnabled(false);
           setStopGainPercentage(null);
         }
           
@@ -833,8 +2010,9 @@ export default function BMGBR() {
         setOperationError(errorMessage);
         // Em caso de erro, também liberar a exibição forçada
         setForceOperatingDisplay(false);
-        // 🎯 NOVO: Resetar stop gain em caso de erro
+        // 🎯 NOVO: Resetar meta de lucro em caso de erro
         if (!isStopGainTriggered) {
+          setStopGainEnabled(false);
           setStopGainPercentage(null);
         }
         setIsStopGainTriggered(false); // Sempre resetar o flag em caso de erro
@@ -843,33 +2021,82 @@ export default function BMGBR() {
       }
     } else {
       // Iniciar operação
-      if (martingaleSequence.length === 0 || userBanca < 150) {
-        setOperationError('Configure sua banca (mínimo R$ 150,00) primeiro para calcular o stake ideal');
+      if (martingaleSequence.length === 0 || selectedStake < 0.50) {
+        setOperationError('Configure sua stake (mínimo R$ 0,50) primeiro');
         return;
       }
 
-      // 🛡️ NOVO: Verificar se o status atual é permitido para operação (apenas se regra estiver ativa)
-      if (allowedStatuses.length > 0 && currentGameStatus && !allowedStatuses.includes(currentGameStatus)) {
-        setWaitingForSafeStatus(true);
-        setOperationError(null);
-        setOperationSuccess(`⏳ Bot ligado em modo análise. Aguardando status seguro para modo real. Status atual: ${currentGameStatus}. Bot ativará automaticamente quando o status for: ${allowedStatuses.join(', ')}`);
+      // 🤖 NOVO: Se Auto Bot está ativo, tirar "foto" inicial e verificar limiares
+      if (autoBotEnabled) {
+
         
-        // Atualizar configuração na API
-        await updateSafetyConfig({
-          allowedStatuses,
-          waitingForSafeStatus: true,
-          currentGameStatus
-        });
-      } else {
-        // Status seguro - pode operar normalmente
-        setWaitingForSafeStatus(false);
+        // 📸 Tirar foto inicial dos valores atuais e verificar limiares
+        const snapshotResult = captureInitialAutoBotSnapshot();
+        
+        setOperationError(null);
+        
+        if (snapshotResult.hasThresholdMet && snapshotResult.bestOpportunity) {
+          // 🎯 LIMIAR JÁ ATINGIDO: Configurar tipo e iniciar apostas
+          setM4DirectBetType(snapshotResult.bestOpportunity.type as typeof m4DirectBetType);
+          setAutoBotCurrentOpportunity(snapshotResult.bestOpportunity.label);
+          
+          console.log(`🎯 Auto Bot: Limiar já atingido! ${snapshotResult.bestOpportunity.label} = ${snapshotResult.bestOpportunity.value} rodadas`);
+          setOperationSuccess(`🎯 Auto Bot: Apostando em ${snapshotResult.bestOpportunity.label} (${snapshotResult.bestOpportunity.value} rodadas)`);
+        } else {
+          // ⏳ NENHUM LIMIAR ATINGIDO: Conectar em modo standby (sem apostas)
+          console.log('⏳ Auto Bot: Nenhum limiar atingido - conectando em modo standby...');
+          setOperationSuccess(`⏳ Auto Bot: Aguardando algum tipo atingir ${autoBotThreshold} rodadas...`);
+        }
+        
+        // ✅ NOVO: Limpar logs e forçar exibição como "preparando"
+        setWebsocketLogs([]);
+        setLastTenResults([]);
+        setForceOperatingDisplay(true);
+        
+        // 🔄 NOVO: Atualizar dados históricos antes de conectar
+        try {
+          await loadFullHistoryRecords();
+        } catch (error) {
+          console.error('Erro ao atualizar dados históricos:', error);
+        }
+        
+        // ✅ NOVO: Timeout menor para modo standby
+        setTimeout(() => {
+          setForceOperatingDisplay(false);
+        }, 5000);
+
+        // Conectar e iniciar monitoramento em tempo real
+        const tipValue = martingaleSequence[0];
+        
+        // 🎯 Se limiar atingido, usar o tipo correto; senão, usar modo standby
+        if (snapshotResult.hasThresholdMet && snapshotResult.bestOpportunity) {
+          await startOperation(tipValue, snapshotResult.bestOpportunity.type as any);
+        } else {
+          await startOperation(tipValue, 'standby' as any); // Modo standby especial
+        }
+        
+        
+        return;
       }
+
+      // ✅ CORREÇÃO: Sempre conectar no modo M4 direto
+      // Verificações de status removidas - modo M4 direto apenas
+        setOperationError(null);
+      setOperationSuccess(null);
+
+      // ✅ NOVO: Limpar logs do WebSocket para evitar confusão com dados antigos
+      setWebsocketLogs([]);
+      setLastTenResults([]);
 
       // ✅ NOVO: Imediatamente forçar exibição como operando
       setForceOperatingDisplay(true);
-      setOperationError(null);
-      setOperationSuccess(null);
-      setWaitingForSafeStatus(false);
+      
+      // 🔄 NOVO: Atualizar dados históricos antes de iniciar a operação
+      try {
+        await loadFullHistoryRecords();
+      } catch (error) {
+        console.error('Erro ao atualizar dados históricos:', error);
+      }
       
       // ✅ NOVO: Timeout de 10 segundos antes de permitir sincronização
       setTimeout(() => {
@@ -884,9 +2111,11 @@ export default function BMGBR() {
 
   // Iniciar monitoramento dos logs
   const startMonitoring = async () => {
+    // 🛑 CONTADOR REMOVIDO: Polling histórico não é mais necessário
     
     while (monitoringRef.current) {
     try {
+      // 🚀 OTIMIZADO: Agora o backend inclui operation report no get-websocket-logs
       const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -898,12 +2127,17 @@ export default function BMGBR() {
 
       const result = await response.json();
 
+      // ✅ Atualizar todos os dados de uma vez
         if (result.success && result.data) {
           const currentLogsCount = result.data.logs?.length || 0;
           const previousLogsCount = websocketLogs.length;
           
           setWebsocketLogs(result.data.logs || []);
-          setLastSevenResults(result.data.lastSevenResults || []);
+          
+          // 🔇 ATUALIZAÇÃO SILENCIOSA: Sem comparações, sempre atualizar
+          const newLastTenResults = result.data.lastTenResults || [];
+            setLastTenResults(newLastTenResults);
+          
           setConnectionStatus(result.data.connectionStatus || { connected: false, lastUpdate: Date.now() });
           setOperationActive(result.data.operationActive || false);
           setOperationState(result.data.operationState || null);
@@ -915,12 +2149,27 @@ export default function BMGBR() {
           // 🔄 Sincronizar estado da operação - APENAS SE NÃO ESTIVER FORÇANDO EXIBIÇÃO
           if (!forceOperatingDisplay && isOperating !== apiOperationActive) {
             setIsOperating(apiOperationActive);
+            
+            // 🤖 NOVO: Resetar contadores quando operação terminar
+            if (isOperating && !apiOperationActive && autoBotEnabled) {
+              setTimeout(() => {
+                resetStakeProgression(); // Resetar progressão
+                setAutoBotCurrentOpportunity(null); // Limpar oportunidade atual
+                setAutoBotCounters(null); // Resetar contadores para nova operação
+                setLastProcessedGameId(null); // Resetar ID do último resultado processado
+                setRecentCounterUpdate(false); // Resetar indicador de atualização
+                setRecentZeroDetected(false); // Resetar indicador de zero
+        
+              }, 2000);
+            }
           }
           
           // 🔄 Se desconectado, garantir que isOperating seja false - APENAS SE NÃO ESTIVER FORÇANDO EXIBIÇÃO
           if (!forceOperatingDisplay && !apiConnected && isOperating) {
             setIsOperating(false);
           }
+          
+          // Verificações de stake pendente removidas - agora é aplicado diretamente
           // NOVO: Capturar estado da janela de apostas
           setBettingWindow(result.data.bettingWindow || { isOpen: false });
           // 📊 NOVO: Atualizar estatísticas de martingale da API
@@ -936,26 +2185,38 @@ export default function BMGBR() {
             processBetResults(result.data.logs);
           }
           
+          // 🤖 NOVO: Atualizar contadores do Auto Bot com resultados do WebSocket
+          if (result.data.lastTenResults && result.data.lastTenResults.length > 0) {
+            const latestResult = result.data.lastTenResults[0]; // Resultado mais recente
+            if (latestResult && latestResult.number && latestResult.color && latestResult.gameId) {
+
+              updateAutoBotCounters({
+                number: latestResult.number,
+                color: latestResult.color,
+                gameId: latestResult.gameId
+              });
+            }
+          }
+          
           // 🛑 NOVO: Capturar controle do botão "parar" baseado no modo
           if (result.data.operationState?.stopButtonControl) {
             setStopButtonControl(result.data.operationState.stopButtonControl);
           }
           
-          // 📋 NOVO: Capturar histórico detalhado
-          if (result.data.detailedHistory) {
-            setDetailedHistory(result.data.detailedHistory);
+          // 🚀 NOVO: Atualizar operation report em tempo real (incluído na resposta)
+          if (result.data.operationReport) {
+            setOperationReport(result.data.operationReport);
           }
-
-          // 🛡️ NOVO: Capturar status atual do jogo (se disponível na API)
-          if (result.data.currentGameStatus) {
-            setCurrentGameStatus(result.data.currentGameStatus);
-          }
+          
+                  // Verificações de stake pendente removidas - agora aplicado diretamente
         }
 
     } catch (error) {
       }
 
-      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 segundos
+      // 🛑 POLLING HISTÓRICO REMOVIDO: Dados vêm apenas do insights
+
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 1 segundo - informação fresca com hash inteligente
     }
     
   };
@@ -1013,17 +2274,19 @@ export default function BMGBR() {
       body: JSON.stringify({
         userId: userIdRef.current,
         action: 'update-strategy',
-        stopGainPercentage: stopGainPercentage // <-- Enviar o estado do Stop Gain
+                    stopGainPercentage: stopGainEnabled ? stopGainSliderValue : null, // <-- Enviar o estado da Meta de Lucro
+        selectedStake: selectedStake // <-- Enviar o stake selecionado
       })
     });
-  }, [stopGainPercentage]);
+  }, [stopGainEnabled, stopGainSliderValue, selectedStake]);
 
 
   useEffect(() => {
     if (userIdRef.current && isOperating) {
-      fetchOperationReport();
-      const interval = setInterval(fetchOperationReport, 10000); // A cada 10 segundos
-      return () => clearInterval(interval);
+      // 🚀 REMOVIDO: fetchOperationReport individual - agora é feito no startMonitoring a cada 2s
+      // fetchOperationReport();
+      // const interval = setInterval(fetchOperationReport, 10000); // A cada 10 segundos
+      // return () => clearInterval(interval);
     }
   }, [isOperating]);
 
@@ -1036,36 +2299,52 @@ export default function BMGBR() {
     };
   }, []);
 
-  // 🛡️ NOVO: Monitoramento automático para ativar modo real quando status melhorar
+  // 🛡️ NOVO: Monitoramento automático para ativar modo real quando condições melhorarem
   useEffect(() => {
-    // Só executar se estiver aguardando status seguro e regra estiver ativa
-    if (!waitingForSafeStatus || !currentGameStatus || !isOperating || allowedStatuses.length === 0) return;
+    // Só executar se bot estiver operando e em modo análise
+    if (!isOperating || !operationState || operationState.mode !== 'analysis') {
+      // Resetar flag quando sair do modo análise
+      if (realModeActivationAttempted) {
+        setRealModeActivationAttempted(false);
+      }
+      return;
+    }
 
-    // Verificar se o status atual agora é permitido
-    if (allowedStatuses.includes(currentGameStatus)) {
-      console.log(`🛡️ Status melhorou para "${currentGameStatus}" - Ativando modo real automaticamente`);
+    // Throttling: só verificar a cada 5 segundos para evitar execuções excessivas
+    const now = Date.now();
+    if (now - lastActivationCheckRef.current < 5000) {
+      return;
+    }
+    lastActivationCheckRef.current = now;
+
+    // Se já tentou ativar modo real nesta sessão, não tentar novamente
+    if (realModeActivationAttempted) {
+      return;
+    }
+
+    // 🔥 NOVO: Se modo M4 direto está ativado, ignora todas as verificações
+    if (m4DirectModeEnabled && !realModeActivationAttempted) {
+      // Marcar que tentou ativar para evitar tentativas repetidas
+      setRealModeActivationAttempted(true);
       
-      // Resetar estado de aguardo
-      setWaitingForSafeStatus(false);
+      // Estado de aguardo removido - modo M4 direto
       
-      // Notificar usuário
-      setOperationSuccess(`✅ Status seguro detectado: ${currentGameStatus}! Bot ativou automaticamente o modo real.`);
-      
-      // Enviar comando para API ativar modo real
+      // Enviar comando para API ativar modo real imediatamente
       const activateRealMode = async () => {
         try {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
           
-                      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userId: user.id,
-                action: 'activate-real-mode',
-                allowedStatuses: allowedStatuses.length > 0 ? allowedStatuses : null
-              })
-            });
+          const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.id,
+              action: 'activate-real-mode',
+              m4DirectMode: true,
+              m4DirectBetType: m4DirectBetType // 🔥 NOVO: Enviar tipo de aposta
+            })
+          });
           
           const result = await response.json();
           
@@ -1080,17 +2359,83 @@ export default function BMGBR() {
       };
       
       activateRealMode();
+      return; // Sair do useEffect após ativar modo M4 direto
     }
-  }, [waitingForSafeStatus, currentGameStatus, allowedStatuses, isOperating]);
+
+    // Verificações de status e frequência removidas - modo M4 direto apenas
+  }, [isOperating, operationState, realModeActivationAttempted, m4DirectModeEnabled]);
+
+  // 🤖 NOVO: Efeito para carregar dados históricos quando Auto Bot for habilitado
+  useEffect(() => {
+    if (autoBotEnabled && fullHistoryRecords.length === 0) {
+      
+      loadFullHistoryRecords();
+    }
+  }, [autoBotEnabled]);
+
+  // 🤖 NOVO: Efeito para capturar snapshot inicial quando dados históricos estiverem carregados
+  useEffect(() => {
+    if (autoBotEnabled && fullHistoryRecords.length > 0 && !autoBotCounters) {
+      
+      const snapshot = captureInitialAutoBotSnapshot();
+      if (snapshot.hasThresholdMet) {
+        console.log('🎯 Auto Bot: Limiar já atingido na foto inicial!', snapshot.bestOpportunity);
+      }
+    }
+  }, [autoBotEnabled, fullHistoryRecords.length, autoBotCounters]);
+
+  // 🤖 NOVO: Efeito para monitorar mudanças nos contadores
+  useEffect(() => {
+    if (autoBotCounters) {
+      
+    }
+  }, [autoBotCounters]);
+
+  // 🔧 NOVO: Efeito para detectar mudanças no estado de "aguardando resultado"
+  useEffect(() => {
+    const currentWaitingState = operationState?.waitingForResult || false;
+    
+    // Se estava aguardando resultado e agora não está mais
+    if (previousWaitingState && !currentWaitingState && lastDebugAction) {
+      setOperationSuccess('✅ Problema resolvido! O sistema saiu do estado "aguardando resultado" e continuou funcionando normalmente');
+      setLastDebugAction(null);
+      setTimeout(() => {
+        setOperationSuccess(null);
+      }, 8000);
+    }
+    
+    // Se o estado continuar aguardando por mais de 1 minuto, mostrar debug novamente
+    if (currentWaitingState && debugHidden) {
+      setTimeout(() => {
+        if (operationState?.waitingForResult) {
+          setDebugHidden(false); // Mostrar debug novamente após 1 minuto
+        }
+      }, 60000);
+    }
+    
+    setPreviousWaitingState(currentWaitingState);
+  }, [operationState?.waitingForResult, previousWaitingState, lastDebugAction, debugHidden]);
+
+  // 🔧 NOVO: Limpar estado de debug quando operação termina
+  useEffect(() => {
+    if (!isOperating && !forceOperatingDisplay) {
+      setLastDebugAction(null);
+      setDebugRunning(false);
+      setSyncRunning(false);
+      setPreviousWaitingState(false);
+      setDebugHidden(false); // Resetar também o estado de oculto
+      setLastProcessedInsightGameId(null); // Limpar histórico de processamento
+    }
+  }, [isOperating, forceOperatingDisplay]);
 
   // NOVO: Controle inteligente do botão baseado no padrão E janela de apostas
-  const hasCompletePattern = lastSevenResults.length >= 7;
+      const hasCompletePattern = lastTenResults.length >= 10;
   const canStartOperation = hasCompletePattern && bettingWindow.isOpen && !operationActive;
   
   // IMPORTANTE: Verificar se é padrão de repetição válido
-  const isValidRepetitionPattern = lastSevenResults.length >= 7 && 
-    lastSevenResults[5]?.color === lastSevenResults[0]?.color && 
-    lastSevenResults[6]?.color === lastSevenResults[1]?.color;
+  const isValidRepetitionPattern = lastTenResults.length >= 10 &&
+    lastTenResults[5]?.color === lastTenResults[0]?.color &&
+    lastTenResults[6]?.color === lastTenResults[1]?.color;
   
   // Função para inverter cores (adaptada ao formato R/B do backend)
   const invertColor = (color: string): string => {
@@ -1099,8 +2444,268 @@ export default function BMGBR() {
     return color; // green/G permanece inalterado
   };
 
+  // 🤖 REMOVIDO: Função monitorOpportunities não é mais necessária - usando contadores em tempo real
+
+  // 🤖 NOVO: Função para tirar "foto" inicial dos valores quando começar
+  const captureInitialAutoBotSnapshot = () => {
+    if (!autoBotEnabled) return { hasThresholdMet: false, bestOpportunity: null };
+
+    // 🔧 VERIFICAÇÃO: Garantir que há dados históricos carregados
+    if (fullHistoryRecords.length === 0) {
+      return { hasThresholdMet: false, bestOpportunity: null };
+    }
+
+    const comparison = calculateYesterdayComparison();
+    
+    if (!comparison.hasData) {
+      return { hasThresholdMet: false, bestOpportunity: null };
+    }
+
+    // 🔧 CORREÇÃO: Extrair valores corretamente das strings
+    const parseRounds = (value: string | number): number => {
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        if (value === '--') return 0;
+        const numericValue = parseInt(value.replace('r', '').replace('--', '0'));
+        return isNaN(numericValue) ? 0 : numericValue;
+      }
+      return 0;
+    };
+
+    const redRounds = parseRounds(comparison.roundsSinceLastSequence?.red || 0);
+    const blackRounds = parseRounds(comparison.roundsSinceLastSequence?.black || 0);
+    const evenRounds = parseRounds(comparison.roundsSinceLastSequence?.even || 0);
+    const oddRounds = parseRounds(comparison.roundsSinceLastSequence?.odd || 0);
+    const lowRounds = parseRounds(comparison.roundsSinceLastSequence?.low || 0);
+    const highRounds = parseRounds(comparison.roundsSinceLastSequence?.high || 0);
+
+    // Salvar "foto" inicial
+    const initialCounters = {
+      red: redRounds,
+      black: blackRounds,
+      even: evenRounds,
+      odd: oddRounds,
+      low: lowRounds,
+      high: highRounds
+    };
+    
+    setAutoBotCounters(initialCounters);
+    
+    // 🎯 VERIFICAR: Se já existe algum limiar atingido na foto inicial
+    const opportunities = [
+      { type: 'red', value: redRounds, label: 'VERMELHO' },
+      { type: 'black', value: blackRounds, label: 'PRETO' },
+      { type: 'even', value: evenRounds, label: 'PAR' },
+      { type: 'odd', value: oddRounds, label: 'ÍMPAR' },
+      { type: 'low', value: lowRounds, label: 'BAIXAS' },
+      { type: 'high', value: highRounds, label: 'ALTAS' }
+    ];
+
+    const validOpportunities = opportunities.filter(op => op.value >= autoBotThreshold);
+    
+    if (validOpportunities.length > 0) {
+      const bestOpportunity = validOpportunities.reduce((best, current) => 
+        current.value > best.value ? current : best
+      );
+      
+      return { hasThresholdMet: true, bestOpportunity };
+    }
+    
+    return { hasThresholdMet: false, bestOpportunity: null };
+  };
+
+  // 🤖 NOVO: Função para atualizar contadores com base nos resultados do WebSocket
+  const updateAutoBotCounters = (gameResult: { number: number; color: string; gameId: string }) => {
+    if (!autoBotEnabled || !autoBotCounters) return;
+
+    // Evitar contar o mesmo resultado duas vezes
+    if (gameResult.gameId === lastProcessedGameId) {
+      return;
+    }
+    
+    const newCounters = { ...autoBotCounters };
+    
+    // Incrementar contadores baseado no resultado (ignorar zero verde)
+    if (gameResult.number === 0) {
+      // Zero verde não conta para nenhuma categoria
+      
+      // 🤖 NOVO: Mostrar indicador de zero detectado
+      setRecentZeroDetected(true);
+      setTimeout(() => setRecentZeroDetected(false), 3000);
+    } else {
+      // Cores (vermelho/preto)
+      if (gameResult.color === 'red') {
+        newCounters.red++;
+      } else if (gameResult.color === 'black') {
+        newCounters.black++;
+      }
+      
+      // Par/Ímpar
+      if (gameResult.number % 2 === 0) {
+        newCounters.even++;
+      } else {
+        newCounters.odd++;
+      }
+      
+      // Baixas/Altas
+      if (gameResult.number >= 1 && gameResult.number <= 18) {
+        newCounters.low++;
+      } else if (gameResult.number >= 19 && gameResult.number <= 36) {
+        newCounters.high++;
+      }
+    }
+
+    setAutoBotCounters(newCounters);
+    setLastProcessedGameId(gameResult.gameId);
+    
+    // 🤖 NOVO: Mostrar indicador de atualização recente
+    setRecentCounterUpdate(true);
+    setTimeout(() => setRecentCounterUpdate(false), 2000);
+    
+    // Verificar se algum limiar foi atingido
+    checkAutoBotThresholds(newCounters);
+  };
+
+  // 🤖 NOVO: Função para verificar limiares em tempo real
+  const checkAutoBotThresholds = (counters: typeof autoBotCounters) => {
+    if (!autoBotEnabled || !counters) return;
+
+    const opportunities = [
+      { type: 'red', value: counters.red, label: 'VERMELHO' },
+      { type: 'black', value: counters.black, label: 'PRETO' },
+      { type: 'even', value: counters.even, label: 'PAR' },
+      { type: 'odd', value: counters.odd, label: 'ÍMPAR' },
+      { type: 'low', value: counters.low, label: 'BAIXAS' },
+      { type: 'high', value: counters.high, label: 'ALTAS' }
+    ];
+
+    // Encontrar oportunidades que atingiram o limiar
+    const validOpportunities = opportunities.filter(op => op.value >= autoBotThreshold);
+    
+    if (validOpportunities.length > 0) {
+      // Pegar a melhor oportunidade (maior valor)
+      const bestOpportunity = validOpportunities.reduce((best, current) => 
+        current.value > best.value ? current : best
+      );
+
+      // Atualizar tipo de aposta se mudou
+      const newBetType = bestOpportunity.type as typeof m4DirectBetType;
+      if (newBetType !== m4DirectBetType) {
+        setM4DirectBetType(newBetType);
+        setAutoBotCurrentOpportunity(bestOpportunity.label);
+      }
+      
+      // 🚀 NOVO: Se está em standby, ativar modo de apostas
+      if (isOperating && !operationActive) {
+        
+        // Enviar comando para backend sair do standby e começar a apostar
+        const activateAutoBot = async () => {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            // 🔧 CORREÇÃO: Usar set-standby-mode para desativar standby
+            const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: user.id,
+                action: 'set-standby-mode',
+                isStandbyMode: false
+              })
+            });
+
+            if (response.ok) {
+              // 🎯 NOVO: Configurar tipo de aposta no backend
+              const betTypeResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userId: user.id,
+                  action: 'update-bet-type',
+                  m4DirectBetType: bestOpportunity.type
+                })
+              });
+            }
+          } catch (error) {
+            console.error('Erro ao ativar Auto Bot:', error);
+          }
+        };
+        
+        activateAutoBot();
+      }
+      
+      // 🚀 NOVO: Se não está operando ainda, iniciar operação automaticamente
+      if (!isOperating && !operationActive) {
+        setTimeout(() => {
+          handleOperate();
+        }, 1000);
+      }
+    }
+  };
+
+  // 🚀 REMOVIDO: Função startAutoBotOperations não é mais necessária - usamos handleOperate() diretamente
+
+  // 📈 NOVO: Função para resetar progressão de stake
+  const resetStakeProgression = () => {
+    setStakeProgressionCurrentMultiplications(0);
+    setStakeProgressionRoundCounter(0);
+    setStakeProgressionInitialStake(selectedStake);
+  };
+
+  // 📈 NOVO: Função para aplicar progressão de stake
+  const applyStakeProgression = async () => {
+    if (!autoBotEnabled || !stakeProgressionEnabled) return;
+
+    // Incrementar contador de rodadas
+    const newRoundCounter = stakeProgressionRoundCounter + 1;
+    setStakeProgressionRoundCounter(newRoundCounter);
+
+    // Verificar se deve aplicar multiplicador
+    if (newRoundCounter >= stakeProgressionRounds) {
+      // Verificar se ainda pode multiplicar
+      if (stakeProgressionCurrentMultiplications < stakeProgressionMaxMultiplications) {
+        const newMultiplications = stakeProgressionCurrentMultiplications + 1;
+        const newStake = stakeProgressionInitialStake * Math.pow(stakeProgressionMultiplier, newMultiplications);
+        
+        setStakeProgressionCurrentMultiplications(newMultiplications);
+        setStakeProgressionRoundCounter(0); // Resetar contador
+        
+        // Aplicar nova stake
+        await updateStakeDirectly(newStake);
+      } else {
+                 // Atingiu limite máximo de multiplicações
+         
+         // Resetar progressão
+         resetStakeProgression();
+         
+         // Parar operação atual
+         if (isOperating) {
+           handleOperate(); // Parar operação
+         }
+         
+         // 🤖 REMOVIDO: Auto Bot não procura oportunidades automaticamente
+         // O usuário deve reiniciar manualmente quando desejado
+         setTimeout(() => {
+           if (autoBotEnabled) {
+    
+             // handleAutoBetSelection(); // REMOVIDO: Procurar nova oportunidade automaticamente
+           }
+         }, 3000);
+      }
+    }
+  };
+
+  // 🎯 SISTEMA AUTOMÁTICO: Processamento baseado em gameId
+  // A lógica de validação vitória/derrota é automática no backend
+  // Quando gameId da API de insights corresponde à aposta, o resultado é processado automaticamente
+
+  // 🎯 SISTEMA SIMPLIFICADO: Processamento automático no backend
+  // Não há mais necessidade de funções de debug manuais
+  // O sistema automaticamente compara gameId e processa resultados
+
   // Padrão base para apostas (primeiros 5 resultados - CORES HISTÓRICAS)
-  const basePattern = lastSevenResults.slice(0, 5).map((r: any) => r.color);
+  const basePattern = lastTenResults.slice(0, 5).map((r: any) => r.color);
   
   // ✅ NOVO: Padrão invertido que será apostado (CONTRA o histórico)
   const bettingPattern = basePattern.map(invertColor);
@@ -1117,27 +2722,75 @@ export default function BMGBR() {
   const isRealOperation = isOperating && operationState?.mode === 'real';
   const isAnalysisMode = connectionStatus.connected && operationState?.mode === 'analysis';
 
-  // 1. Função para atualizar stake no backend (mantida para compatibilidade)
-  const updateStake = (newStake: number) => {
-    setSelectedStake(newStake);
-    // Atualizar sequência local
-    const seq = calculateMartingaleSequence(newStake);
-    setMartingaleSequence(seq);
-    setTotalMartingaleAmount(calculateTotalAmount(seq));
-    // Enviar para backend
-    if (userIdRef.current) {
-      fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-          action: 'update-stake',
-          stake: newStake,
-          banca: userBanca
-        })
-      });
+  // 1. Função para definir stake pendente (aguarda derrota)
+  const updateStakeDirectly = async (newStakeValue: number) => {
+    try {
+      // ✅ SEMPRE atualizar frontend
+      setSelectedStake(newStakeValue);
+      const newSequence = calculateMartingaleSequence(newStakeValue);
+      setMartingaleSequence(newSequence);
+      setTotalMartingaleAmount(calculateTotalAmount(newSequence));
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.error('❌ Usuário não autenticado');
+        return;
+      }
+
+      // Se há operação ativa, aguarda derrota para aplicar
+      if (isOperating) {
+        const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            action: 'set-pending-stake',
+            newStake: newStakeValue
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Erro HTTP: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        if (result.success) {
+          console.log(`✅ Stake pendente definida: R$ ${newStakeValue.toFixed(2)}`);
+        } else {
+          console.error('❌ Erro na resposta do backend:', result.error);
+        }
+      } else {
+        // Se não há operação, aplica imediatamente no backend também
+        const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            action: 'update-stake',
+            newStake: newStakeValue
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Erro HTTP: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        if (result.success) {
+          console.log(`✅ Stake atualizada: R$ ${newStakeValue.toFixed(2)}`);
+        } else {
+          console.error('❌ Erro na resposta do backend:', result.error);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Erro ao atualizar stake:', error);
     }
   };
+
+  // 🔧 NOVA: Função para limpar manualmente stake pendente (em caso de travamento)
+            // Função clearPendingStake removida - não mais necessária
 
   // 2. Adicionar o select de stake abaixo do switch Break-Even Estratégico
   return (
@@ -1147,8 +2800,6 @@ export default function BMGBR() {
       
       <div className="relative z-10 p-8">
         <div className="max-w-4xl mx-auto space-y-6">
-          
-
           
 
 
@@ -1208,252 +2859,186 @@ export default function BMGBR() {
             </div>
           </button>
 
-          {/* 💰 NOVO: Card de Configuração de Banca */}
-          <Card className="border-yellow-500/30 backdrop-blur-sm">
-            <CardHeader className="pb-2">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-yellow-500/20 rounded-lg">
-                  <Zap className="h-5 w-5 text-yellow-400" />
-                </div>
-                <div>
-                  <CardTitle className="text-lg font-mono text-yellow-400">
-                    💰 CONFIGURAÇÕES
+          {/* 💰 NOVO: Card de Créditos Disponíveis */}
+          <CreditDisplay />
+
+
+
+          {/* 🛑 GameStatisticsCard DESATIVADO - polling desnecessário, dados vêm do insights */}
+          {/* <GameStatisticsCard refreshInterval={30000} autoRefresh={true} /> */}
+
+          {/* 🔥 NOVO: Card de Insights de Dados - Todos os Tipos de Aposta */}
+                      {insightsData && insightsData.results && Array.isArray(insightsData.results) && insightsData.results.length > 0 && (() => {
+              // ✅ CORREÇÃO: Usar dados já memorizados em vez de recalcular
+
+              // ✅ CORREÇÃO: Usar função getTemperatureStatus memorizada (definida no nível superior)
+            
+            return (
+              <Card className="border-purple-500/30 backdrop-blur-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-purple-400 font-mono">
+                    <Target className="h-5 w-5" />
+                    INSIGHTS DE DADOS
                   </CardTitle>
-                  <CardDescription className="text-xs font-mono text-gray-400">
-                    // Configure o setup ideal antes de iniciar seu bot
+                  <CardDescription className="text-gray-400 font-mono text-xs">
+                    // Analise a frequencia dos tipos de aposta e histórico atual
                   </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-2 pb-4 px-4">
-              {/* Input de Banca */}
-              <div>
-                <label className="text-sm font-semibold text-gray-300 font-mono mb-4 block">
-                  Selecione o valor da sua banca atual
-                </label>
-                <div className="flex items-center gap-2 mb-3">
-                  {/* Botão Menos */}
-                  <button
-                    onClick={() => {
-                      const newBanca = Math.max(150, userBanca - 50);
-                      setUserBanca(newBanca);
-                      setUserBancaFormatted(applyBrazilianMask((newBanca * 100).toString()));
-                    }}
-                    disabled={userBanca <= 150 || isOperating || forceOperatingDisplay}
-                    className="w-14 h-14 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-lg hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-                  >
-                    -
-                  </button>
                   
-                  {/* Input de Valor */}
-                  <div className="flex-1 relative">
-                    <input
-                      type="text"
-                      value={userBancaFormatted}
-                      onChange={(e) => {
-                        if (isOperating || forceOperatingDisplay) return; // Bloquear alteração quando operando
-                        const rawValue = e.target.value;
-                        const maskedValue = applyBrazilianMask(rawValue);
-                        const numericValue = parseBrazilianNumber(maskedValue);
-                        
-                        // Aplicar limite máximo
-                        if (numericValue <= 50000) {
-                          setUserBancaFormatted(maskedValue);
-                          setUserBanca(numericValue);
-                        }
-                      }}
-                      onBlur={() => {
-                        if (isOperating || forceOperatingDisplay) return; // Bloquear alteração quando operando
-                        // Garantir valor mínimo
-                        if (userBanca < 150) {
-                          setUserBanca(150);
-                          setUserBancaFormatted('150,00');
-                        }
-                      }}
-                      disabled={isOperating || forceOperatingDisplay}
-                      placeholder="0,00"
-                      className={`w-full h-14 p-3 bg-gray-800/50 border border-gray-600/50 rounded-lg font-mono text-lg font-bold text-center text-green-400 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50 hover:bg-gray-700/50 hover:border-gray-500/50 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield] ${
-                        isOperating || forceOperatingDisplay ? 'opacity-50 cursor-not-allowed' : ''
-                      }`}
-                    />
-                    <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-mono text-sm pointer-events-none">
-                      R$
-                    </div>
+                  {/* Referências */}
+                  <div className="px-4 pb-2 text-xs font-mono text-gray-500 space-y-1">
                   </div>
-                  
-                  {/* Botão Mais */}
-                  <button
-                    onClick={() => {
-                      const newBanca = Math.min(50000, userBanca + 50);
-                      setUserBanca(newBanca);
-                      setUserBancaFormatted(applyBrazilianMask((newBanca * 100).toString()));
-                    }}
-                    disabled={userBanca >= 50000 || isOperating || forceOperatingDisplay}
-                    className="w-14 h-14 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-lg hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-                  >
-                    +
-                  </button>
-                </div>
-                <div className="text-xs text-gray-400 font-mono text-left">
-                  Min: R$ 150,00 • Max: R$ 50.000,00
-                </div>
-                
-                {/* 🎯 NOVA SEÇÃO: Stop Gain */}
-                <div className="mt-6 space-y-3">
-                  <label className="text-sm font-semibold text-gray-300 font-mono">
-                    Stop Gain (Opcional)
-                  </label>
-                  <div className="text-xs text-gray-400 font-mono mb-3">
-                    {stopGainPercentage 
-                      ? `Meta: ${formatCurrency(calculateStopGainTarget(userBanca, stopGainPercentage))} (${stopGainPercentage}% da banca)`
-                      : 'Nenhuma meta definida - Bot continuará até parada manual'
-                    }
-                  </div>
-                  
-                  <div className="grid grid-cols-5 gap-2">
-                    {[10, 25, 50, 75, 100].map((percentage) => (
-                      <button
-                        key={percentage}
-                        onClick={() => {
-                          if (stopGainPercentage === percentage) {
-                            setStopGainPercentage(null); // Desselecionar se já estiver selecionado
-                          } else {
-                            setStopGainPercentage(percentage);
-                          }
-                        }}
-                        disabled={isOperating || forceOperatingDisplay}
-                        className={`h-10 px-2 rounded-lg font-mono text-xs font-bold transition-all duration-200 ${
-                          stopGainPercentage === percentage
-                            ? 'bg-green-500/20 border border-green-500/50 text-green-400'
-                            : 'bg-gray-700/50 border border-gray-600/50 text-gray-300 hover:bg-gray-600/50 hover:border-gray-500/50'
-                        } ${
-                          isOperating || forceOperatingDisplay ? 'opacity-50 cursor-not-allowed' : ''
-                        }`}
-                      >
-                        {percentage}%
-                      </button>
-                    ))}
-                  </div>
-                  
-                  {stopGainPercentage && (
-                    <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-                        <span className="text-xs font-mono text-green-400">STOP GAIN ATIVO</span>
-                      </div>
-                      <div className="text-xs text-gray-400 font-mono">
-                        Bot irá parar automaticamente ao atingir {formatCurrency(calculateStopGainTarget(userBanca, stopGainPercentage))} de lucro
+                </CardHeader>
+                <CardContent className="pt-0 pb-4 px-4">
+                  {!insightsComparison.hasData ? (
+                    <div className="text-center py-8">
+                      <div className="text-gray-400 mb-2 font-mono">AGUARDANDO_DADOS</div>
+                      <div className="text-xs text-gray-500 font-mono">
+                        // Coletando dados em tempo real
                       </div>
                     </div>
-                  )}
-                </div>
-
-                {/* 🛡️ NOVO: Seção de Status Seguro */}
-                <div className="mt-6 space-y-3">
-                  <label className="text-sm font-semibold text-gray-300 font-mono">
-                    Status Seguro (Opcional)
-                  </label>
-                  <div className="text-xs text-gray-400 font-mono mb-3">
-                    {allowedStatuses.length > 0 
-                      ? `Permitidos: ${allowedStatuses.join(', ')} • Atual: ${currentGameStatus}`
-                      : 'Desabilitado - Bot pode operar em qualquer status'
-                    }
-                  </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-4 w-full">
+                      {/* ✅ CORREÇÃO: Usar componentes memorizados para evitar re-renders */}
+                      <InsightCard
+                        title="VERMELHO"
+                        color="text-red-400"
+                        bgColor="bg-red-500/5"
+                        borderColor="border-red-500/20"
+                        hoverColor="hover:bg-red-500/10"
+                        rounds={insightsComparison.roundsSinceLastSequence?.red || '--'}
+                        tooltip={tooltipContents.red}
+                      />
+                      
+                      <InsightCard
+                        title="PRETO"
+                        color="text-gray-300"
+                        bgColor="bg-gray-500/5"
+                        borderColor="border-gray-500/20"
+                        hoverColor="hover:bg-gray-500/10"
+                        rounds={insightsComparison.roundsSinceLastSequence?.black || '--'}
+                        tooltip={tooltipContents.black}
+                      />
+                      
+                      <InsightCard
+                        title="PAR"
+                        color="text-blue-400"
+                        bgColor="bg-blue-500/5"
+                        borderColor="border-blue-500/20"
+                        hoverColor="hover:bg-blue-500/10"
+                        rounds={insightsComparison.roundsSinceLastSequence?.even || '--'}
+                        tooltip={tooltipContents.even}
+                      />
+                      
+                      <InsightCard
+                        title="ÍMPAR"
+                        color="text-green-400"
+                        bgColor="bg-green-500/5"
+                        borderColor="border-green-500/20"
+                        hoverColor="hover:bg-green-500/10"
+                        rounds={insightsComparison.roundsSinceLastSequence?.odd || '--'}
+                        tooltip={tooltipContents.odd}
+                      />
+                      
+                      <InsightCard
+                        title="BAIXAS (1-18)"
+                        color="text-yellow-400"
+                        bgColor="bg-yellow-500/5"
+                        borderColor="border-yellow-500/20"
+                        hoverColor="hover:bg-yellow-500/10"
+                        rounds={insightsComparison.roundsSinceLastSequence?.low || '--'}
+                        tooltip={tooltipContents.low}
+                      />
+                      
+                      <InsightCard
+                        title="ALTAS (19-36)"
+                        color="text-indigo-400"
+                        bgColor="bg-indigo-500/5"
+                        borderColor="border-indigo-500/20"
+                        hoverColor="hover:bg-indigo-500/10"
+                        rounds={insightsComparison.roundsSinceLastSequence?.high || '--'}
+                        tooltip={tooltipContents.high}
+                      />
+                          </div>
+                                    )}
                   
-                  <div className="grid grid-cols-5 gap-2">
-                    {['Excelente', 'Bom', 'Regular', 'Ruim', 'Crítico'].map((status) => (
-                      <button
-                        key={status}
-                        onClick={() => {
-                          const statusHierarchy = ['Excelente', 'Bom', 'Regular', 'Ruim', 'Crítico'];
+                  {/* Últimos resultados em tempo real - Grid 10x2 */}
+                  {insightsData && insightsData.results && Array.isArray(insightsData.results) && insightsData.results.length > 0 && (
+                    <div className="space-y-3 mt-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs font-mono text-gray-400">
+                          Últimos resultados:
+                        </div>
+                      </div>
+                      <div className="w-full max-w-4xl mx-auto p-4 bg-gray-900/30 border border-gray-700/30 rounded-lg">
+                        <div className="grid grid-cols-10 gap-3 auto-rows-fr">
+                          {/* ✅ CORREÇÃO: Usar dados memorizados com tooltips pré-calculados */}
+                          {memoizedInsightsResults.map((result) => (
+                            <ResultRouletteSlot
+                              key={result.id}
+                              number={result.number}
+                              gameId={result.gameId}
+                              timestamp={result.timestamp}
+                              index={result.index}
+                              isRed={result.isRed}
+                              isGreen={result.isGreen}
+                              tooltipContent={result.tooltipContent}
+                            />
+                          ))}
                           
-                          if (allowedStatuses.includes(status)) {
-                            // Remover o status selecionado e todos os "piores" (à direita)
-                            setAllowedStatuses(prev => prev.filter(s => 
-                              statusHierarchy.indexOf(s) < statusHierarchy.indexOf(status)
+                          {/* Preencher slots vazios para completar o grid 10x2 (agora sem botão '+') */}
+                          {(() => {
+                            const actualResults = memoizedInsightsResults.length;
+                            const totalSlots = 20; // Grid fixo 10x2
+                            const emptySlots = Math.max(0, totalSlots - actualResults);
+                            
+                            return Array.from({ length: emptySlots }).map((_, index) => (
+                              <div
+                                key={`empty-${index}`}
+                                className="aspect-square rounded-lg border-2 border-dashed border-gray-600/50 flex items-center justify-center"
+                              >
+                                <div className="w-2 h-2 bg-gray-600/30 rounded-full"></div>
+                              </div>
                             ));
-                          } else {
-                            // Adicionar o status selecionado e todos os "melhores" (à esquerda)
-                            const statusesToAdd = statusHierarchy.slice(0, statusHierarchy.indexOf(status) + 1);
-                            setAllowedStatuses(prev => {
-                              const newStatuses = [...prev];
-                              statusesToAdd.forEach(statusToAdd => {
-                                if (!newStatuses.includes(statusToAdd)) {
-                                  newStatuses.push(statusToAdd);
-                                }
-                              });
-                              return newStatuses;
-                            });
-                          }
-                        }}
-                        disabled={isOperating || forceOperatingDisplay}
-                        className={`h-10 px-2 rounded-lg font-mono text-xs font-bold transition-all duration-200 ${
-                          allowedStatuses.includes(status)
-                            ? 'bg-green-500/20 border border-green-500/50 text-green-400'
-                            : 'bg-gray-700/50 border border-gray-600/50 text-gray-300 hover:bg-gray-600/50 hover:border-gray-500/50'
-                        } ${
-                          isOperating || forceOperatingDisplay ? 'opacity-50 cursor-not-allowed' : ''
-                        }`}
-                      >
-                        {status === 'Excelente' ? 'EXC' : 
-                         status === 'Bom' ? 'BOM' : 
-                         status === 'Regular' ? 'REG' : 
-                         status === 'Ruim' ? 'RUI' : 'CRÍ'}
-                      </button>
-                    ))}
-                  </div>
-                  
-                  {waitingForSafeStatus && (
-                    <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
-                        <span className="text-xs font-mono text-yellow-400">AGUARDANDO STATUS SEGURO</span>
-                      </div>
-                      <div className="text-xs text-gray-400 font-mono">
-                        Bot aguarda um dos status permitidos para ativar automaticamente
+                          })()}
+                        </div>
                       </div>
                     </div>
                   )}
-                </div>
-                
-                {/* Mostrar informações quando operando */}
-                {(isOperating || forceOperatingDisplay) && (
-                  <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
-                      <span className="text-xs font-mono text-yellow-400">CONFIGURAÇÕES BLOQUEADAS</span>
-                    </div>
-                    <div className="text-xs text-gray-400 font-mono space-y-1">
-                      <div>Para alterar as configurações, pare o bot primeiro</div>
-                      {stopGainPercentage && (
-                        <div className="text-green-400">
-                          🎯 Stop Gain: {formatCurrency(calculateStopGainTarget(userBanca, stopGainPercentage))} ({stopGainPercentage}%)
-                        </div>
-                      )}
-                      {allowedStatuses.length > 0 && (
-                        <div className="text-blue-400">
-                          🛡️ Status Seguro: {allowedStatuses.join(', ')}
-                        </div>
+                  
+                  {/* Informações da última atualização */}
+                  <div className="p-3 bg-gray-800/30 border border-gray-600/30 rounded-lg mt-4">
+                    <div className="text-xs font-mono text-gray-400">
+                      {insightsData && insightsData.lastUpdate && (
+                        <p>Última atualização: {new Date(insightsData.lastUpdate).toLocaleTimeString()}</p>
                       )}
                     </div>
                   </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            );
+          })()}
 
-          {/* 📊 NOVO: Card de Estatísticas dos Jogos (STATUS_ATUAL) - MOVIDO PARA BAIXO DO CARD DE CONFIGURAÇÕES */}
-          <GameStatisticsCard 
-            onStatusChange={(status) => setCurrentGameStatus(status)}  // 🛡️ NOVO: Capturar status atual
-          />
+
+
+          {/* Card OPERAÇÕES */}
+          <OperationsCard operationReport={operationReport} />
 
           {/* Card Operação */}
           <Card className="border-blue-500/30 backdrop-blur-sm">
-
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
+                <Power className="h-5 w-5" />
+                CONTROLE_OPERAÇÃO
+              </CardTitle>
+              <CardDescription className="text-gray-400 font-mono text-xs">
+                // Inicie ou pare as operações do bot
+              </CardDescription>
+            </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 
                 {/* Status */}
+                <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <div className={`w-3 h-3 rounded-full shadow-lg ${
                     isRealOperation
@@ -1481,69 +3066,14 @@ export default function BMGBR() {
                   </span>
                 </div>
 
-                {/* Últimos 7 Resultados */}
-                {lastSevenResults.length > 0 && (
-                  <div className="space-y-2">
 
-                    <div className="flex gap-2 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg flex-wrap">
-                      {lastSevenResults.slice().reverse().map((result: any, index: number) => {
-                        // Calcular posição cronológica: index 0 = posição 7 (mais recente), index 6 = posição 1 (mais antigo)
-                        const cronologicalPosition = lastSevenResults.length - index;
-                        const baseClasses = "w-12 h-12 rounded-full flex flex-col items-center justify-center text-xs font-bold font-mono shadow-lg transition-all duration-300 hover:scale-110";
-                        const colorClasses = result.color === 'R' 
-                          ? 'bg-red-500 text-white shadow-red-500/50' 
-                          : 'bg-gray-800 text-white border border-gray-600 shadow-gray-800/50';
-                        
-                        return (
-                          <div
-                            key={`result-${index}-${result.gameId}`}
-                            className={`${baseClasses} ${colorClasses}`}
-                            title={`Posição ${cronologicalPosition} | Número: ${result.number} | Game: ${result.gameId}`}
-                          >
-                            <div className="text-[8px] leading-none">{cronologicalPosition}</div>
-                            <div className="text-xs leading-none">{result.color}</div>
-                          </div>
-                        );
-                      })}
-                      {lastSevenResults.length < 7 && (
-                        Array.from({ length: 7 - lastSevenResults.length }).map((_, index) => {
-                          const cronologicalPosition = 7 - lastSevenResults.length - index;
-                          return (
-                            <div
-                              key={`empty-${index}`}
-                              className="w-12 h-12 rounded-full border-2 border-dashed border-gray-600 flex flex-col items-center justify-center text-xs text-gray-500"
-                            >
-                              <div className="text-[8px] leading-none">{cronologicalPosition}</div>
-                              <div className="text-xs leading-none">?</div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-
-                    {isValidRepetitionPattern && (
-                      <div className="text-xs font-mono text-green-300 bg-green-500/10 p-2 rounded border border-green-500/20">
-                        ✅ Padrão de repetição válido: Posições 1,2 repetiram em 6,7!
-                  </div>
-                )}
+                </div>
 
 
-                  </div>
-                )}
 
-                {/* Estado da Operação */}
-                {isRealOperation && operationState && (
-                  <div className="space-y-2">
-                    <div className="p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg space-y-1 text-xs font-mono">
-                      {lastSevenResults.length >= 5 && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-400">Histórico:</span>
-                          <span className="text-gray-500">{basePattern.map((cor, i) => `${i+1}:${cor}`).join(' ')}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
+
+
+                {/* ✅ SISTEMA AUTOMÁTICO: Debug manual removido - processamento automático via gameId */}
 
                 {/* Logs do WebSocket */}
                 {websocketLogs.length > 0 && (
@@ -1575,62 +3105,7 @@ export default function BMGBR() {
                   </div>
                 )}
 
-                {/* 📊 Gráfico de Vitórias Martingale */}
-                {isOperating && (
-                  <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg">
-                    <div className="flex items-center gap-2 mb-3">
-                      <BarChart3 className="h-3 w-3 text-purple-400" />
-                      <span className="text-xs font-mono text-purple-400">VITÓRIAS MARTINGALE</span>
-                    </div>
-                    
-                    {/* Estatísticas compactas */}
-                    <div className="grid grid-cols-4 gap-2 mb-3">
-                      {martingaleUsage.map((usage, index) => (
-                        <div
-                          key={index}
-                          className="p-1.5 bg-gray-800/50 border border-gray-600/30 rounded text-center"
-                        >
-                          <div className="text-xs text-gray-400 font-mono">
-                            M{index + 1}
-                          </div>
-                          <div className="text-sm font-bold text-white font-mono">
-                            {usage}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    {/* Gráfico de barras simples */}
-                    <div className="flex items-end gap-1 h-16 bg-gray-800/30 p-2 rounded">
-                      {martingaleUsage.map((usage, index) => {
-                        const maxUsage = Math.max(...martingaleUsage, 1);
-                        const barHeight = usage > 0 ? (usage / maxUsage) * 100 : 5; // Mínimo 5% para visibilidade
-                        const colors = ['#10B981', '#F59E0B', '#EF4444', '#8B5CF6']; // Verde, Amarelo, Vermelho, Roxo
-                        
-                        return (
-                          <div key={index} className="flex-1 flex flex-col items-center">
-                            <div 
-                              className="w-full rounded-t transition-all duration-300"
-                              style={{ 
-                                height: `${barHeight}%`,
-                                backgroundColor: usage > 0 ? colors[index] : '#374151',
-                                minHeight: '2px'
-                              }}
-                            />
-                            <span className="text-xs font-mono text-gray-400 mt-1">M{index + 1}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    
-                    <div className="text-xs font-mono text-purple-400 text-center mt-2 space-y-1">
-                      <div>Vitórias: {martingaleUsage.reduce((sum, usage) => sum + usage, 0)}</div>
-                      <div className="text-xs text-gray-400">
-                        Rodadas analisadas: M1={analysisRounds[0]} | M2={analysisRounds[1]} | M3={analysisRounds[2]} | M4={analysisRounds[3]}
-                      </div>
-                    </div>
-                  </div>
-                )}
+
 
                 {/* Erro */}
                 {operationError && (
@@ -1654,12 +3129,12 @@ export default function BMGBR() {
                     disabled={
                       operationLoading || 
                       !isConfigured || 
-                      ((isOperating || forceOperatingDisplay) && !canSafelyStop) || // ✅ NOVO: Desabilita quando operando e não é seguro parar
+                      ((isOperating || forceOperatingDisplay) && isRealOperation && !canSafelyStop) || // ✅ NOVO: Desabilita quando operando em modo REAL e não é seguro parar
                       (!(isOperating || forceOperatingDisplay) && martingaleSequence.length === 0) // ✅ NOVO: Desabilita se não há sequência válida
                     }
                     className={`w-full font-mono ${
                       (isOperating || forceOperatingDisplay)
-                        ? canSafelyStop
+                        ? (isAnalysisMode || canSafelyStop) // ✅ NOVO: No modo análise sempre pode parar, no modo real depende do canSafelyStop
                           ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30' // Pode parar
                           : 'bg-gray-500/20 border border-gray-500/50 text-gray-400 cursor-not-allowed' // Não pode parar
                         : martingaleSequence.length === 0
@@ -1686,12 +3161,479 @@ export default function BMGBR() {
                   </Button>
 
                   {/* ✅ NOVO: Mostrar informações da estratégia quando não operando */}
-                  
-
-
 
                 </div>
 
+                {/* 💰 NOVO: Defina sua Stake */}
+                <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-3">
+                  <label className="text-sm font-semibold text-blue-400 font-mono">
+                    Defina sua Stake
+                  </label>
+                  <div className="text-xs text-gray-400 font-mono">
+                    Valor da primeira aposta do martingale
+                  </div>
+                  
+                  {/* Controle de Valor */}
+                  <div className="flex items-center gap-2">
+                    {/* Botão Menos */}
+                    <button
+                      onClick={() => {
+                        const currentIndex = STAKE_OPTIONS.indexOf(selectedStake);
+                        const newStake = currentIndex > 0 ? STAKE_OPTIONS[currentIndex - 1] : STAKE_OPTIONS[0];
+                        
+                        // Aplicar stake diretamente sempre
+                        updateStakeDirectly(newStake);
+                      }}
+                      disabled={selectedStake <= STAKE_OPTIONS[0]}
+                      className="w-10 h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                    >
+                      -
+                    </button>
+                    
+                    {/* Input de Valor */}
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        value={formatCurrency(selectedStake)}
+                        onChange={(e) => {
+                          const cleanValue = e.target.value.replace(/[^\d,]/g, '');
+                          const numValue = parseFloat(cleanValue.replace(',', '.')) || 0.50;
+                          const closest = STAKE_OPTIONS.reduce((prev, curr) => {
+                            return Math.abs(curr - numValue) < Math.abs(prev - numValue) ? curr : prev;
+                          });
+                          
+                          // Aplicar stake diretamente sempre
+                          updateStakeDirectly(closest);
+                        }}
+                        className="w-full h-10 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center text-white font-mono text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all duration-200"
+                        placeholder="R$ 0,50"
+                      />
+                    </div>
+                    
+                    {/* Botão Mais */}
+                    <button
+                      onClick={() => {
+                        const currentIndex = STAKE_OPTIONS.indexOf(selectedStake);
+                        const newStake = currentIndex < STAKE_OPTIONS.length - 1 ? STAKE_OPTIONS[currentIndex + 1] : STAKE_OPTIONS[STAKE_OPTIONS.length - 1];
+                        
+                        // Aplicar stake diretamente sempre
+                        updateStakeDirectly(newStake);
+                      }}
+                      disabled={selectedStake >= STAKE_OPTIONS[STAKE_OPTIONS.length - 1]}
+                      className="w-10 h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                    >
+                      +
+                    </button>
+                    
+
+                  </div>
+                  
+                  {/* Informações da Progressão */}
+                  <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                    <div className="text-gray-400">
+                      Primeira aposta: <span className="text-white">{formatCurrency(martingaleSequence[0] || 0)}</span>
+                    </div>
+                    <div className="text-gray-400">
+                      Segunda aposta: <span className="text-white">{formatCurrency(martingaleSequence[1] || 0)}</span>
+                    </div>
+                    <div className="text-gray-400">
+                      Terceira aposta: <span className="text-white">{formatCurrency(martingaleSequence[2] || 0)}</span>
+                    </div>
+                    <div className="text-gray-400">
+                      Última aposta: <span className="text-white">{formatCurrency(martingaleSequence[3] || 0)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🔥 SEÇÃO: Tipo de Aposta */}
+                <div className={`mt-4 space-y-3 p-3 rounded-lg ${
+                  autoBotEnabled 
+                    ? 'bg-gray-500/5 border border-gray-500/20' 
+                    : 'bg-purple-500/5 border border-purple-500/20'
+                }`}>
+                  <label className={`text-sm font-semibold font-mono ${
+                    autoBotEnabled ? 'text-gray-400' : 'text-purple-400'
+                  }`}>
+                    Tipo de Aposta{autoBotEnabled ? ' (Automático)' : ''}
+                  </label>
+                  <div className="text-xs text-gray-400 font-mono">
+                    {autoBotEnabled 
+                      ? 'Seleção automática pelo Auto Bot'
+                      : 'Selecione um tipo de aposta'
+                    }
+                  </div>
+                  
+                  {/* 🔥 SELEÇÃO: Tipo de aposta */}
+                  <div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { value: 'red', label: 'VERMELHO', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
+                        { value: 'black', label: 'PRETO', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' },
+                        { value: 'even', label: 'PAR', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+                        { value: 'odd', label: 'ÍMPAR', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+                        { value: 'low', label: 'BAIXAS (1-18)', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+                        { value: 'high', label: 'ALTAS (19-36)', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+                      ].map((option) => (
+                        <button
+                          key={option.value}
+                          onClick={() => setM4DirectBetType(option.value as typeof m4DirectBetType)}
+                          disabled={isOperating || forceOperatingDisplay || autoBotEnabled}
+                          className={`p-2 rounded text-xs font-mono border transition-all ${
+                            m4DirectBetType === option.value
+                              ? option.color
+                              : 'bg-gray-800/50 text-gray-400 border-gray-600/30 hover:bg-gray-700/50'
+                          } ${
+                            isOperating || forceOperatingDisplay || autoBotEnabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-2 text-xs text-gray-500 font-mono">
+                      {autoBotEnabled ? (
+                        <span>🤖 Aposta automática: <span className="text-purple-400">{
+                          m4DirectBetType === 'red' ? 'VERMELHO' :
+                          m4DirectBetType === 'black' ? 'PRETO' :
+                          m4DirectBetType === 'even' ? 'PAR' :
+                          m4DirectBetType === 'odd' ? 'ÍMPAR' :
+                          m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
+                          'ALTAS (19-36)'
+                        }</span></span>
+                      ) : (
+                        <span>Aposta selecionada: <span className="text-purple-400">{
+                          m4DirectBetType === 'red' ? 'VERMELHO' :
+                          m4DirectBetType === 'black' ? 'PRETO' :
+                          m4DirectBetType === 'even' ? 'PAR' :
+                          m4DirectBetType === 'odd' ? 'ÍMPAR' :
+                          m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
+                          'ALTAS (19-36)'
+                        }</span></span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🎯 SEÇÃO: Meta de Lucro */}
+                <div className="mt-4 space-y-3 p-3 bg-green-500/5 border border-green-500/20 rounded-lg">
+                  <label className="text-sm font-semibold text-green-400 font-mono">
+                    Meta de Lucro
+                  </label>
+                  <div className="text-xs text-gray-400 font-mono">
+                    {stopGainEnabled 
+                      ? `Meta: ${formatCurrency(calculateStopGainTarget(stopGainSliderValue))} (${stopGainSliderValue}% da base)`
+                      : 'Nenhuma meta definida'
+                    }
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setStopGainEnabled(!stopGainEnabled)}
+                      disabled={isOperating || forceOperatingDisplay}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
+                        stopGainEnabled 
+                          ? 'bg-green-500/20 border border-green-500/50' 
+                          : 'bg-gray-600/20 border border-gray-600/50'
+                      } ${
+                        isOperating || forceOperatingDisplay ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                          stopGainEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                    <span className={`text-xs font-mono ${
+                      stopGainEnabled ? 'text-green-400' : 'text-gray-400'
+                    }`}>
+                      {stopGainEnabled ? 'HABILITADO' : 'DESABILITADO'}
+                    </span>
+                  </div>
+                  
+                  {stopGainEnabled && (
+                    <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                        <span className="text-xs font-mono text-green-400">META DE LUCRO ATIVA</span>
+                      </div>
+                      
+                      {/* Slider para porcentagem */}
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-mono text-gray-400 w-8">1%</span>
+                          <div className="flex-1 relative">
+                            <input
+                              type="range"
+                              min="1"
+                              max="100"
+                              value={stopGainSliderValue}
+                              onChange={(e) => setStopGainSliderValue(parseInt(e.target.value))}
+                              disabled={isOperating || forceOperatingDisplay}
+                              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-custom"
+                              style={{
+                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${stopGainSliderValue}%, #374151 ${stopGainSliderValue}%, #374151 100%)`
+                              }}
+                            />
+                          </div>
+                          <span className="text-xs font-mono text-gray-400 w-12">100%</span>
+                        </div>
+                        
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-mono text-green-400">
+                            {stopGainSliderValue}%
+                          </div>
+                          <div className="text-xs font-mono text-gray-400">
+                            {formatCurrency(calculateStopGainTarget(stopGainSliderValue))}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="text-xs text-gray-400 font-mono mt-2">
+                        Bot irá parar automaticamente ao atingir {formatCurrency(calculateStopGainTarget(stopGainSliderValue))} de lucro
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Estilos CSS para o slider customizado */}
+                  <style jsx>{`
+                    .slider-custom::-webkit-slider-thumb {
+                      appearance: none;
+                      width: 20px;
+                      height: 20px;
+                      border-radius: 50%;
+                      background: #10b981;
+                      cursor: pointer;
+                      border: 2px solid #0f766e;
+                      box-shadow: 0 0 0 1px #10b981;
+                      transition: all 0.2s ease;
+                    }
+                    
+                    .slider-custom::-webkit-slider-thumb:hover {
+                      background: #0d9488;
+                      transform: scale(1.1);
+                    }
+                    
+                    .slider-custom::-moz-range-thumb {
+                      width: 20px;
+                      height: 20px;
+                      border-radius: 50%;
+                      background: #10b981;
+                      cursor: pointer;
+                      border: 2px solid #0f766e;
+                      box-shadow: 0 0 0 1px #10b981;
+                      transition: all 0.2s ease;
+                    }
+                    
+                    .slider-custom::-moz-range-thumb:hover {
+                      background: #0d9488;
+                      transform: scale(1.1);
+                    }
+                    
+                    .slider-custom:disabled::-webkit-slider-thumb {
+                      opacity: 0.5;
+                      cursor: not-allowed;
+                    }
+                    
+                    .slider-custom:disabled::-moz-range-thumb {
+                      opacity: 0.5;
+                      cursor: not-allowed;
+                    }
+                  `}</style>
+                </div>
+
+                {/* 🤖 SEÇÃO: Auto Bot */}
+                <div className="mt-4 space-y-3 p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg">
+                  <label className="text-sm font-semibold text-purple-400 font-mono">
+                    Auto Bot
+                  </label>
+                  <div className="text-xs text-gray-400 font-mono">
+                    {autoBotEnabled 
+                      ? (isOperating || forceOperatingDisplay) 
+                        ? operationActive
+                          ? `🎯 APOSTANDO: ${autoBotCurrentOpportunity || m4DirectBetType.toUpperCase()} (objetivo: vitória no M4)`
+                          : autoBotCounters && Object.values(autoBotCounters).some(val => val >= autoBotThreshold)
+                            ? `🚀 LIMIAR ATINGIDO: Ativando apostas...`
+                            : `⏳ STANDBY: Conectado - Aguardando limiar ${autoBotThreshold} rodadas`
+                        : `🔄 DESCONECTADO: Clique COMEÇAR para conectar Auto Bot (limiar: ${autoBotThreshold})`
+                      : 'Auto Bot desabilitado - Controle manual'
+                    }
+                  </div>
+                  
+                  {/* 🤖 NOVO: Exibir contadores em tempo real */}
+                  {autoBotEnabled && autoBotCounters && (
+                    <div className="mt-2 p-2 bg-gray-800/50 rounded text-xs">
+                      {(() => {
+          
+                        return null;
+                      })()}
+                      <div className="text-purple-400 font-mono mb-1">📊 Contadores em tempo real:</div>
+                      <div className="grid grid-cols-3 gap-1 text-xs font-mono">
+                        <div className={`${autoBotCounters.red >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
+                          🔴 {autoBotCounters.red}
+                        </div>
+                        <div className={`${autoBotCounters.black >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
+                          ⚫ {autoBotCounters.black}
+                        </div>
+                        <div className={`${autoBotCounters.even >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
+                          🟢 {autoBotCounters.even}
+                        </div>
+                        <div className={`${autoBotCounters.odd >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
+                          🟡 {autoBotCounters.odd}
+                        </div>
+                        <div className={`${autoBotCounters.low >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
+                          🔵 {autoBotCounters.low}
+                        </div>
+                        <div className={`${autoBotCounters.high >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
+                          🟣 {autoBotCounters.high}
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Limiar: {autoBotThreshold} | Verde = Limiar atingido
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setAutoBotEnabled(!autoBotEnabled)}
+                      disabled={isOperating || forceOperatingDisplay}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
+                        autoBotEnabled 
+                          ? 'bg-purple-500/20 border border-purple-500/50' 
+                          : 'bg-gray-600/20 border border-gray-600/50'
+                      } ${
+                        isOperating || forceOperatingDisplay ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
+                          autoBotEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                    <span className={`text-xs font-mono ${
+                      autoBotEnabled ? 'text-purple-400' : 'text-gray-400'
+                    }`}>
+                      {autoBotEnabled ? 'HABILITADO' : 'DESABILITADO'}
+                    </span>
+                  </div>
+                  
+                  {autoBotEnabled && (
+                    <div className="space-y-3">
+                      {/* Configuração do Limiar */}
+                      <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
+                          <span className="text-xs font-mono text-purple-400">LIMIAR DE OPORTUNIDADE</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-mono text-gray-400">Rodadas:</span>
+                          <input
+                            type="number"
+                            min="10"
+                            max="100"
+                            value={autoBotThreshold}
+                            onChange={(e) => setAutoBotThreshold(parseInt(e.target.value) || 50)}
+                            disabled={isOperating || forceOperatingDisplay}
+                            className="w-20 h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
+                          />
+                        </div>
+                        
+                        <div className="text-xs text-gray-400 font-mono mt-2">
+                          Bot opera quando qualquer tipo de aposta atingir {autoBotThreshold} rodadas
+                        </div>
+                      </div>
+
+                      {/* Configuração da Progressão de Stake */}
+                      <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2 h-2 bg-orange-400 rounded-full"></div>
+                          <span className="text-xs font-mono text-orange-400">PROGRESSÃO DE STAKE</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-3 mb-2">
+                          <button
+                            onClick={() => setStakeProgressionEnabled(!stakeProgressionEnabled)}
+                            disabled={isOperating || forceOperatingDisplay}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${
+                              stakeProgressionEnabled 
+                                ? 'bg-orange-500/20 border border-orange-500/50' 
+                                : 'bg-gray-600/20 border border-gray-600/50'
+                            } ${
+                              isOperating || forceOperatingDisplay ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform duration-200 ${
+                                stakeProgressionEnabled ? 'translate-x-5' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                          <span className={`text-xs font-mono ${
+                            stakeProgressionEnabled ? 'text-orange-400' : 'text-gray-400'
+                          }`}>
+                            {stakeProgressionEnabled ? 'ATIVA' : 'INATIVA'}
+                          </span>
+                        </div>
+
+                        {stakeProgressionEnabled && (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-xs font-mono text-gray-400">Rodadas:</label>
+                                <input
+                                  type="number"
+                                  min="10"
+                                  max="100"
+                                  value={stakeProgressionRounds}
+                                  onChange={(e) => setStakeProgressionRounds(parseInt(e.target.value) || 30)}
+                                  disabled={isOperating || forceOperatingDisplay}
+                                  className="w-full h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 disabled:opacity-50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs font-mono text-gray-400">Multiplicador:</label>
+                                <select
+                                  value={stakeProgressionMultiplier}
+                                  onChange={(e) => setStakeProgressionMultiplier(parseFloat(e.target.value))}
+                                  disabled={isOperating || forceOperatingDisplay}
+                                  className="w-full h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 disabled:opacity-50"
+                                >
+                                  <option value="1.5">1.5x</option>
+                                  <option value="2">2x</option>
+                                  <option value="3">3x</option>
+                                  <option value="4">4x</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-xs font-mono text-gray-400">Máximo de multiplicações:</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max="10"
+                                value={stakeProgressionMaxMultiplications}
+                                onChange={(e) => setStakeProgressionMaxMultiplications(parseInt(e.target.value) || 3)}
+                                disabled={isOperating || forceOperatingDisplay}
+                                className="w-full h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 disabled:opacity-50"
+                              />
+                            </div>
+                            <div className="text-xs text-gray-400 font-mono">
+                              A cada {stakeProgressionRounds} rodadas sem sucesso, multiplica stake por {stakeProgressionMultiplier}x (máximo {stakeProgressionMaxMultiplications}x)
+                              {(isOperating || forceOperatingDisplay) && (
+                                <div className="mt-1 text-orange-400">
+                                  📊 Rodadas: {stakeProgressionRoundCounter}/{stakeProgressionRounds} | Multiplicações: {stakeProgressionCurrentMultiplications}/{stakeProgressionMaxMultiplications}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1702,13 +3644,7 @@ export default function BMGBR() {
 
 
 
-          {/* Novos Cards dos Componentes */}
-          <OperationsCard operationReport={operationReport} />
           
-          {/* 📋 NOVO: Card de Histórico Detalhado */}
-          <DetailedHistoryCard history={detailedHistory} />
-          
-          <CreditDisplay />
 
         </div>
       </div>
@@ -1786,3 +3722,4 @@ export default function BMGBR() {
     </div>
   );
 } 
+

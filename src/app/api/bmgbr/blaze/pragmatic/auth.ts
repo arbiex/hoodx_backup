@@ -1,14 +1,5 @@
-/**
- * 🧪 BOTS2 - AUTH - VERSÃO DE TESTES
- * 
- * Esta é uma cópia do sistema de autenticação original para testes
- * de novas funcionalidades sem interferir no sistema em produção.
- * 
-   * API: /api/bots2/blaze/pragmatic/
-   */
-  import { createClient } from '@supabase/supabase-js';
-  
-  // Interface para resultado de autenticação
+import { createClient } from '@supabase/supabase-js';
+
 export interface AuthResult {
   userId: string;
   originalUserId: string;
@@ -17,24 +8,23 @@ export interface AuthResult {
   timestamp: string;
 }
 
-/**
- * 🔑 Buscar token da Blaze do usuário no Supabase
- */
 export async function getUserBlazeToken(userId: string): Promise<{ success: boolean; token?: string; error?: string }> {
   try {
-    console.log('🔑 [GET-BLAZE-TOKEN] Buscando token para usuário:', userId);
+    // 🔧 CORREÇÃO: Remover prefixo "polling_" se existir
+    const cleanUserId = userId.startsWith('polling_') ? userId.replace('polling_', '') : userId;
+    
+    console.log('🔑 [GET-BLAZE-TOKEN] Buscando token para usuário:', cleanUserId);
     
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Primeiro, tentar buscar na tabela user_tokens (estrutura nova)
     const { data: tokenData, error: tokenError } = await supabase
       .from('user_tokens')
       .select('token')
       .eq('casino_code', 'BLAZE')
-      .eq('user_id', userId)
+      .eq('user_id', cleanUserId)
       .eq('is_active', true)
       .single();
 
@@ -46,11 +36,10 @@ export async function getUserBlazeToken(userId: string): Promise<{ success: bool
       };
     }
 
-    // Se não encontrar na user_tokens, buscar na users (estrutura antiga - fallback)
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('blaze_access_token')
-      .eq('id', userId)
+      .eq('id', cleanUserId)
       .single();
 
     if (userError || !userData?.blaze_access_token) {
@@ -76,9 +65,6 @@ export async function getUserBlazeToken(userId: string): Promise<{ success: bool
   }
 }
 
-/**
- * 🔐 Validar tokens vindos do client-side (apenas validação, não geração)
- */
 export async function authenticateUserFrontend(blazeToken: string, userAgent?: string, acceptLanguage?: string, realBrowserHeaders?: any): Promise<{ success: boolean; data?: { ppToken: string; jsessionId: string }; error?: string }> {
   try {
     console.log('🔐 [FRONTEND-AUTH] Validando autenticação client-side...');
@@ -106,9 +92,6 @@ export async function authenticateUserFrontend(blazeToken: string, userAgent?: s
   }
 }
 
-/**
- * ✅ Validar tokens vindos do client-side
- */
 export async function validateClientTokens(userId: string, tokens: { ppToken: string; jsessionId: string; pragmaticUserId: string }): Promise<{ success: boolean; data?: AuthResult; error?: string }> {
   try {
     console.log('🔍 [VALIDATE-CLIENT-TOKENS] Validando tokens do client...');
@@ -128,7 +111,6 @@ export async function validateClientTokens(userId: string, tokens: { ppToken: st
       };
     }
 
-    // Verificar se o usuário tem token da Blaze
     const tokenResult = await getUserBlazeToken(userId);
     if (!tokenResult.success) {
       return {
@@ -159,9 +141,6 @@ export async function validateClientTokens(userId: string, tokens: { ppToken: st
   }
 }
 
-/**
- * 🛠️ Sistema de debug (mantido para testes)
- */
 export async function debugAuth(testType: string, userId: string): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
     console.log(`🔧 [DEBUG-AUTH] Executando teste: ${testType}`);

@@ -142,7 +142,7 @@ export default function BotsMonitoringPage() {
   const botEndpoints = [
     {
       id: 'blaze-megaroulette-main',
-      name: 'Blaze MegaRoulette',
+      name: 'Blaze Mega Roulette BR',
       endpoint: '/api/bots/blaze/pragmatic/blaze-megarouletebr',
       sourcePage: '/blaze-megaroulettebr',
       description: 'Página principal - /blaze-megaroulettebr',
@@ -169,7 +169,7 @@ export default function BotsMonitoringPage() {
     },
     {
       id: 'bmgbr-copy',
-      name: 'BMGBR Copy',
+      name: 'BMGBR',
               endpoint: '/api/bmgbr/blaze/pragmatic/blaze-megarouletebr',
       sourcePage: '/bmgbr',
       description: 'Cópia teste independente - /bmgbr',

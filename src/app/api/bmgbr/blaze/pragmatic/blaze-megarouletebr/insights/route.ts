@@ -17,11 +17,15 @@ interface AuthResult {
 interface TokenStorage {
   userId: string;
   jsessionId: string;
+  ppToken: string;
+  pragmaticUserId: string;
   timestamp: number;
+  expiresAt: number;  // TTL: 30 minutos
 }
 
-// 🔥 NOVO: Armazenamento simples de jsessionId por usuário
+// 🔥 CACHE INTELIGENTE: Armazenamento com TTL para evitar geração constante
 const userTokens = new Map<string, TokenStorage>();
+const TOKEN_TTL = 30 * 60 * 1000; // 30 minutos em milissegundos
 
 // Cache de números vermelhos
 const RED_NUMBERS = new Set([
@@ -86,11 +90,14 @@ async function authenticateUser(userId: string): Promise<AuthResult> {
       pragmaticUserId: result.data.pragmaticUserId
     };
 
-    // Salvar jsessionId para uso futuro
+    // Salvar tokens completos para uso futuro com TTL
     userTokens.set(userId, {
       userId,
       jsessionId: tokens.jsessionId,
-      timestamp: Date.now()
+      ppToken: tokens.ppToken,
+      pragmaticUserId: tokens.pragmaticUserId,
+      timestamp: Date.now(),
+      expiresAt: Date.now() + TOKEN_TTL
     });
 
     console.log('✅ [INSIGHTS-AUTH] Renovação completa de tokens concluída - blazeToken → ppToken → jsessionId → URL válida');
@@ -114,13 +121,38 @@ async function authenticateUser(userId: string): Promise<AuthResult> {
 // 4. Se coincidirem, o resultado é processado automaticamente (vitória/derrota)
 // 5. Não há necessidade de intervenção manual - tudo automático via gameId
 
-// 🔥 NOVO: Função para buscar dados diretamente da API Pragmatic
+// 🔥 CACHE INTELIGENTE: Verificar se tokens ainda são válidos antes de gerar novos
+function isTokenValid(tokenData: TokenStorage | undefined): boolean {
+  if (!tokenData) return false;
+  if (Date.now() > tokenData.expiresAt) {
+    console.log(`⏰ [INSIGHTS-CACHE] Token expirado para usuário: ${tokenData.userId}`);
+    return false;
+  }
+  return true;
+}
+
+// 🧹 LIMPEZA AUTOMÁTICA: Remover tokens expirados
+function cleanupExpiredTokens() {
+  const now = Date.now();
+  for (const [userId, tokenData] of userTokens.entries()) {
+    if (now > tokenData.expiresAt) {
+      userTokens.delete(userId);
+      console.log(`🗑️ [INSIGHTS-CACHE] Token expirado removido para usuário: ${userId}`);
+    }
+  }
+}
+
+// 🔥 OTIMIZADO: Função para buscar dados REUTILIZANDO tokens existentes
 async function fetchGameData(userId: string, forceAuth = false) {
   try {
+    // 🧹 LIMPEZA AUTOMÁTICA: Remover tokens expirados antes de iniciar
+    cleanupExpiredTokens();
+    
     let tokenData = userTokens.get(userId);
     
-    // Se não tem token ou forçar autenticação, autenticar
-    if (!tokenData || forceAuth) {
+    // 🎯 VERIFICAÇÃO INTELIGENTE: Só gerar tokens se necessário
+    if (!isTokenValid(tokenData) || forceAuth) {
+      console.log(`🔄 [INSIGHTS-CACHE] Gerando novos tokens para usuário: ${userId} (força: ${forceAuth})`);
       const authResult = await authenticateUser(userId);
       if (!authResult.success) {
         return {
@@ -129,12 +161,14 @@ async function fetchGameData(userId: string, forceAuth = false) {
         };
       }
       tokenData = userTokens.get(userId);
+    } else {
+      console.log(`✅ [INSIGHTS-CACHE] Token válido encontrado para usuário: ${userId} (expira em ${Math.round((tokenData!.expiresAt - Date.now()) / 1000 / 60)} minutos)`);
     }
 
     if (!tokenData) {
       return {
         success: false,
-        error: 'Erro ao obter token de sessão'
+        error: 'Erro ao obter token de sessão após autenticação'
       };
     }
 
@@ -342,9 +376,10 @@ export async function POST(request: NextRequest) {
       case 'stop':
         // Limpar token do usuário
         userTokens.delete(user_id);
+        console.log(`🗑️ [INSIGHTS-CACHE] Cache limpo para usuário: ${user_id}`);
         return NextResponse.json({
           success: true,
-          message: 'Coleta de insights parada com sucesso'
+          message: 'Coleta de insights parada e cache limpo com sucesso'
         });
 
       case 'get':
@@ -373,9 +408,15 @@ export async function POST(request: NextRequest) {
 // Handler para requisições GET
 export async function GET() {
   try {
+    // 🧹 LIMPEZA AUTOMÁTICA antes de retornar status
+    cleanupExpiredTokens();
+    
+    const now = Date.now();
     const tokenStatus = Array.from(userTokens.entries()).map(([userId, token]) => ({
       userId,
-      tokenAge: Date.now() - token.timestamp,
+      tokenAge: now - token.timestamp,
+      timeToExpire: token.expiresAt - now,
+      isValid: isTokenValid(token),
       hasToken: !!token.jsessionId
     }));
 
@@ -384,7 +425,14 @@ export async function GET() {
       data: {
         tokenStatus,
         totalActiveUsers: userTokens.size,
-        timestamp: Date.now()
+        validTokens: tokenStatus.filter(t => t.isValid).length,
+        expiredTokens: tokenStatus.filter(t => !t.isValid).length,
+        timestamp: now,
+        cacheStats: {
+          totalCacheSize: userTokens.size,
+          tokenTTL: TOKEN_TTL,
+          cacheHitsPossible: tokenStatus.filter(t => t.isValid).length
+        }
       }
     });
   } catch (error) {

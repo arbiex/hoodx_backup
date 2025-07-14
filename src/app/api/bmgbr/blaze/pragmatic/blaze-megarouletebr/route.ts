@@ -910,8 +910,8 @@ async function checkForNewResults(userId: string): Promise<void> {
   const hasActiveBets = operation.waitingForResult && !!operation.lastGameId;
   
   try {
-    // 🎯 CONSULTAR: insights API local
-    const response = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/bmgbr/blaze/pragmatic/blaze-megarouletebr/insights`, {
+    // 🎯 CONSULTAR: insights API local usando função utilitária
+    const response = await fetch(`${getBaseUrl()}/api/bmgbr/blaze/pragmatic/blaze-megarouletebr/insights`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

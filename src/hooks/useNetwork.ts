@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { getBaseUrl } from '@/lib/utils'
 
 export interface NetworkStats {
   total_referrals: number
@@ -102,9 +103,8 @@ export function useNetwork() {
         return
       }
 
-      // URL base da aplicação
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hoodx.ai'
-      const referralUrl = `${baseUrl}/invite?ref=${agentData.agent_code}`
+      // URL base da aplicação usando função utilitária
+      const referralUrl = `${getBaseUrl()}/invite?ref=${agentData.agent_code}`
 
       const referralData = {
         referral_code: agentData.agent_code,

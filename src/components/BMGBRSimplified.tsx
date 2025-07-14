@@ -11,6 +11,7 @@ import { useNotifications } from './BMGBRNotificationSystem';
 export default function BMGBRSimplified() {
   const { 
     state, 
+    dispatch,
     setOperating, 
     setOperationError, 
     setOperationSuccess,
@@ -148,12 +149,12 @@ export default function BMGBRSimplified() {
                   <select
                     value={state.m4DirectBetType}
                     onChange={(e) => {
-                      // Dispatch manual já que não temos setter direto
-                      // state.dispatch({ type: 'SET_M4_DIRECT_BET_TYPE', payload: e.target.value as any });
+                      dispatch({ type: 'SET_M4_DIRECT_BET_TYPE', payload: e.target.value as typeof state.m4DirectBetType });
                     }}
                     className="w-full p-2 bg-gray-800 border border-gray-600 rounded font-mono text-sm"
                     disabled={state.isOperating}
                   >
+                    <option value="await">Aguardar</option>
                     <option value="red">Vermelho</option>
                     <option value="black">Preto</option>
                     <option value="even">Par</option>

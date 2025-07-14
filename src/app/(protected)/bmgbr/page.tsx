@@ -62,6 +62,14 @@ export default function BMGBR() {
   // 💰 NOVO: Valores de stake predefinidos
   const STAKE_OPTIONS = [0.50, 1.00, 1.50, 2.00, 2.50, 3.00, 3.50, 4.00, 4.50, 5.00, 6.00, 7.00, 8.00, 9.00, 10.00];
 
+  // 🚀 NOVO: Estados para progressão automática de stake
+  const [autoProgressionEnabled, setAutoProgressionEnabled] = useState<boolean>(false);
+  const [progressionInterval, setProgressionInterval] = useState<number>(10); // a cada X apostas
+  const [progressionIncrement, setProgressionIncrement] = useState<number>(0.50); // aumentar R$ X
+  const [progressionBetCounter, setProgressionBetCounter] = useState<number>(0); // contador atual de apostas
+  const [progressionMaxStake, setProgressionMaxStake] = useState<number>(10.00); // stake máxima
+  const [progressionPaused, setProgressionPaused] = useState<boolean>(false); // pausar por limite
+
   // Estados para WebSocket logs
   const [websocketLogs, setWebsocketLogs] = useState<Array<{ 
     timestamp: number; 
@@ -85,7 +93,7 @@ export default function BMGBR() {
 
   // 📈 NOVO: Estado para rastreamento do histórico de apostas
   const [betHistory, setBetHistory] = useState<Array<{ 
-    type: 'win' | 'loss'; 
+    type: 'win' | 'loss' | 'placed'; 
     timestamp: number; 
     value: number;
     gameId?: string;
@@ -108,9 +116,8 @@ export default function BMGBR() {
       profit: number;
       startedAt: number;
     };
-    // 🤖 NOVO: Propriedades do Auto Bot
-    isStandbyMode?: boolean;
-    m4DirectBetType?: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
+      // M4 Direct mode
+  m4DirectBetType?: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
   } | null>(null);
 
   // Estados de conexão
@@ -241,32 +248,7 @@ export default function BMGBR() {
 
   // Estados para controle de segurança baseado em status foram removidos - apenas M4 Direto
 
-  // 🎯 NOVO: Estado para controlar Meta de Lucro (null = desabilitado)
-  const [stopGainPercentage, setStopGainPercentage] = useState<number | null>(null);
-
-  // 🤖 NOVO: Estados para Auto Bot
-  const [autoBotEnabled, setAutoBotEnabled] = useState(false);
-  const [autoBotThreshold, setAutoBotThreshold] = useState(50);
-  const [autoBotCurrentOpportunity, setAutoBotCurrentOpportunity] = useState<string | null>(null);
-  
-  // 🤖 NOVO: Contadores em tempo real para Auto Bot
-  const [autoBotCounters, setAutoBotCounters] = useState<{
-    red: number;
-    black: number;
-    even: number;
-    odd: number;
-    low: number;
-    high: number;
-  } | null>(null);
-  
-  // 🤖 NOVO: Último resultado processado para evitar duplicatas
-  const [lastProcessedGameId, setLastProcessedGameId] = useState<string | null>(null);
-  
-  // 🤖 NOVO: Indicador de atualização recente dos contadores
-  const [recentCounterUpdate, setRecentCounterUpdate] = useState<boolean>(false);
-  
-  // 🤖 NOVO: Indicador de zero detectado (não conta nos contadores)
-  const [recentZeroDetected, setRecentZeroDetected] = useState<boolean>(false);
+  // Removed: Auto Bot and Stop Gain states
   
   // 🔧 NOVO: Estados para controlar se debug está rodando
   const [debugRunning, setDebugRunning] = useState<boolean>(false);
@@ -285,12 +267,7 @@ export default function BMGBR() {
   const [stakeProgressionRoundCounter, setStakeProgressionRoundCounter] = useState(0);
   const [stakeProgressionInitialStake, setStakeProgressionInitialStake] = useState(0.50);
 
-  // 🎯 NOVO: Estados para slider da Meta de Lucro
-  const [stopGainEnabled, setStopGainEnabled] = useState(false);
-  const [stopGainSliderValue, setStopGainSliderValue] = useState(50);
-
-  // 🎯 NOVO: Flag para identificar parada automática por meta de lucro
-  const [isStopGainTriggered, setIsStopGainTriggered] = useState(false);
+  // Removed: Stop Gain states
 
   // Estado para controlar regra de frequência foi removido - apenas M4 Direto
 
@@ -298,7 +275,7 @@ export default function BMGBR() {
   const m4DirectModeEnabled = true;
 
   // 🔥 NOVO: Estado para tipo de aposta do modo M4 direto
-  const [m4DirectBetType, setM4DirectBetType] = useState<'red' | 'black' | 'even' | 'odd' | 'low' | 'high'>('red');
+  const [m4DirectBetType, setM4DirectBetType] = useState<'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high'>('await');
 
   // 🔄 NOVO: Estado para controlar última atualização dos dados históricos
   const [lastHistoryUpdate, setLastHistoryUpdate] = useState<Date | null>(null);
@@ -366,39 +343,7 @@ export default function BMGBR() {
     }
   }, []);
 
-  // 🎯 EFEITO: Sincronizar slider da Meta de Lucro com o estado usado na API
-  useEffect(() => {
-    if (stopGainEnabled) {
-      setStopGainPercentage(stopGainSliderValue);
-    } else {
-      setStopGainPercentage(null);
-    }
-  }, [stopGainEnabled, stopGainSliderValue]);
-
-  // 🎯 EFEITO: Monitorar Meta de Lucro e parar automaticamente
-  useEffect(() => {
-    if (stopGainEnabled && (isOperating || forceOperatingDisplay) && operationReport) {
-      const baseAmount = totalMartingaleAmount * 6; // Base para cálculo
-      const targetProfit = (baseAmount * stopGainSliderValue) / 100;
-      const currentProfit = operationReport.summary.profit;
-      
-      if (currentProfit >= targetProfit) {
-        // Definir flag antes de parar
-        setIsStopGainTriggered(true);
-        
-        // Parar automaticamente (não resetar stop gain quando parar por meta)
-        if (isOperating || forceOperatingDisplay) {
-          handleOperate();
-          
-          // Mostrar mensagem de sucesso específica para meta de lucro
-          setTimeout(() => {
-            setOperationSuccess(`🎯 Meta de Lucro atingida! Meta: ${formatCurrency(targetProfit)}, Lucro: ${formatCurrency(currentProfit)}`);
-            setIsStopGainTriggered(false); // Resetar flag após mostrar mensagem
-          }, 1000);
-        }
-      }
-    }
-  }, [stopGainEnabled, stopGainSliderValue, isOperating, forceOperatingDisplay, operationReport?.summary.profit, totalMartingaleAmount]);
+  // Removed: Stop Gain effects
 
   // 🔥 NOVO: Inicializar coleta de insights automaticamente
   useEffect(() => {
@@ -531,67 +476,217 @@ export default function BMGBR() {
     setOperationReport(null);
     setOperationState(null);
     setLastTenResults([]);
+    
+    // 🚀 NOVA: Resetar contador de progressão automática
+    resetProgressionCounter();
   };
+
+  // 🚀 NOVA FUNÇÃO: Resetar contador de progressão automática
+  const resetProgressionCounter = () => {
+    setProgressionBetCounter(0);
+    setProgressionPaused(false);
+  };
+
+  // 🚀 NOVA FUNÇÃO: Verificar se progressão pode ser reativada
+  const checkProgressionReactivation = () => {
+    if (progressionPaused && selectedStake < progressionMaxStake) {
+      setProgressionPaused(false);
+      console.log('🚀 Progressão automática reativada - Limite aumentado');
+    }
+  };
+
+  // 🚀 NOVA FUNÇÃO: Processar aposta para progressão automática
+  const processProgressionBet = async () => {
+    if (!autoProgressionEnabled || progressionPaused) return;
+
+    const newCounter = progressionBetCounter + 1;
+    setProgressionBetCounter(newCounter);
+
+    // Verificar se é hora de aplicar progressão
+    if (newCounter >= progressionInterval) {
+      const newStake = selectedStake + progressionIncrement;
+      
+      // Verificar se não ultrapassou o limite máximo
+      if (newStake <= progressionMaxStake) {
+        // Aplicar nova stake usando função existente
+        await updateStakeDirectly(newStake);
+        
+        // Resetar contador para próxima progressão
+        setProgressionBetCounter(0);
+        
+        console.log(`🚀 Progressão automática aplicada: R$ ${selectedStake.toFixed(2)} → R$ ${newStake.toFixed(2)}`);
+      } else {
+        // Pausar progressão se atingiu limite
+        setProgressionPaused(true);
+        setProgressionBetCounter(0); // Resetar contador também
+        console.log(`🛑 Progressão automática pausada - Limite máximo de R$ ${progressionMaxStake.toFixed(2)} atingido`);
+      }
+    }
+  };
+
+  // 🚀 NOVA FUNÇÃO: Calcular quantas apostas faltam para próxima progressão
+  const getProgressionStatus = () => {
+    if (!autoProgressionEnabled) return null;
+    if (progressionPaused) return 'Pausada - Limite atingido';
+    
+    const remaining = progressionInterval - progressionBetCounter;
+    let status;
+    
+    if (remaining > 0) {
+      status = `Próxima em: ${remaining} apostas`;
+    } else if (remaining === 0) {
+      status = 'Pendente - Aguardando derrota';
+    } else {
+      status = 'Aplicando progressão...';
+    }
+    
+    // Debug: Mostrar contadores no console
+    console.log(`📊 Status progressão: ${status} (contador: ${progressionBetCounter}/${progressionInterval})`);
+    
+    return status;
+  };
+
+  // 🚀 NOVA FUNÇÃO: Enviar configurações de progressão para o backend
+  const updateProgressionSettings = async () => {
+    if (!userIdRef.current) return;
+    
+    try {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: userIdRef.current,
+          action: 'update-progression',
+          progressionSettings: {
+            enabled: autoProgressionEnabled,
+            interval: progressionInterval,
+            increment: progressionIncrement,
+            maxStake: progressionMaxStake,
+            paused: progressionPaused
+          }
+        }),
+      });
+      
+      if (!response.ok) {
+        console.error('Erro ao atualizar configurações de progressão:', response.statusText);
+      }
+    } catch (error) {
+      console.error('Erro ao enviar configurações de progressão:', error);
+    }
+  };
+
+  // 🚀 EFEITO: Atualizar configurações no backend quando mudarem
+  useEffect(() => {
+    updateProgressionSettings();
+  }, [autoProgressionEnabled, progressionInterval, progressionIncrement, progressionMaxStake, progressionPaused]);
+  
+  // 🚀 EFEITO: Sincronizar configurações na inicialização
+  useEffect(() => {
+    if (userIdRef.current) {
+      updateProgressionSettings();
+    }
+  }, [userIdRef.current]);
 
   // 📈 NOVA FUNÇÃO: Processar logs para identificar vitórias e derrotas
   const processBetResults = (logs: any[]) => {
-    // Procurar por logs específicos de vitória e derrota do backend
-    const resultLogs = logs.filter(log => 
-      log.message.includes('✅ VITÓRIA M') || 
-      log.message.includes('❌ DERROTA M')
+    // 🎯 NOVA LÓGICA: Procurar por logs de apostas realizadas (mais direto e confiável)
+    const betLogs = logs.filter(log => 
+      log.message.includes('🎯 Aposta realizada:')
     );
 
-    resultLogs.forEach(log => {
-      const isWin = log.message.includes('✅ VITÓRIA M');
-      const isLoss = log.message.includes('❌ DERROTA M');
-
-      if (isWin || isLoss) {
-        // Extrair informações específicas das mensagens do backend
-        // Exemplo: "✅ VITÓRIA M3! Apostou Vermelho R$ 21.00 → Veio Vermelho"
-        // Exemplo: "❌ DERROTA M2! Apostou Preto R$ 20.00 → Veio Vermelho"
-        
-        const gameIdMatch = log.message.match(/Game[:\s]+(\d+)/i);
-        const martingaleLevelMatch = log.message.match(/M(\d+)!/);
+    betLogs.forEach(log => {
+      // Extrair informações da aposta realizada
+      // Exemplo: "🎯 Aposta realizada: R$ 5.00 no Vermelho - 2/5"
         const valueMatch = log.message.match(/R\$\s*([\d,]+\.?\d*)/);
-        
-        // Criar identificador único baseado no timestamp e nível de martingale
-        const uniqueId = `${log.timestamp || Date.now()}-${martingaleLevelMatch?.[1] || 'unknown'}`;
+      const colorMatch = log.message.match(/no\s+(\w+)/i);
+      
+      // 🚀 NOVO: Extrair contador de progressão do backend (formato "- X/Y")
+      const progressionMatch = log.message.match(/- (\d+)\/(\d+)/);
+      
+      // Criar identificador único baseado no timestamp
+      const uniqueId = `${log.timestamp || Date.now()}`;
 
         const newBet = {
-          type: isWin ? 'win' as const : 'loss' as const,
+        type: 'placed' as const, // Novo tipo para apostar realizada
           timestamp: log.timestamp || Date.now(),
           value: valueMatch ? parseFloat(valueMatch[1].replace(',', '')) : 0,
-          gameId: gameIdMatch ? gameIdMatch[1] : uniqueId,
-          martingaleLevel: martingaleLevelMatch ? parseInt(martingaleLevelMatch[1]) : undefined
+        gameId: uniqueId,
+        color: colorMatch ? colorMatch[1] : 'unknown'
         };
 
-        // Verificar se já existe este resultado no histórico (evitar duplicatas)
+      // Verificar se já existe esta aposta no histórico (evitar duplicatas)
         setBetHistory(prev => {
           const exists = prev.some(bet => 
-            Math.abs(bet.timestamp - newBet.timestamp) < 1000 && // Mesmo segundo
-            bet.martingaleLevel === newBet.martingaleLevel && // Mesmo nível
-            bet.type === newBet.type // Mesmo resultado
+          Math.abs(bet.timestamp - newBet.timestamp) < 2000 // Mesmos 2 segundos
           );
           
           if (!exists) {
-            // 📈 NOVO: Aplicar progressão de stake se Auto Bot estiver ativo
-            if (autoBotEnabled && stakeProgressionEnabled && isWin) {
-              // Vitória: resetar progressão de stake
-              setTimeout(() => {
-                resetStakeProgression();
-              }, 1000);
-            } else if (autoBotEnabled && stakeProgressionEnabled && isLoss) {
-              // Derrota: aplicar progressão de stake
-              setTimeout(() => {
-                applyStakeProgression();
-              }, 1000);
+          // 🚀 SINCRONIZAR COM BACKEND: Atualizar contador local baseado no backend
+          if (progressionMatch) {
+            const currentCounter = parseInt(progressionMatch[1]);
+            const totalInterval = parseInt(progressionMatch[2]);
+            
+            // Atualizar estados locais para sincronizar com backend
+            setProgressionBetCounter(currentCounter);
+            setProgressionInterval(totalInterval);
+            
+            console.log(`🔄 Sincronizando progressão: ${currentCounter}/${totalInterval}`);
+            
+            // Debug: Mostrar diferença entre contador backend e frontend
+            if (progressionBetCounter !== currentCounter) {
+              console.log(`⚠️ Dessincronização detectada - Frontend: ${progressionBetCounter}, Backend: ${currentCounter}`);
+            }
+          } else {
+            // Fallback: Se não houver contador no log, processar como antes
+            processProgressionBet();
             }
             
             return [...prev, newBet];
           }
+        
           return prev;
         });
+    });
+    
+    // 🚀 NOVO: Processar logs de reset de progressão
+    const resetLogs = logs.filter(log =>
+      log.message.includes('🔄 Contador de progressão automática resetado')
+    );
+    
+    resetLogs.forEach(log => {
+      // Resetar contador local para sincronizar com backend
+      setProgressionBetCounter(0);
+      console.log('🔄 Contador de progressão resetado pelo backend');
+    });
+    
+    // 🚀 NOVO: Processar logs de progressão aplicada
+    const progressionAppliedLogs = logs.filter(log =>
+      log.message.includes('🚀 Progressão aplicada:')
+    );
+    
+    progressionAppliedLogs.forEach(log => {
+      // Resetar contador local quando progressão for aplicada
+      setProgressionBetCounter(0);
+      console.log('🚀 Progressão aplicada - contador resetado');
+      
+      // Extrair nova stake do log para atualizar interface
+      const stakeMatch = log.message.match(/→ R\$ ([\d,]+\.?\d*)/);
+      if (stakeMatch) {
+        const newStake = parseFloat(stakeMatch[1].replace(',', ''));
+        setSelectedStake(newStake);
+        console.log(`💰 Nova stake aplicada: R$ ${newStake.toFixed(2)}`);
       }
+    });
+    
+    // 🚀 NOVO: Processar logs de progressão pendente
+    const progressionPendingLogs = logs.filter(log =>
+      log.message.includes('📊 Progressão pendente: Será aplicada após próxima derrota')
+    );
+    
+    progressionPendingLogs.forEach(log => {
+      console.log('📊 Progressão pendente detectada - aguardando derrota para aplicar');
     });
   };
 
@@ -633,18 +728,25 @@ export default function BMGBR() {
   const resetSafetySettings = () => {
     // Estados de status seguro e frequência removidos - apenas M4 direto
     // 🔥 MODO M4 DIRETO: sempre habilitado nativamente
-    setM4DirectBetType('red'); // 🔥 NOVO: Resetar tipo de aposta do modo M4 direto
+    setM4DirectBetType('await'); // 🔥 NOVO: Resetar tipo de aposta para aguardar
     setRealModeActivationAttempted(false);
     // 🔄 NOVO: Limpar também mensagens de erro/sucesso
     setOperationError(null);
     setOperationSuccess(null);
-    console.log('🔄 Configurações resetadas - Bot funcionará em modo M4 direto');
+    // 🚀 NOVA: Resetar progressão automática
+    resetProgressionCounter();
+    console.log('🔄 Configurações resetadas - Bot funcionará em modo aguardar');
   };
 
   // 🔄 NOVO: Resetar configurações de segurança na inicialização
   useEffect(() => {
     resetSafetySettings();
   }, []);
+
+  // 🚀 NOVA: Verificar reativação da progressão quando limite máximo muda
+  useEffect(() => {
+    checkProgressionReactivation();
+  }, [progressionMaxStake, selectedStake]);
 
   // ✅ NOVO: Verificar estado quando conexão mudar
   useEffect(() => {
@@ -681,7 +783,7 @@ export default function BMGBR() {
 
   // 🤖 REMOVIDO: Monitoramento de limiares não é mais necessário - agora é em tempo real via WebSocket
 
-  // 🚀 REMOVIDO: Verificações complexas não são mais necessárias
+  // �� REMOVIDO: Verificações complexas não são mais necessárias
 
   // 🎯 REMOVIDO: Verificação imediata não é mais necessária
 
@@ -1782,7 +1884,7 @@ export default function BMGBR() {
   };
 
   // 💰 NOVA FUNÇÃO: Atualizar função de início de operação para usar a sequência personalizada
-  const startOperation = async (tipValue: number, forcedBetType?: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | 'standby') => {
+  const startOperation = async (tipValue: number, forcedBetType?: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | 'standby') => {
     try {
     setOperationLoading(true);
     setOperationError(null);
@@ -1901,7 +2003,7 @@ export default function BMGBR() {
             hardwareConcurrency: navigator.hardwareConcurrency,
             connectionType: (navigator as any).connection?.effectiveType
           },
-          stopGainPercentage: stopGainPercentage, // <-- Enviar o estado da Meta de Lucro
+          // Removed: stopGainPercentage
           // 🔥 NOVO: Enviar configuração do modo M4 direto
           m4DirectModeEnabled: m4DirectModeEnabled,
           // 🔥 CORREÇÃO: Não enviar tipo de aposta em modo standby
@@ -1997,11 +2099,7 @@ export default function BMGBR() {
         // Estados pendentes removidos
         monitoringRef.current = false;
         
-        // 🎯 NOVO: Resetar meta de lucro apenas se não foi parada automática
-        if (!isStopGainTriggered) {
-          setStopGainEnabled(false);
-          setStopGainPercentage(null);
-        }
+        // Removed: Stop gain reset
           
         // ✅ CORREÇÃO: Forçar atualização imediata do estado
         
@@ -2010,12 +2108,7 @@ export default function BMGBR() {
         setOperationError(errorMessage);
         // Em caso de erro, também liberar a exibição forçada
         setForceOperatingDisplay(false);
-        // 🎯 NOVO: Resetar meta de lucro em caso de erro
-        if (!isStopGainTriggered) {
-          setStopGainEnabled(false);
-          setStopGainPercentage(null);
-        }
-        setIsStopGainTriggered(false); // Sempre resetar o flag em caso de erro
+        // Removed: Stop gain error reset
       } finally {
         setOperationLoading(false);
       }
@@ -2026,58 +2119,7 @@ export default function BMGBR() {
         return;
       }
 
-      // 🤖 NOVO: Se Auto Bot está ativo, tirar "foto" inicial e verificar limiares
-      if (autoBotEnabled) {
-
-        
-        // 📸 Tirar foto inicial dos valores atuais e verificar limiares
-        const snapshotResult = captureInitialAutoBotSnapshot();
-        
-        setOperationError(null);
-        
-        if (snapshotResult.hasThresholdMet && snapshotResult.bestOpportunity) {
-          // 🎯 LIMIAR JÁ ATINGIDO: Configurar tipo e iniciar apostas
-          setM4DirectBetType(snapshotResult.bestOpportunity.type as typeof m4DirectBetType);
-          setAutoBotCurrentOpportunity(snapshotResult.bestOpportunity.label);
-          
-          console.log(`🎯 Auto Bot: Limiar já atingido! ${snapshotResult.bestOpportunity.label} = ${snapshotResult.bestOpportunity.value} rodadas`);
-          setOperationSuccess(`🎯 Auto Bot: Apostando em ${snapshotResult.bestOpportunity.label} (${snapshotResult.bestOpportunity.value} rodadas)`);
-        } else {
-          // ⏳ NENHUM LIMIAR ATINGIDO: Conectar em modo standby (sem apostas)
-          console.log('⏳ Auto Bot: Nenhum limiar atingido - conectando em modo standby...');
-          setOperationSuccess(`⏳ Auto Bot: Aguardando algum tipo atingir ${autoBotThreshold} rodadas...`);
-        }
-        
-        // ✅ NOVO: Limpar logs e forçar exibição como "preparando"
-        setWebsocketLogs([]);
-        setLastTenResults([]);
-        setForceOperatingDisplay(true);
-        
-        // 🔄 NOVO: Atualizar dados históricos antes de conectar
-        try {
-          await loadFullHistoryRecords();
-        } catch (error) {
-          console.error('Erro ao atualizar dados históricos:', error);
-        }
-        
-        // ✅ NOVO: Timeout menor para modo standby
-        setTimeout(() => {
-          setForceOperatingDisplay(false);
-        }, 5000);
-
-        // Conectar e iniciar monitoramento em tempo real
-        const tipValue = martingaleSequence[0];
-        
-        // 🎯 Se limiar atingido, usar o tipo correto; senão, usar modo standby
-        if (snapshotResult.hasThresholdMet && snapshotResult.bestOpportunity) {
-          await startOperation(tipValue, snapshotResult.bestOpportunity.type as any);
-        } else {
-          await startOperation(tipValue, 'standby' as any); // Modo standby especial
-        }
-        
-        
-        return;
-      }
+      // Removed: Auto Bot logic
 
       // ✅ CORREÇÃO: Sempre conectar no modo M4 direto
       // Verificações de status removidas - modo M4 direto apenas
@@ -2150,18 +2192,7 @@ export default function BMGBR() {
           if (!forceOperatingDisplay && isOperating !== apiOperationActive) {
             setIsOperating(apiOperationActive);
             
-            // 🤖 NOVO: Resetar contadores quando operação terminar
-            if (isOperating && !apiOperationActive && autoBotEnabled) {
-              setTimeout(() => {
-                resetStakeProgression(); // Resetar progressão
-                setAutoBotCurrentOpportunity(null); // Limpar oportunidade atual
-                setAutoBotCounters(null); // Resetar contadores para nova operação
-                setLastProcessedGameId(null); // Resetar ID do último resultado processado
-                setRecentCounterUpdate(false); // Resetar indicador de atualização
-                setRecentZeroDetected(false); // Resetar indicador de zero
-        
-              }, 2000);
-            }
+            // Removed: Auto Bot counter reset
           }
           
           // 🔄 Se desconectado, garantir que isOperating seja false - APENAS SE NÃO ESTIVER FORÇANDO EXIBIÇÃO
@@ -2185,18 +2216,7 @@ export default function BMGBR() {
             processBetResults(result.data.logs);
           }
           
-          // 🤖 NOVO: Atualizar contadores do Auto Bot com resultados do WebSocket
-          if (result.data.lastTenResults && result.data.lastTenResults.length > 0) {
-            const latestResult = result.data.lastTenResults[0]; // Resultado mais recente
-            if (latestResult && latestResult.number && latestResult.color && latestResult.gameId) {
 
-              updateAutoBotCounters({
-                number: latestResult.number,
-                color: latestResult.color,
-                gameId: latestResult.gameId
-              });
-            }
-          }
           
           // 🛑 NOVO: Capturar controle do botão "parar" baseado no modo
           if (result.data.operationState?.stopButtonControl) {
@@ -2274,11 +2294,46 @@ export default function BMGBR() {
       body: JSON.stringify({
         userId: userIdRef.current,
         action: 'update-strategy',
-                    stopGainPercentage: stopGainEnabled ? stopGainSliderValue : null, // <-- Enviar o estado da Meta de Lucro
+                    // Removed: stopGainPercentage
         selectedStake: selectedStake // <-- Enviar o stake selecionado
       })
     });
-  }, [stopGainEnabled, stopGainSliderValue, selectedStake]);
+        }, [selectedStake]);
+
+  // 🔥 NOVO: Atualizar tipo de aposta dinamicamente durante operação
+  const previousBetTypeRef = useRef<string | null>(null);
+  
+  useEffect(() => {
+    if (!userIdRef.current || !isOperating) return;
+    
+    // Evitar chamadas desnecessárias - só executar se o tipo de aposta realmente mudou
+    if (previousBetTypeRef.current === m4DirectBetType) return;
+    
+    previousBetTypeRef.current = m4DirectBetType;
+
+    const updateBetType = async () => {
+      try {
+        const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userIdRef.current,
+            action: 'update-bet-type',
+            m4DirectBetType: m4DirectBetType === 'await' ? 'await' : m4DirectBetType
+          })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+          console.log('Tipo de aposta atualizado:', result.message);
+        }
+      } catch (error) {
+        console.error('Erro ao atualizar tipo de aposta:', error);
+      }
+    };
+
+    updateBetType();
+  }, [m4DirectBetType, isOperating]);
 
 
   useEffect(() => {
@@ -2365,31 +2420,7 @@ export default function BMGBR() {
     // Verificações de status e frequência removidas - modo M4 direto apenas
   }, [isOperating, operationState, realModeActivationAttempted, m4DirectModeEnabled]);
 
-  // 🤖 NOVO: Efeito para carregar dados históricos quando Auto Bot for habilitado
-  useEffect(() => {
-    if (autoBotEnabled && fullHistoryRecords.length === 0) {
-      
-      loadFullHistoryRecords();
-    }
-  }, [autoBotEnabled]);
-
-  // 🤖 NOVO: Efeito para capturar snapshot inicial quando dados históricos estiverem carregados
-  useEffect(() => {
-    if (autoBotEnabled && fullHistoryRecords.length > 0 && !autoBotCounters) {
-      
-      const snapshot = captureInitialAutoBotSnapshot();
-      if (snapshot.hasThresholdMet) {
-        console.log('🎯 Auto Bot: Limiar já atingido na foto inicial!', snapshot.bestOpportunity);
-      }
-    }
-  }, [autoBotEnabled, fullHistoryRecords.length, autoBotCounters]);
-
-  // 🤖 NOVO: Efeito para monitorar mudanças nos contadores
-  useEffect(() => {
-    if (autoBotCounters) {
-      
-    }
-  }, [autoBotCounters]);
+  // Removed: Auto Bot effects
 
   // 🔧 NOVO: Efeito para detectar mudanças no estado de "aguardando resultado"
   useEffect(() => {
@@ -2425,6 +2456,7 @@ export default function BMGBR() {
       setPreviousWaitingState(false);
       setDebugHidden(false); // Resetar também o estado de oculto
       setLastProcessedInsightGameId(null); // Limpar histórico de processamento
+      previousBetTypeRef.current = null; // Resetar referência do tipo de aposta
     }
   }, [isOperating, forceOperatingDisplay]);
 
@@ -2446,255 +2478,22 @@ export default function BMGBR() {
 
   // 🤖 REMOVIDO: Função monitorOpportunities não é mais necessária - usando contadores em tempo real
 
-  // 🤖 NOVO: Função para tirar "foto" inicial dos valores quando começar
-  const captureInitialAutoBotSnapshot = () => {
-    if (!autoBotEnabled) return { hasThresholdMet: false, bestOpportunity: null };
+  // Removed: Auto Bot snapshot function
 
-    // 🔧 VERIFICAÇÃO: Garantir que há dados históricos carregados
-    if (fullHistoryRecords.length === 0) {
-      return { hasThresholdMet: false, bestOpportunity: null };
-    }
+  // Removed: Auto Bot counter update function
 
-    const comparison = calculateYesterdayComparison();
-    
-    if (!comparison.hasData) {
-      return { hasThresholdMet: false, bestOpportunity: null };
-    }
 
-    // 🔧 CORREÇÃO: Extrair valores corretamente das strings
-    const parseRounds = (value: string | number): number => {
-      if (typeof value === 'number') return value;
-      if (typeof value === 'string') {
-        if (value === '--') return 0;
-        const numericValue = parseInt(value.replace('r', '').replace('--', '0'));
-        return isNaN(numericValue) ? 0 : numericValue;
-      }
-      return 0;
-    };
-
-    const redRounds = parseRounds(comparison.roundsSinceLastSequence?.red || 0);
-    const blackRounds = parseRounds(comparison.roundsSinceLastSequence?.black || 0);
-    const evenRounds = parseRounds(comparison.roundsSinceLastSequence?.even || 0);
-    const oddRounds = parseRounds(comparison.roundsSinceLastSequence?.odd || 0);
-    const lowRounds = parseRounds(comparison.roundsSinceLastSequence?.low || 0);
-    const highRounds = parseRounds(comparison.roundsSinceLastSequence?.high || 0);
-
-    // Salvar "foto" inicial
-    const initialCounters = {
-      red: redRounds,
-      black: blackRounds,
-      even: evenRounds,
-      odd: oddRounds,
-      low: lowRounds,
-      high: highRounds
-    };
-    
-    setAutoBotCounters(initialCounters);
-    
-    // 🎯 VERIFICAR: Se já existe algum limiar atingido na foto inicial
-    const opportunities = [
-      { type: 'red', value: redRounds, label: 'VERMELHO' },
-      { type: 'black', value: blackRounds, label: 'PRETO' },
-      { type: 'even', value: evenRounds, label: 'PAR' },
-      { type: 'odd', value: oddRounds, label: 'ÍMPAR' },
-      { type: 'low', value: lowRounds, label: 'BAIXAS' },
-      { type: 'high', value: highRounds, label: 'ALTAS' }
-    ];
-
-    const validOpportunities = opportunities.filter(op => op.value >= autoBotThreshold);
-    
-    if (validOpportunities.length > 0) {
-      const bestOpportunity = validOpportunities.reduce((best, current) => 
-        current.value > best.value ? current : best
-      );
-      
-      return { hasThresholdMet: true, bestOpportunity };
-    }
-    
-    return { hasThresholdMet: false, bestOpportunity: null };
-  };
-
-  // 🤖 NOVO: Função para atualizar contadores com base nos resultados do WebSocket
-  const updateAutoBotCounters = (gameResult: { number: number; color: string; gameId: string }) => {
-    if (!autoBotEnabled || !autoBotCounters) return;
-
-    // Evitar contar o mesmo resultado duas vezes
-    if (gameResult.gameId === lastProcessedGameId) {
-      return;
-    }
-    
-    const newCounters = { ...autoBotCounters };
-    
-    // Incrementar contadores baseado no resultado (ignorar zero verde)
-    if (gameResult.number === 0) {
-      // Zero verde não conta para nenhuma categoria
-      
-      // 🤖 NOVO: Mostrar indicador de zero detectado
-      setRecentZeroDetected(true);
-      setTimeout(() => setRecentZeroDetected(false), 3000);
-    } else {
-      // Cores (vermelho/preto)
-      if (gameResult.color === 'red') {
-        newCounters.red++;
-      } else if (gameResult.color === 'black') {
-        newCounters.black++;
-      }
-      
-      // Par/Ímpar
-      if (gameResult.number % 2 === 0) {
-        newCounters.even++;
-      } else {
-        newCounters.odd++;
-      }
-      
-      // Baixas/Altas
-      if (gameResult.number >= 1 && gameResult.number <= 18) {
-        newCounters.low++;
-      } else if (gameResult.number >= 19 && gameResult.number <= 36) {
-        newCounters.high++;
-      }
-    }
-
-    setAutoBotCounters(newCounters);
-    setLastProcessedGameId(gameResult.gameId);
-    
-    // 🤖 NOVO: Mostrar indicador de atualização recente
-    setRecentCounterUpdate(true);
-    setTimeout(() => setRecentCounterUpdate(false), 2000);
-    
-    // Verificar se algum limiar foi atingido
-    checkAutoBotThresholds(newCounters);
-  };
-
-  // 🤖 NOVO: Função para verificar limiares em tempo real
-  const checkAutoBotThresholds = (counters: typeof autoBotCounters) => {
-    if (!autoBotEnabled || !counters) return;
-
-    const opportunities = [
-      { type: 'red', value: counters.red, label: 'VERMELHO' },
-      { type: 'black', value: counters.black, label: 'PRETO' },
-      { type: 'even', value: counters.even, label: 'PAR' },
-      { type: 'odd', value: counters.odd, label: 'ÍMPAR' },
-      { type: 'low', value: counters.low, label: 'BAIXAS' },
-      { type: 'high', value: counters.high, label: 'ALTAS' }
-    ];
-
-    // Encontrar oportunidades que atingiram o limiar
-    const validOpportunities = opportunities.filter(op => op.value >= autoBotThreshold);
-    
-    if (validOpportunities.length > 0) {
-      // Pegar a melhor oportunidade (maior valor)
-      const bestOpportunity = validOpportunities.reduce((best, current) => 
-        current.value > best.value ? current : best
-      );
-
-      // Atualizar tipo de aposta se mudou
-      const newBetType = bestOpportunity.type as typeof m4DirectBetType;
-      if (newBetType !== m4DirectBetType) {
-        setM4DirectBetType(newBetType);
-        setAutoBotCurrentOpportunity(bestOpportunity.label);
-      }
-      
-      // 🚀 NOVO: Se está em standby, ativar modo de apostas
-      if (isOperating && !operationActive) {
-        
-        // Enviar comando para backend sair do standby e começar a apostar
-        const activateAutoBot = async () => {
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            // 🔧 CORREÇÃO: Usar set-standby-mode para desativar standby
-            const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userId: user.id,
-                action: 'set-standby-mode',
-                isStandbyMode: false
-              })
-            });
-
-            if (response.ok) {
-              // 🎯 NOVO: Configurar tipo de aposta no backend
-              const betTypeResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  userId: user.id,
-                  action: 'update-bet-type',
-                  m4DirectBetType: bestOpportunity.type
-                })
-              });
-            }
-          } catch (error) {
-            console.error('Erro ao ativar Auto Bot:', error);
-          }
-        };
-        
-        activateAutoBot();
-      }
-      
-      // 🚀 NOVO: Se não está operando ainda, iniciar operação automaticamente
-      if (!isOperating && !operationActive) {
-        setTimeout(() => {
-          handleOperate();
-        }, 1000);
-      }
-    }
-  };
 
   // 🚀 REMOVIDO: Função startAutoBotOperations não é mais necessária - usamos handleOperate() diretamente
 
-  // 📈 NOVO: Função para resetar progressão de stake
-  const resetStakeProgression = () => {
-    setStakeProgressionCurrentMultiplications(0);
-    setStakeProgressionRoundCounter(0);
-    setStakeProgressionInitialStake(selectedStake);
-  };
 
-  // 📈 NOVO: Função para aplicar progressão de stake
-  const applyStakeProgression = async () => {
-    if (!autoBotEnabled || !stakeProgressionEnabled) return;
 
-    // Incrementar contador de rodadas
-    const newRoundCounter = stakeProgressionRoundCounter + 1;
-    setStakeProgressionRoundCounter(newRoundCounter);
 
-    // Verificar se deve aplicar multiplicador
-    if (newRoundCounter >= stakeProgressionRounds) {
-      // Verificar se ainda pode multiplicar
-      if (stakeProgressionCurrentMultiplications < stakeProgressionMaxMultiplications) {
-        const newMultiplications = stakeProgressionCurrentMultiplications + 1;
-        const newStake = stakeProgressionInitialStake * Math.pow(stakeProgressionMultiplier, newMultiplications);
-        
-        setStakeProgressionCurrentMultiplications(newMultiplications);
-        setStakeProgressionRoundCounter(0); // Resetar contador
-        
-        // Aplicar nova stake
-        await updateStakeDirectly(newStake);
-      } else {
-                 // Atingiu limite máximo de multiplicações
-         
-         // Resetar progressão
-         resetStakeProgression();
-         
-         // Parar operação atual
-         if (isOperating) {
-           handleOperate(); // Parar operação
-         }
          
          // 🤖 REMOVIDO: Auto Bot não procura oportunidades automaticamente
-         // O usuário deve reiniciar manualmente quando desejado
-         setTimeout(() => {
-           if (autoBotEnabled) {
-    
-             // handleAutoBetSelection(); // REMOVIDO: Procurar nova oportunidade automaticamente
-           }
-         }, 3000);
-      }
-    }
-  };
+  // As oportunidades são detectadas em tempo real quando contadores são atualizados
+
+  // ... existing code ...
 
   // 🎯 SISTEMA AUTOMÁTICO: Processamento baseado em gameId
   // A lógica de validação vitória/derrota é automática no backend
@@ -3243,30 +3042,126 @@ export default function BMGBR() {
                       Última aposta: <span className="text-white">{formatCurrency(martingaleSequence[3] || 0)}</span>
                     </div>
                   </div>
+                  
+                  {/* 🚀 NOVA SEÇÃO: Progressão Automática */}
+                  <div className="mt-4 pt-3 border-t border-blue-500/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm font-semibold text-blue-400 font-mono">
+                        Progressão Automática
+                      </label>
+                      <button
+                        onClick={() => {
+                          setAutoProgressionEnabled(!autoProgressionEnabled);
+                          if (!autoProgressionEnabled) {
+                            // Reativar progressão se estava pausada
+                            setProgressionPaused(false);
+                          }
+                        }}
+                        className={`px-2 py-1 rounded text-xs font-mono transition-all duration-200 ${
+                          autoProgressionEnabled 
+                            ? progressionPaused 
+                              ? 'bg-yellow-500/20 border border-yellow-500/30 text-yellow-400' 
+                              : 'bg-green-500/20 border border-green-500/30 text-green-400'
+                            : 'bg-gray-500/20 border border-gray-500/30 text-gray-400'
+                        }`}
+                      >
+                        {autoProgressionEnabled ? (progressionPaused ? 'PAUSADA' : 'ON') : 'OFF'}
+                      </button>
+                    </div>
+                    
+                    {autoProgressionEnabled && (
+                      <div className="space-y-2">
+                        <div className="text-xs text-gray-400 font-mono mb-2">
+                          Aumenta stake automaticamente baseado em apostas
+                        </div>
+                        
+                        {/* Configurações */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-xs text-gray-400 font-mono">A cada X apostas</label>
+                            <input
+                              type="number"
+                              value={progressionInterval}
+                              onChange={(e) => {
+                                const value = Math.max(1, Math.min(100, parseInt(e.target.value) || 1));
+                                setProgressionInterval(value);
+                              }}
+                              className="w-full mt-1 h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                              min="1"
+                              max="100"
+                            />
+                          </div>
+                          
+                          <div>
+                            <label className="text-xs text-gray-400 font-mono">Aumentar R$</label>
+                            <input
+                              type="number"
+                              value={progressionIncrement}
+                              onChange={(e) => {
+                                const value = Math.max(0.25, Math.min(5.00, parseFloat(e.target.value) || 0.25));
+                                setProgressionIncrement(value);
+                              }}
+                              className="w-full mt-1 h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                              min="0.25"
+                              max="5.00"
+                              step="0.25"
+                            />
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <label className="text-xs text-gray-400 font-mono">Limite máximo</label>
+                          <input
+                            type="number"
+                            value={progressionMaxStake}
+                            onChange={(e) => {
+                              const value = Math.max(selectedStake, Math.min(50.00, parseFloat(e.target.value) || selectedStake));
+                              setProgressionMaxStake(value);
+                            }}
+                            className="w-full mt-1 h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                            min={selectedStake}
+                            max="50.00"
+                            step="0.50"
+                          />
+                        </div>
+                        
+                        {/* Status */}
+                        <div className="text-xs font-mono text-center p-2 bg-gray-800/30 rounded">
+                          {progressionPaused ? (
+                            <span className="text-yellow-400">⏸️ Pausada - Limite atingido</span>
+                          ) : (
+                            <span className="text-blue-400">
+                              📊 {getProgressionStatus()} (Stake atual: {formatCurrency(selectedStake)})
+                            </span>
+                          )}
+                        </div>
+                        
+                        {/* Botão Reset */}
+                        <button
+                          onClick={resetProgressionCounter}
+                          className="w-full py-1 text-xs font-mono bg-gray-700/50 border border-gray-600/50 rounded text-gray-300 hover:bg-gray-600/50 hover:border-gray-500/50 transition-all duration-200"
+                        >
+                          Reset Contador
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* 🔥 SEÇÃO: Tipo de Aposta */}
-                <div className={`mt-4 space-y-3 p-3 rounded-lg ${
-                  autoBotEnabled 
-                    ? 'bg-gray-500/5 border border-gray-500/20' 
-                    : 'bg-purple-500/5 border border-purple-500/20'
-                }`}>
-                  <label className={`text-sm font-semibold font-mono ${
-                    autoBotEnabled ? 'text-gray-400' : 'text-purple-400'
-                  }`}>
-                    Tipo de Aposta{autoBotEnabled ? ' (Automático)' : ''}
+                <div className="mt-4 space-y-3 p-3 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                  <label className="text-sm font-semibold font-mono text-purple-400">
+                    Tipo de Aposta
                   </label>
                   <div className="text-xs text-gray-400 font-mono">
-                    {autoBotEnabled 
-                      ? 'Seleção automática pelo Auto Bot'
-                      : 'Selecione um tipo de aposta'
-                    }
+                    Selecione um tipo de aposta
                   </div>
                   
                   {/* 🔥 SELEÇÃO: Tipo de aposta */}
                   <div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {[
+                        { value: 'await', label: 'AGUARDAR', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
                         { value: 'red', label: 'VERMELHO', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
                         { value: 'black', label: 'PRETO', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' },
                         { value: 'even', label: 'PAR', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
@@ -3277,31 +3172,20 @@ export default function BMGBR() {
                         <button
                           key={option.value}
                           onClick={() => setM4DirectBetType(option.value as typeof m4DirectBetType)}
-                          disabled={isOperating || forceOperatingDisplay || autoBotEnabled}
+                          disabled={false} // Sempre habilitado para permitir troca durante operação
                           className={`p-2 rounded text-xs font-mono border transition-all ${
                             m4DirectBetType === option.value
                               ? option.color
                               : 'bg-gray-800/50 text-gray-400 border-gray-600/30 hover:bg-gray-700/50'
-                          } ${
-                            isOperating || forceOperatingDisplay || autoBotEnabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                          }`}
+                          } cursor-pointer`}
                         >
                           {option.label}
                         </button>
                       ))}
                     </div>
                     <div className="mt-2 text-xs text-gray-500 font-mono">
-                      {autoBotEnabled ? (
-                        <span>🤖 Aposta automática: <span className="text-purple-400">{
-                          m4DirectBetType === 'red' ? 'VERMELHO' :
-                          m4DirectBetType === 'black' ? 'PRETO' :
-                          m4DirectBetType === 'even' ? 'PAR' :
-                          m4DirectBetType === 'odd' ? 'ÍMPAR' :
-                          m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
-                          'ALTAS (19-36)'
-                        }</span></span>
-                      ) : (
                         <span>Aposta selecionada: <span className="text-purple-400">{
+                        m4DirectBetType === 'await' ? 'AGUARDAR' :
                           m4DirectBetType === 'red' ? 'VERMELHO' :
                           m4DirectBetType === 'black' ? 'PRETO' :
                           m4DirectBetType === 'even' ? 'PAR' :
@@ -3309,331 +3193,11 @@ export default function BMGBR() {
                           m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
                           'ALTAS (19-36)'
                         }</span></span>
-                      )}
                     </div>
                   </div>
                 </div>
 
-                {/* 🎯 SEÇÃO: Meta de Lucro */}
-                <div className="mt-4 space-y-3 p-3 bg-green-500/5 border border-green-500/20 rounded-lg">
-                  <label className="text-sm font-semibold text-green-400 font-mono">
-                    Meta de Lucro
-                  </label>
-                  <div className="text-xs text-gray-400 font-mono">
-                    {stopGainEnabled 
-                      ? `Meta: ${formatCurrency(calculateStopGainTarget(stopGainSliderValue))} (${stopGainSliderValue}% da base)`
-                      : 'Nenhuma meta definida'
-                    }
-                  </div>
-                  
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => setStopGainEnabled(!stopGainEnabled)}
-                      disabled={isOperating || forceOperatingDisplay}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
-                        stopGainEnabled 
-                          ? 'bg-green-500/20 border border-green-500/50' 
-                          : 'bg-gray-600/20 border border-gray-600/50'
-                      } ${
-                        isOperating || forceOperatingDisplay ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                          stopGainEnabled ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                    <span className={`text-xs font-mono ${
-                      stopGainEnabled ? 'text-green-400' : 'text-gray-400'
-                    }`}>
-                      {stopGainEnabled ? 'HABILITADO' : 'DESABILITADO'}
-                    </span>
-                  </div>
-                  
-                  {stopGainEnabled && (
-                    <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-                        <span className="text-xs font-mono text-green-400">META DE LUCRO ATIVA</span>
-                      </div>
-                      
-                      {/* Slider para porcentagem */}
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs font-mono text-gray-400 w-8">1%</span>
-                          <div className="flex-1 relative">
-                            <input
-                              type="range"
-                              min="1"
-                              max="100"
-                              value={stopGainSliderValue}
-                              onChange={(e) => setStopGainSliderValue(parseInt(e.target.value))}
-                              disabled={isOperating || forceOperatingDisplay}
-                              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-custom"
-                              style={{
-                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${stopGainSliderValue}%, #374151 ${stopGainSliderValue}%, #374151 100%)`
-                              }}
-                            />
-                          </div>
-                          <span className="text-xs font-mono text-gray-400 w-12">100%</span>
-                        </div>
-                        
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-mono text-green-400">
-                            {stopGainSliderValue}%
-                          </div>
-                          <div className="text-xs font-mono text-gray-400">
-                            {formatCurrency(calculateStopGainTarget(stopGainSliderValue))}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="text-xs text-gray-400 font-mono mt-2">
-                        Bot irá parar automaticamente ao atingir {formatCurrency(calculateStopGainTarget(stopGainSliderValue))} de lucro
-                      </div>
-                    </div>
-                  )}
 
-                  {/* Estilos CSS para o slider customizado */}
-                  <style jsx>{`
-                    .slider-custom::-webkit-slider-thumb {
-                      appearance: none;
-                      width: 20px;
-                      height: 20px;
-                      border-radius: 50%;
-                      background: #10b981;
-                      cursor: pointer;
-                      border: 2px solid #0f766e;
-                      box-shadow: 0 0 0 1px #10b981;
-                      transition: all 0.2s ease;
-                    }
-                    
-                    .slider-custom::-webkit-slider-thumb:hover {
-                      background: #0d9488;
-                      transform: scale(1.1);
-                    }
-                    
-                    .slider-custom::-moz-range-thumb {
-                      width: 20px;
-                      height: 20px;
-                      border-radius: 50%;
-                      background: #10b981;
-                      cursor: pointer;
-                      border: 2px solid #0f766e;
-                      box-shadow: 0 0 0 1px #10b981;
-                      transition: all 0.2s ease;
-                    }
-                    
-                    .slider-custom::-moz-range-thumb:hover {
-                      background: #0d9488;
-                      transform: scale(1.1);
-                    }
-                    
-                    .slider-custom:disabled::-webkit-slider-thumb {
-                      opacity: 0.5;
-                      cursor: not-allowed;
-                    }
-                    
-                    .slider-custom:disabled::-moz-range-thumb {
-                      opacity: 0.5;
-                      cursor: not-allowed;
-                    }
-                  `}</style>
-                </div>
-
-                {/* 🤖 SEÇÃO: Auto Bot */}
-                <div className="mt-4 space-y-3 p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg">
-                  <label className="text-sm font-semibold text-purple-400 font-mono">
-                    Auto Bot
-                  </label>
-                  <div className="text-xs text-gray-400 font-mono">
-                    {autoBotEnabled 
-                      ? (isOperating || forceOperatingDisplay) 
-                        ? operationActive
-                          ? `🎯 APOSTANDO: ${autoBotCurrentOpportunity || m4DirectBetType.toUpperCase()} (objetivo: vitória no M4)`
-                          : autoBotCounters && Object.values(autoBotCounters).some(val => val >= autoBotThreshold)
-                            ? `🚀 LIMIAR ATINGIDO: Ativando apostas...`
-                            : `⏳ STANDBY: Conectado - Aguardando limiar ${autoBotThreshold} rodadas`
-                        : `🔄 DESCONECTADO: Clique COMEÇAR para conectar Auto Bot (limiar: ${autoBotThreshold})`
-                      : 'Auto Bot desabilitado - Controle manual'
-                    }
-                  </div>
-                  
-                  {/* 🤖 NOVO: Exibir contadores em tempo real */}
-                  {autoBotEnabled && autoBotCounters && (
-                    <div className="mt-2 p-2 bg-gray-800/50 rounded text-xs">
-                      {(() => {
-          
-                        return null;
-                      })()}
-                      <div className="text-purple-400 font-mono mb-1">📊 Contadores em tempo real:</div>
-                      <div className="grid grid-cols-3 gap-1 text-xs font-mono">
-                        <div className={`${autoBotCounters.red >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
-                          🔴 {autoBotCounters.red}
-                        </div>
-                        <div className={`${autoBotCounters.black >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
-                          ⚫ {autoBotCounters.black}
-                        </div>
-                        <div className={`${autoBotCounters.even >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
-                          🟢 {autoBotCounters.even}
-                        </div>
-                        <div className={`${autoBotCounters.odd >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
-                          🟡 {autoBotCounters.odd}
-                        </div>
-                        <div className={`${autoBotCounters.low >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
-                          🔵 {autoBotCounters.low}
-                        </div>
-                        <div className={`${autoBotCounters.high >= autoBotThreshold ? 'text-green-400' : 'text-gray-400'}`}>
-                          🟣 {autoBotCounters.high}
-                        </div>
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        Limiar: {autoBotThreshold} | Verde = Limiar atingido
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => setAutoBotEnabled(!autoBotEnabled)}
-                      disabled={isOperating || forceOperatingDisplay}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
-                        autoBotEnabled 
-                          ? 'bg-purple-500/20 border border-purple-500/50' 
-                          : 'bg-gray-600/20 border border-gray-600/50'
-                      } ${
-                        isOperating || forceOperatingDisplay ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                          autoBotEnabled ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                    <span className={`text-xs font-mono ${
-                      autoBotEnabled ? 'text-purple-400' : 'text-gray-400'
-                    }`}>
-                      {autoBotEnabled ? 'HABILITADO' : 'DESABILITADO'}
-                    </span>
-                  </div>
-                  
-                  {autoBotEnabled && (
-                    <div className="space-y-3">
-                      {/* Configuração do Limiar */}
-                      <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
-                          <span className="text-xs font-mono text-purple-400">LIMIAR DE OPORTUNIDADE</span>
-                        </div>
-                        
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs font-mono text-gray-400">Rodadas:</span>
-                          <input
-                            type="number"
-                            min="10"
-                            max="100"
-                            value={autoBotThreshold}
-                            onChange={(e) => setAutoBotThreshold(parseInt(e.target.value) || 50)}
-                            disabled={isOperating || forceOperatingDisplay}
-                            className="w-20 h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
-                          />
-                        </div>
-                        
-                        <div className="text-xs text-gray-400 font-mono mt-2">
-                          Bot opera quando qualquer tipo de aposta atingir {autoBotThreshold} rodadas
-                        </div>
-                      </div>
-
-                      {/* Configuração da Progressão de Stake */}
-                      <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-2 h-2 bg-orange-400 rounded-full"></div>
-                          <span className="text-xs font-mono text-orange-400">PROGRESSÃO DE STAKE</span>
-                        </div>
-                        
-                        <div className="flex items-center gap-3 mb-2">
-                          <button
-                            onClick={() => setStakeProgressionEnabled(!stakeProgressionEnabled)}
-                            disabled={isOperating || forceOperatingDisplay}
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${
-                              stakeProgressionEnabled 
-                                ? 'bg-orange-500/20 border border-orange-500/50' 
-                                : 'bg-gray-600/20 border border-gray-600/50'
-                            } ${
-                              isOperating || forceOperatingDisplay ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                            }`}
-                          >
-                            <span
-                              className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform duration-200 ${
-                                stakeProgressionEnabled ? 'translate-x-5' : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
-                          <span className={`text-xs font-mono ${
-                            stakeProgressionEnabled ? 'text-orange-400' : 'text-gray-400'
-                          }`}>
-                            {stakeProgressionEnabled ? 'ATIVA' : 'INATIVA'}
-                          </span>
-                        </div>
-
-                        {stakeProgressionEnabled && (
-                          <div className="space-y-2">
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="text-xs font-mono text-gray-400">Rodadas:</label>
-                                <input
-                                  type="number"
-                                  min="10"
-                                  max="100"
-                                  value={stakeProgressionRounds}
-                                  onChange={(e) => setStakeProgressionRounds(parseInt(e.target.value) || 30)}
-                                  disabled={isOperating || forceOperatingDisplay}
-                                  className="w-full h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 disabled:opacity-50"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs font-mono text-gray-400">Multiplicador:</label>
-                                <select
-                                  value={stakeProgressionMultiplier}
-                                  onChange={(e) => setStakeProgressionMultiplier(parseFloat(e.target.value))}
-                                  disabled={isOperating || forceOperatingDisplay}
-                                  className="w-full h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 disabled:opacity-50"
-                                >
-                                  <option value="1.5">1.5x</option>
-                                  <option value="2">2x</option>
-                                  <option value="3">3x</option>
-                                  <option value="4">4x</option>
-                                </select>
-                              </div>
-                            </div>
-                            <div>
-                              <label className="text-xs font-mono text-gray-400">Máximo de multiplicações:</label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="10"
-                                value={stakeProgressionMaxMultiplications}
-                                onChange={(e) => setStakeProgressionMaxMultiplications(parseInt(e.target.value) || 3)}
-                                disabled={isOperating || forceOperatingDisplay}
-                                className="w-full h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 disabled:opacity-50"
-                              />
-                            </div>
-                            <div className="text-xs text-gray-400 font-mono">
-                              A cada {stakeProgressionRounds} rodadas sem sucesso, multiplica stake por {stakeProgressionMultiplier}x (máximo {stakeProgressionMaxMultiplications}x)
-                              {(isOperating || forceOperatingDisplay) && (
-                                <div className="mt-1 text-orange-400">
-                                  📊 Rodadas: {stakeProgressionRoundCounter}/{stakeProgressionRounds} | Multiplicações: {stakeProgressionCurrentMultiplications}/{stakeProgressionMaxMultiplications}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
               </div>
             </CardContent>
           </Card>

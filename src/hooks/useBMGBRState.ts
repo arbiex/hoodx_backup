@@ -44,7 +44,7 @@ interface BMGBRState {
   // Estados de configuração avançada
   autoBotEnabled: boolean;
   autoBotThreshold: number;
-  m4DirectBetType: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
+  m4DirectBetType: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
   
   // Estados de UI
   forceOperatingDisplay: boolean;
@@ -89,7 +89,7 @@ const initialState: BMGBRState = {
   
   autoBotEnabled: false,
   autoBotThreshold: 50,
-  m4DirectBetType: 'red',
+  m4DirectBetType: 'await',
   
   forceOperatingDisplay: false,
   canSafelyStop: true,

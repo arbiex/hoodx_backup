@@ -14,7 +14,7 @@ export function useBMGBROperations(config: BMGBROperationsConfig = {}) {
   // Função para conectar e iniciar operação
   const startOperation = useCallback(async (
     stake: number,
-    betType: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' = 'red'
+    betType: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' = 'await'
   ) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();

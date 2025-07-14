@@ -32,8 +32,18 @@ const RED_NUMBERS = new Set([
   1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36
 ]);
 
+// ✅ EDGE FUNCTION URL: Centralizando configuração
+const BLAZE_AUTH_EDGE_FUNCTION_URL = 'https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth';
+
 // 🔥 FUNÇÃO DE RENOVAÇÃO COMPLETA DE TOKENS
 // Gera toda a cadeia: blazeToken → ppToken → jsessionId → nova URL Pragmatic
+// 
+// ✅ VANTAGENS DA EDGE FUNCTION:
+// - Execução mais rápida (edge computing)
+// - Menor latência (servidores globais)
+// - Isolamento de responsabilidades
+// - Escalabilidade automática
+// - Não sobrecarrega a API principal
 async function authenticateUser(userId: string): Promise<AuthResult> {
   console.log('🔐 [INSIGHTS-AUTH] Iniciando renovação completa de tokens para usuário:', userId);
   
@@ -47,47 +57,58 @@ async function authenticateUser(userId: string): Promise<AuthResult> {
       };
     }
 
-    // Usar a implementação funcional do route.ts
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-    const response = await fetch(`${baseUrl}/api/bmgbr/blaze/pragmatic/blaze-megarouletebr`, {
+    // ✅ USAR EDGE FUNCTION DIRETAMENTE: Mais eficiente e consistente
+    console.log('🚀 [INSIGHTS-AUTH] Usando Edge Function blaze-auth diretamente...');
+    
+    const edgeResponse = await fetch(BLAZE_AUTH_EDGE_FUNCTION_URL, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`
       },
       body: JSON.stringify({
-        userId: userId,
-        action: 'generate-client-tokens',
+        action: 'generate-tokens',
         blazeToken: tokenResult.token,
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         acceptLanguage: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        selectedCurrencyType: 'BRL'
+        selectedCurrencyType: 'BRL',
+        realBrowserHeaders: {
+          'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
+          'DNT': '1',
+          'Upgrade-Insecure-Requests': '1',
+          'Pragma': 'no-cache',
+          'Cache-Control': 'no-cache'
+        }
       })
     });
 
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error('❌ [INSIGHTS-AUTH] Erro na API route.ts:', response.status, errorData);
+    if (!edgeResponse.ok) {
+      const errorText = await edgeResponse.text();
+      console.error('❌ [INSIGHTS-AUTH] Erro na Edge Function:', edgeResponse.status, errorText);
       return {
         success: false,
-        error: `Erro na autenticação: ${response.status}`
+        error: `Erro na Edge Function: ${edgeResponse.status} - ${errorText}`
       };
     }
 
-    const result = await response.json();
+    const edgeResult = await edgeResponse.json();
     
-    if (!result.success) {
-      console.error('❌ [INSIGHTS-AUTH] Falha na autenticação:', result.error);
+    if (!edgeResult.success || !edgeResult.data) {
+      console.error('❌ [INSIGHTS-AUTH] Falha na Edge Function:', edgeResult.error);
       return {
         success: false,
-        error: result.error || 'Erro na autenticação'
+        error: edgeResult.error || 'Erro na geração de tokens via Edge Function'
       };
     }
 
+    // ✅ TOKENS GERADOS VIA EDGE FUNCTION
     const tokens = {
       blazeToken: tokenResult.token!,
-      ppToken: result.data.ppToken,
-      jsessionId: result.data.jsessionId,
-      pragmaticUserId: result.data.pragmaticUserId
+      ppToken: edgeResult.data.ppToken,
+      jsessionId: edgeResult.data.jsessionId,
+      pragmaticUserId: edgeResult.data.pragmaticUserId || ''
     };
 
     // Salvar tokens completos para uso futuro com TTL
@@ -100,7 +121,7 @@ async function authenticateUser(userId: string): Promise<AuthResult> {
       expiresAt: Date.now() + TOKEN_TTL
     });
 
-    console.log('✅ [INSIGHTS-AUTH] Renovação completa de tokens concluída - blazeToken → ppToken → jsessionId → URL válida');
+    console.log('✅ [INSIGHTS-AUTH] Renovação completa via Edge Function concluída - blazeToken → ppToken → jsessionId → URL válida');
     return {
       success: true,
       tokens

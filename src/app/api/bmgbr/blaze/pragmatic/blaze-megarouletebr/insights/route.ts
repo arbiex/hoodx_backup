@@ -183,7 +183,7 @@ async function fetchGameData(userId: string, forceAuth = false) {
       }
       tokenData = userTokens.get(userId);
     } else {
-      console.log(`✅ [INSIGHTS-CACHE] Token válido encontrado para usuário: ${userId} (expira em ${Math.round((tokenData!.expiresAt - Date.now()) / 1000 / 60)} minutos)`);
+      // Log removido: verbose demais no terminal
     }
 
     if (!tokenData) {
@@ -351,7 +351,7 @@ async function fetchGameData(userId: string, forceAuth = false) {
       };
     });
 
-    console.log(`✅ [INSIGHTS-DATA] Coletados ${processedResults.length} resultados`);
+    // Log removido: verbose demais no terminal
 
     return {
       success: true,
@@ -384,7 +384,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`🚀 [INSIGHTS-API] Processando ação: ${action} para usuário: ${user_id}`);
+    // Log removido: verbose demais no terminal
 
     // Processar diferentes ações
     switch (action) {

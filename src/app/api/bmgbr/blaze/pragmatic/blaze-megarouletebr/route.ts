@@ -792,14 +792,14 @@ async function retryBlazeRequest(
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`🔄 [RETRY-${operationType.toUpperCase()}] Tentativa ${attempt}/${maxRetries}`);
+      // Log removido: verbose demais no terminal
       
       const response = await requestFunction();
       
       // Se resposta OK, retornar imediatamente
       if (response.ok) {
         if (attempt > 1) {
-          console.log(`✅ [RETRY-${operationType.toUpperCase()}] Sucesso na tentativa ${attempt}!`);
+          // Log removido: verbose demais no terminal
         }
         return response;
       }
@@ -827,7 +827,7 @@ async function retryBlazeRequest(
       return response;
       
     } catch (error) {
-      console.log(`❌ [RETRY-${operationType.toUpperCase()}] Erro de rede na tentativa ${attempt}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+              // Log removido: verbose demais no terminal
       
       // Se não é a última tentativa, aguardar antes de tentar novamente
       if (attempt < maxRetries) {
@@ -1229,6 +1229,8 @@ async function processOperationResult(userId: string, resultColor: string, resul
     // ✅ LÓGICA MARTINGALE NORMAL: Vitória avança nível (apenas se ainda estiver no mesmo modo)
     operation.martingaleLevel++; // Avança martingale
     
+    // 🎯 LÓGICA REMOVIDA: Renovação agora acontece após apostas, não após resultados
+    
     // ✅ Verificar se atingiu M4 (máximo da sequência)
     if (operation.martingaleLevel >= 4) {
               // 🔥 NOVO: Verificar se está em modo M4 direto
@@ -1374,16 +1376,9 @@ async function processOperationResult(userId: string, resultColor: string, resul
       // NÃO muda para análise - continua no modo real até conseguir M4
     }
     
-    // ⏰ Verificar renovação automática após derrota
-    if (shouldRenewAutomatically(userId)) {
-      // Logs removidos: renovação automática é silenciosa
-      setTimeout(async () => {
-        const renewed = await renewSession(userId);
-        if (!renewed) {
-          addWebSocketLog(userId, '❌ Falha na renovação automática', 'error');
-        }
-      }, 1000);
-    }
+    // 🎯 LÓGICA REMOVIDA: Renovação agora acontece após apostas, não após resultados
+    
+    // ⏰ REMOVIDO: Renovação automática após derrota (já feita após apostas)
   }
 }
 
@@ -2480,7 +2475,7 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             } else {
               addWebSocketLog(userId, '❌ Falha na renovação automática', 'error');
             }
-          }, 1000);
+          }, 2000); // Delay maior para evitar conflito com renovação pós-aposta
         }
 
         // 🚫 REMOVIDO: Processamento de resultados via WebSocket
@@ -2838,6 +2833,19 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     // ✅ NOVO: Marcar timestamp da primeira aposta após conexão
     if (!firstBetTimestamp[userId]) {
       firstBetTimestamp[userId] = Date.now();
+    }
+    
+    // 🎯 NOVA LÓGICA: Verificar se precisa renovar e aproveitar momento pós-aposta
+    if (shouldRenewAfterBet(userId)) {
+      setTimeout(async () => {
+        const renewed = await renewSession(userId);
+        if (renewed) {
+          addWebSocketLog(userId, '✅ Conexão renovada com sucesso', 'success');
+          addWebSocketLog(userId, '✅ Conexão estável', 'success');
+        } else {
+          addWebSocketLog(userId, '❌ Falha na renovação pós-aposta', 'error');
+        }
+      }, 1000); // Aguardar 1s para aposta ser processada
     }
     
     // TODO: Debitar créditos quando necessário
@@ -3443,7 +3451,52 @@ function initializeAutoRenewal(userId: string) {
   addWebSocketLog(userId, '⏰ Renovação automática iniciada - próxima em 10 minutos', 'info');
 }
 
-// ⏰ Função para verificar se deve renovar automaticamente
+// 🎯 NOVA FUNÇÃO: Forçar renovação imediata após resultado
+// 🎯 NOVA FUNÇÃO: Verificar se precisa renovar e aproveitar momento pós-aposta
+function shouldRenewAfterBet(userId: string): boolean {
+  const renewal = autoRenewal[userId];
+  if (!renewal) return false;
+  
+  const now = Date.now();
+  
+  // 🎯 INTELIGENTE: Se está próximo do tempo de renovação (dentro de 3 minutos)
+  const timeUntilRenewal = renewal.nextRenewalTime - now;
+  const shouldRenew = timeUntilRenewal <= (3 * 60 * 1000); // 3 minutos ou menos
+  
+  if (shouldRenew) {
+    // Atualizar timer para próxima renovação
+    renewal.lastRenewalTime = now;
+    renewal.nextRenewalTime = now + (10 * 60 * 1000); // Próxima em 10 minutos
+    
+    addWebSocketLog(userId, '🎯 Aproveitando momento pós-aposta para renovar (~20s até resultado)', 'info');
+    return true;
+  }
+  
+  return false;
+}
+
+function triggerRenewalAfterBet(userId: string) {
+  const renewal = autoRenewal[userId];
+  if (!renewal) return;
+  
+  const now = Date.now();
+  const timeSinceLastRenewal = now - renewal.lastRenewalTime;
+  const minInterval = 8 * 60 * 1000; // Mínimo 8 minutos entre renovações
+  
+  // Só renovar se passou tempo suficiente desde a última renovação
+  if (timeSinceLastRenewal >= minInterval) {
+    renewal.nextRenewalTime = now; // Renovar imediatamente
+    addWebSocketLog(userId, '🎯 Renovação programada pós-aposta', 'info');
+  } else {
+    // Agendar para o tempo mínimo
+    const remainingTime = minInterval - timeSinceLastRenewal;
+    renewal.nextRenewalTime = now + remainingTime;
+    const minutesLeft = Math.ceil(remainingTime / 60000);
+    addWebSocketLog(userId, `⏳ Renovação em ${minutesLeft} minutos (intervalo mínimo)`, 'info');
+  }
+}
+
+// ⏰ Função para verificar se deve renovar automaticamente COM INTELIGÊNCIA DE APOSTAS
 function shouldRenewAutomatically(userId: string): boolean {
   const renewal = autoRenewal[userId];
   if (!renewal) {
@@ -3454,12 +3507,17 @@ function shouldRenewAutomatically(userId: string): boolean {
   const now = Date.now();
   
   if (now >= renewal.nextRenewalTime) {
+    // 🎯 ANTI-DUPLICAÇÃO: Verificar se não foi renovado recentemente (últimos 30 segundos)
+    const timeSinceLastRenewal = now - renewal.lastRenewalTime;
+    if (timeSinceLastRenewal < 30 * 1000) {
+      // Renovação muito recente, pular
+      return false;
+    }
+    
     // Renovar e agendar próxima
     renewal.lastRenewalTime = now;
     renewal.nextRenewalTime = now + (10 * 60 * 1000); // Próxima em 10 minutos
     
-    // Log removido: renovação automática é silenciosa
-    // addWebSocketLog(userId, '⏰ Renovação automática ativada (10 minutos)', 'info');
     return true;
   }
   

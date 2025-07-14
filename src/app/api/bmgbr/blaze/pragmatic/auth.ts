@@ -13,7 +13,7 @@ export async function getUserBlazeToken(userId: string): Promise<{ success: bool
     // 🔧 CORREÇÃO: Remover prefixo "polling_" se existir
     const cleanUserId = userId.startsWith('polling_') ? userId.replace('polling_', '') : userId;
     
-    console.log('🔑 [GET-BLAZE-TOKEN] Buscando token para usuário:', cleanUserId);
+    // Log removido: verbose demais no terminal
     
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,7 +29,7 @@ export async function getUserBlazeToken(userId: string): Promise<{ success: bool
       .single();
 
     if (!tokenError && tokenData?.token) {
-      console.log('✅ [GET-BLAZE-TOKEN] Token encontrado');
+      // Log removido: verbose demais no terminal
       return {
         success: true,
         token: tokenData.token
@@ -50,7 +50,7 @@ export async function getUserBlazeToken(userId: string): Promise<{ success: bool
       };
     }
 
-    console.log('✅ [GET-BLAZE-TOKEN] Token encontrado (fallback)');
+          // Log removido: verbose demais no terminal
     return {
       success: true,
       token: userData.blaze_access_token

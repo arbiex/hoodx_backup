@@ -12,11 +12,11 @@ primary_region = "gru"
   NEXT_MATRIXX_AUTHORIZED_IDS = "7a3972f5-d603-4420-af55-4852ba61032e,de8aa205-318b-4890-8731-b2463185c885"
 
 [http_service]
-auto_start_machines = true
-auto_stop_machines = true
+auto_start_machines = false
+auto_stop_machines = false
 force_https = true
 internal_port = 3_000
-min_machines_running = 1
+min_machines_running = 2
 
 [[vm]]
 cpu_kind = "shared"

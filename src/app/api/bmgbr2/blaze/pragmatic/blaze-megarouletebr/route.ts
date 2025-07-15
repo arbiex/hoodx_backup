@@ -995,8 +995,8 @@ async function checkForNewResults(userId: string): Promise<void> {
   try {
 
     
-    // 🎯 SOLUÇÃO: Usar fetch interno para localhost em vez de baseUrl
-    const response = await fetch('http://localhost:3000/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights', {
+    // 🎯 SOLUÇÃO: Usar getBaseUrl() para funcionar tanto no localhost quanto em produção
+    const response = await fetch(`${getBaseUrl()}/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

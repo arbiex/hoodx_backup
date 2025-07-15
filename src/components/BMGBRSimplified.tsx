@@ -69,7 +69,49 @@ export default function BMGBRSimplified() {
     }
   };
 
-  const STAKE_OPTIONS = [0.50, 1.00, 1.50, 2.00, 2.50, 3.00, 3.50, 4.00, 4.50, 5.00];
+  // 💰 40 Evoluções de Stake predefinidas com M1 e M2
+  const STAKE_EVOLUTIONS = [
+    { id: 1, m1: 1.00, m2: 2.00 },
+    { id: 2, m1: 1.00, m2: 3.00 },
+    { id: 3, m1: 2.00, m2: 4.00 },
+    { id: 4, m1: 3.00, m2: 5.00 },
+    { id: 5, m1: 4.00, m2: 6.00 },
+    { id: 6, m1: 5.00, m2: 9.00 },
+    { id: 7, m1: 6.00, m2: 13.00 },
+    { id: 8, m1: 7.00, m2: 18.00 },
+    { id: 9, m1: 8.00, m2: 24.00 },
+    { id: 10, m1: 9.00, m2: 31.00 },
+    { id: 11, m1: 10.00, m2: 39.00 },
+    { id: 12, m1: 11.00, m2: 48.00 },
+    { id: 13, m1: 12.00, m2: 58.00 },
+    { id: 14, m1: 13.00, m2: 69.00 },
+    { id: 15, m1: 14.00, m2: 81.00 },
+    { id: 16, m1: 15.00, m2: 94.00 },
+    { id: 17, m1: 16.00, m2: 108.00 },
+    { id: 18, m1: 17.00, m2: 123.00 },
+    { id: 19, m1: 18.00, m2: 139.00 },
+    { id: 20, m1: 19.00, m2: 156.00 },
+    { id: 21, m1: 20.00, m2: 174.00 },
+    { id: 22, m1: 21.00, m2: 193.00 },
+    { id: 23, m1: 22.00, m2: 213.00 },
+    { id: 24, m1: 23.00, m2: 234.00 },
+    { id: 25, m1: 24.00, m2: 256.00 },
+    { id: 26, m1: 25.00, m2: 279.00 },
+    { id: 27, m1: 26.00, m2: 303.00 },
+    { id: 28, m1: 27.00, m2: 328.00 },
+    { id: 29, m1: 28.00, m2: 354.00 },
+    { id: 30, m1: 29.00, m2: 381.00 },
+    { id: 31, m1: 30.00, m2: 409.00 },
+    { id: 32, m1: 31.00, m2: 439.00 },
+    { id: 33, m1: 32.00, m2: 470.00 },
+    { id: 34, m1: 33.00, m2: 502.00 },
+    { id: 35, m1: 34.00, m2: 535.00 },
+    { id: 36, m1: 35.00, m2: 569.00 },
+    { id: 37, m1: 36.00, m2: 604.00 },
+    { id: 38, m1: 37.00, m2: 640.00 },
+    { id: 39, m1: 38.00, m2: 677.00 },
+    { id: 40, m1: 39.00, m2: 715.00 }
+  ];
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
@@ -128,18 +170,50 @@ export default function BMGBRSimplified() {
                   <label className="text-sm font-mono text-gray-300 mb-2 block">
                     Stake Selecionada
                   </label>
-                  <select
-                    value={state.selectedStake}
-                    onChange={(e) => setSelectedStake(Number(e.target.value))}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded font-mono text-sm"
-                    disabled={state.isOperating}
-                  >
-                    {STAKE_OPTIONS.map(stake => (
-                      <option key={stake} value={stake}>
-                        R$ {stake.toFixed(2)}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const currentEvolution = STAKE_EVOLUTIONS.find(e => e.m1 === state.selectedStake);
+                        const currentIndex = currentEvolution ? STAKE_EVOLUTIONS.indexOf(currentEvolution) : 0;
+                        const newIndex = Math.max(0, currentIndex - 1);
+                        setSelectedStake(STAKE_EVOLUTIONS[newIndex].m1);
+                      }}
+                      disabled={state.isOperating}
+                      className="w-8 h-8 bg-gray-700 border border-gray-600 rounded text-gray-300 font-bold text-sm hover:bg-gray-600 disabled:opacity-50"
+                    >
+                      -
+                    </button>
+                    <div className="flex-1">
+                      <input
+                        type="text"
+                        value={`R$ ${state.selectedStake.toFixed(2)}`}
+                        readOnly
+                        className="w-full p-2 bg-gray-800 border border-gray-600 rounded font-mono text-sm text-center"
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        const currentEvolution = STAKE_EVOLUTIONS.find(e => e.m1 === state.selectedStake);
+                        const currentIndex = currentEvolution ? STAKE_EVOLUTIONS.indexOf(currentEvolution) : 0;
+                        const newIndex = Math.min(STAKE_EVOLUTIONS.length - 1, currentIndex + 1);
+                        setSelectedStake(STAKE_EVOLUTIONS[newIndex].m1);
+                      }}
+                      disabled={state.isOperating}
+                      className="w-8 h-8 bg-gray-700 border border-gray-600 rounded text-gray-300 font-bold text-sm hover:bg-gray-600 disabled:opacity-50"
+                    >
+                      +
+                    </button>
+                  </div>
+                  
+                  {/* Informações M1 e M2 */}
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-mono text-gray-400">
+                    <div>
+                      M1: <span className="text-white">R$ {state.selectedStake.toFixed(2)}</span>
+                    </div>
+                    <div>
+                      M2: <span className="text-white">R$ {(STAKE_EVOLUTIONS.find(e => e.m1 === state.selectedStake)?.m2 || 0).toFixed(2)}</span>
+                    </div>
+                  </div>
                 </div>
 
                 <div>

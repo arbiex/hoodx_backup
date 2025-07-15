@@ -167,12 +167,21 @@ export default function BotsMonitoringPage() {
       category: 'testing',
       icon: '📊'
     },
-    {
+        {
       id: 'bmgbr-copy',
       name: 'BMGBR',
-              endpoint: '/api/bmgbr/blaze/pragmatic/blaze-megarouletebr',
+      endpoint: '/api/bmgbr/blaze/pragmatic/blaze-megarouletebr',
       sourcePage: '/bmgbr',
       description: 'Cópia teste independente - /bmgbr',
+      category: 'testing',
+      icon: '🧪'
+    },
+    {
+      id: 'bmgbr2-copy',
+      name: 'BMGBR2',
+      endpoint: '/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr',
+      sourcePage: '/bmgbr2',
+      description: 'Cópia teste independente - /bmgbr2',
       category: 'testing',
       icon: '🧪'
     }
@@ -324,7 +333,7 @@ export default function BotsMonitoringPage() {
           console.log(`✅ Origem detectada: ${bot.userEmail} → ${bot.sourcePage} (${bot.endpoint})`);
         } else {
           // Já existe conexão para esta API, preferir a mais específica
-          // Heurística: /bmg, /bmg2, /bmgbr são mais específicos que /blaze-megaroulettebr
+          // Heurística: /bmg, /bmg2, /bmgbr, /bmgbr2 são mais específicos que /blaze-megaroulettebr
           const isMoreSpecific = bot.sourcePage !== '/blaze-megaroulettebr' && 
                                  existingConnection.sourcePage === '/blaze-megaroulettebr';
           

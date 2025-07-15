@@ -13,7 +13,7 @@ export default function ProtectedLayout({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
-  const shouldHideBottomSidebar = pathname === '/blaze-megaroulettebr' || pathname === '/bmg' || pathname === '/bmg2' || pathname === '/bmgbr'
+  const shouldHideBottomSidebar = pathname === '/blaze-megaroulettebr' || pathname === '/bmg' || pathname === '/bmg2' || pathname === '/bmgbr' || pathname === '/bmgbr2'
 
   return (
     <AuthWrapper>

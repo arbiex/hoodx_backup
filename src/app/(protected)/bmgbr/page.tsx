@@ -2304,7 +2304,8 @@ export default function BMGBR() {
   const previousBetTypeRef = useRef<string | null>(null);
   
   useEffect(() => {
-    if (!userIdRef.current || !isOperating) return;
+    // 🔧 CORREÇÃO: Verificar se está realmente operando e conectado
+    if (!userIdRef.current || !isOperating || !connectionStatus.connected) return;
     
     // Evitar chamadas desnecessárias - só executar se o tipo de aposta realmente mudou
     if (previousBetTypeRef.current === m4DirectBetType) return;
@@ -2333,7 +2334,7 @@ export default function BMGBR() {
     };
 
     updateBetType();
-  }, [m4DirectBetType, isOperating]);
+  }, [m4DirectBetType, isOperating, connectionStatus.connected]);
 
 
   useEffect(() => {

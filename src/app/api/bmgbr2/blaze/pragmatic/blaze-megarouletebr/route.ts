@@ -42,7 +42,7 @@ const operationState: { [userId: string]: {
   waitingForResult: boolean;
   lastGameId?: string;
   currentBetColor?: 'R' | 'B' | 'E' | 'O' | 'L' | 'H' | 'AWAIT';
-  lastBetAmount?: number; // ✅ NOVO: Armazenar valor real da última aposta
+  lastBetAmount?: number;
   
   strategy: {
     sequences: number[];
@@ -57,17 +57,14 @@ const operationState: { [userId: string]: {
   };
   // Tipo de aposta para modo M4 direto
   m4DirectBetType?: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
-  // 🎯 NOVO: Campo para stake pendente
-  pendingStake?: number | null;
   // 🔄 NOVO: Controle de polling da URL/API
   lastProcessedGameId?: string;
   apiPollingInterval?: NodeJS.Timeout;
   // 🎯 NOVO: Controle de missão cumprida
   missionCompleted?: boolean;
-  // 🚀 NOVO: Progressão automática de stake
-  autoProgressionEnabled?: boolean;
-  initialStakeIndex?: number; // Índice inicial para voltar após vitória
-  currentStakeIndex?: number; // Índice atual da evolução
+  // 🚀 NOVA LÓGICA: Sistema de níveis fixos
+  currentLevel: number; // Nível atual (1-29)
+  stakeMultiplier: number; // Multiplicador de stake (1x, 2x, 3x, 4x, 5x)
 } } = {};
 
 const activeWebSockets: { [userId: string]: {
@@ -200,48 +197,37 @@ function updateLastHistoryEntryNumber(userId: string, resultNumber: number, game
 
 // Sistema de humanização removido
 
-// 💰 40 Evoluções de Stake predefinidas com M1 e M2 - Backend
-const STAKE_EVOLUTIONS = [
-  { id: 1, m1: 1.00, m2: 2.00 },
-  { id: 2, m1: 1.00, m2: 3.00 },
-  { id: 3, m1: 2.00, m2: 4.00 },
-  { id: 4, m1: 3.00, m2: 5.00 },
-  { id: 5, m1: 4.00, m2: 6.00 },
-  { id: 6, m1: 5.00, m2: 9.00 },
-  { id: 7, m1: 6.00, m2: 13.00 },
-  { id: 8, m1: 7.00, m2: 18.00 },
-  { id: 9, m1: 8.00, m2: 24.00 },
-  { id: 10, m1: 9.00, m2: 31.00 },
-  { id: 11, m1: 10.00, m2: 39.00 },
-  { id: 12, m1: 11.00, m2: 48.00 },
-  { id: 13, m1: 12.00, m2: 58.00 },
-  { id: 14, m1: 13.00, m2: 69.00 },
-  { id: 15, m1: 14.00, m2: 81.00 },
-  { id: 16, m1: 15.00, m2: 94.00 },
-  { id: 17, m1: 16.00, m2: 108.00 },
-  { id: 18, m1: 17.00, m2: 123.00 },
-  { id: 19, m1: 18.00, m2: 139.00 },
-  { id: 20, m1: 19.00, m2: 156.00 },
-  { id: 21, m1: 20.00, m2: 174.00 },
-  { id: 22, m1: 21.00, m2: 193.00 },
-  { id: 23, m1: 22.00, m2: 213.00 },
-  { id: 24, m1: 23.00, m2: 234.00 },
-  { id: 25, m1: 24.00, m2: 256.00 },
-  { id: 26, m1: 25.00, m2: 279.00 },
-  { id: 27, m1: 26.00, m2: 303.00 },
-  { id: 28, m1: 27.00, m2: 328.00 },
-  { id: 29, m1: 28.00, m2: 354.00 },
-  { id: 30, m1: 29.00, m2: 381.00 },
-  { id: 31, m1: 30.00, m2: 409.00 },
-  { id: 32, m1: 31.00, m2: 439.00 },
-  { id: 33, m1: 32.00, m2: 470.00 },
-  { id: 34, m1: 33.00, m2: 502.00 },
-  { id: 35, m1: 34.00, m2: 535.00 },
-  { id: 36, m1: 35.00, m2: 569.00 },
-  { id: 37, m1: 36.00, m2: 604.00 },
-  { id: 38, m1: 37.00, m2: 640.00 },
-  { id: 39, m1: 38.00, m2: 677.00 },
-  { id: 40, m1: 39.00, m2: 715.00 }
+// 💰 29 Níveis de Stakes Fixas - M1 e M2 predefinidos
+const STAKE_LEVELS = [
+  { level: 1, m1: 1.0, m2: 1.0, cost: 1 },
+  { level: 2, m1: 1.0, m2: 2.0, cost: 2 },
+  { level: 3, m1: 1.5, m2: 2.5, cost: 3.5 },
+  { level: 4, m1: 2.0, m2: 3.0, cost: 5.5 },
+  { level: 5, m1: 2.5, m2: 4.0, cost: 8 },
+  { level: 6, m1: 3.0, m2: 5.0, cost: 11.5 },
+  { level: 7, m1: 4.0, m2: 6.0, cost: 16 },
+  { level: 8, m1: 5.0, m2: 8.0, cost: 22 },
+  { level: 9, m1: 6.0, m2: 10.0, cost: 30 },
+  { level: 10, m1: 8.0, m2: 12.0, cost: 40.5 },
+  { level: 11, m1: 10.0, m2: 15.0, cost: 54.5 },
+  { level: 12, m1: 12.0, m2: 20.0, cost: 73.5 },
+  { level: 13, m1: 15.0, m2: 25.0, cost: 98.5 },
+  { level: 14, m1: 20.0, m2: 30.0, cost: 132 },
+  { level: 15, m1: 25.0, m2: 40.0, cost: 176.5 },
+  { level: 16, m1: 30.0, m2: 50.0, cost: 236 },
+  { level: 17, m1: 40.0, m2: 65.0, cost: 315.5 },
+  { level: 18, m1: 50.0, m2: 80.0, cost: 421 },
+  { level: 19, m1: 65.0, m2: 105.0, cost: 562 },
+  { level: 20, m1: 80.0, m2: 130.0, cost: 750 },
+  { level: 21, m1: 105.0, m2: 170.0, cost: 1000 },
+  { level: 22, m1: 130.0, m2: 215.0, cost: 1334 },
+  { level: 23, m1: 170.0, m2: 280.0, cost: 1779 },
+  { level: 24, m1: 215.0, m2: 355.0, cost: 2372 },
+  { level: 25, m1: 280.0, m2: 465.0, cost: 3163 },
+  { level: 26, m1: 355.0, m2: 590.0, cost: 4218 },
+  { level: 27, m1: 465.0, m2: 775.0, cost: 5624 },
+  { level: 28, m1: 590.0, m2: 985.0, cost: 7499 },
+  { level: 29, m1: 2500.0, m2: 5001.0, cost: 9999 }
 ];
 
 // Funções de sessão simplificadas (removidas - não essenciais)
@@ -585,92 +571,35 @@ export async function POST(request: NextRequest) {
         }, { status: 400 });
       
       case 'update-strategy':
-        // 🛡️ Simplificado: Apenas suporte para stake selecionado
-        const { selectedStake } = requestBody;
+        // 🛡️ Simplificado: Suporte para nível selecionado e multiplicador
+        const { selectedLevel, stakeMultiplier } = requestBody;
         
-        if (userId && operationState[userId] && selectedStake) {
-          // Encontrar evolução correspondente
-          const evolution = STAKE_EVOLUTIONS.find(e => e.m1 === selectedStake) || STAKE_EVOLUTIONS[0];
-          // Atualizar stake na operação
-          operationState[userId].strategy.sequences = [evolution.m1, evolution.m2];
-          addWebSocketLog(userId, `💰 Stake atualizada: Evolução ${evolution.id} - R$ ${selectedStake.toFixed(2)}`, 'success');
+        if (userId && operationState[userId]) {
+          // Atualizar nível se fornecido
+          if (selectedLevel) {
+            const level = STAKE_LEVELS.find(l => l.level === selectedLevel) || STAKE_LEVELS[0];
+            operationState[userId].currentLevel = level.level;
+            addWebSocketLog(userId, `💰 Nível atualizado: Nível ${level.level} - M1: R$ ${level.m1.toFixed(2)}, M2: R$ ${level.m2.toFixed(2)}`, 'success');
         }
         
-        return NextResponse.json({ success: true });
-      
-      case 'set-pending-stake':
-        const { newStake: pendingStake } = requestBody;
-        
-        if (userId && pendingStake && operationState[userId]) {
-          // Definir stake pendente
-          operationState[userId].pendingStake = pendingStake;
-          
-          addWebSocketLog(userId, `⏳ Stake pendente: R$ ${pendingStake.toFixed(2)} - Será aplicada após próxima derrota`, 'info');
-        }
-        return NextResponse.json({ success: true });
-      
-      case 'update-stake':
-        const { newStake } = requestBody;
-        
-        if (userId && newStake && operationState[userId]) {
-          // ✅ CORREÇÃO: Só aplicar stake diretamente se não há operação ativa
-          if (!operationState[userId].active) {
-            // Atualizar stake na operação
-            operationState[userId].strategy.sequences = requestBody.customMartingaleSequence || [newStake, newStake * 4];
-            
-            addWebSocketLog(userId, `💰 Stake atualizada: R$ ${newStake.toFixed(2)}`, 'success');
+          // Atualizar multiplicador se fornecido
+                if (stakeMultiplier && stakeMultiplier >= 1 && stakeMultiplier <= 5) {
+        operationState[userId].stakeMultiplier = stakeMultiplier;
+        addWebSocketLog(userId, `🔢 Multiplicador atualizado: ${stakeMultiplier}x (todos os valores serão multiplicados automaticamente)`, 'success');
           } else {
-            // Se há operação ativa, usar sistema de stake pendente
-            operationState[userId].pendingStake = newStake;
-            addWebSocketLog(userId, `⏳ Stake pendente: R$ ${newStake.toFixed(2)} - Será aplicada após próxima derrota`, 'info');
+          addWebSocketLog(userId, `❌ Estado da operação não encontrado para atualizar multiplicador`, 'error');
           }
         }
+        
         return NextResponse.json({ success: true });
       
-      case 'update-auto-progression':
-        // 🚀 NOVO: Configuração de progressão automática de stake
-        const { enabled, initialStakeIndex } = requestBody;
-        
-        // Garantir que websocketLogs existe
-        if (!websocketLogs[userId]) {
-          websocketLogs[userId] = [];
-        }
-        
-        if (userId) {
-          // Criar operationState se não existir
-          if (!operationState[userId]) {
-            operationState[userId] = {
-              active: false,
-              martingaleLevel: 0,
-              waitingForResult: false,
-              strategy: {
-                sequences: [1, 2],
-                maxMartingale: 2
-              },
-              stats: {
-                totalBets: 0,
-                wins: 0,
-                losses: 0,
-                profit: 0,
-                startedAt: Date.now()
-              },
-              autoProgressionEnabled: false,
-              initialStakeIndex: 0,
-              currentStakeIndex: 0,
-            };
-          }
-          
-          operationState[userId].autoProgressionEnabled = enabled;
-          operationState[userId].initialStakeIndex = initialStakeIndex || 0;
-          operationState[userId].currentStakeIndex = initialStakeIndex || 0;
-          
-          addWebSocketLog(userId, `🚀 Progressão automática ${enabled ? 'ativada' : 'desativada'}`, enabled ? 'success' : 'info');
-          
-          if (enabled) {
-            addWebSocketLog(userId, `📊 Índice inicial: ${initialStakeIndex + 1} - Evolução: ${STAKE_EVOLUTIONS[initialStakeIndex]?.id || 1}`, 'info');
-          }
-        }
-        return NextResponse.json({ success: true });
+      case 'update-recovery-bonus':
+        // Funcionalidade removida na nova lógica de stakes fixas
+        return NextResponse.json({ success: true, message: 'Funcionalidade removida - usando stakes fixas' });
+      
+      case 'update-accumulated-loss':
+        // Funcionalidade removida na nova lógica de stakes fixas
+        return NextResponse.json({ success: true, message: 'Funcionalidade removida - usando stakes fixas' });
       
       case 'update-progression':
         // 🚀 REMOVIDO: Funcionalidade de progressão automática removida
@@ -1100,14 +1029,10 @@ function shouldPollForResults(userId: string): boolean {
   const operation = operationState[userId];
   if (!operation) return false;
   
-  // Condições ESPECÍFICAS para fazer polling:
-  // 1. Há apostas pendentes aguardando resultado
+  // 🔧 CORREÇÃO: Só fazer polling se operação está ativa E há apostas pendentes
+  const hasActiveBets = operation.active && operation.waitingForResult && !!operation.lastGameId;
   
-  const hasActiveBets = operation.waitingForResult && !!operation.lastGameId;
-  
-
-  
-  // 🎯 NOVO: Só fazer polling quando há apostas pendentes
+  // 🎯 ANTI-SPAM: Não fazer polling se não há apostas pendentes
   // Não fazer polling apenas por estar "operando" sem apostas
   return hasActiveBets;
 }
@@ -1275,8 +1200,19 @@ async function processOperationResult(userId: string, resultColor: string, resul
     // ✅ Estado "aguardando resultado" liberado para próxima aposta - Log removido
   }
   
-  // ✅ NOVO: Usar o valor real da aposta armazenado, não o valor da sequência atual
-  const betAmount = operation.lastBetAmount || operation.strategy?.sequences?.[operation.martingaleLevel];
+  // ✅ NOVO: Usar o valor real da aposta armazenado, ou calcular dinamicamente
+  let betAmount = operation.lastBetAmount;
+  if (!betAmount) {
+    // Fallback: calcular dinamicamente se não foi armazenado
+    const currentLevel = STAKE_LEVELS[operation.currentLevel - 1] || STAKE_LEVELS[0];
+    const multiplier = operation.stakeMultiplier || 1;
+    addWebSocketLog(userId, `🔍 DEBUG: Resultado - Multiplicador ${multiplier}x aplicado`, 'info');
+    if (operation.martingaleLevel === 0) {
+      betAmount = currentLevel.m1 * multiplier;
+    } else {
+      betAmount = currentLevel.m2 * multiplier;
+    }
+  }
   const betColorName = COLOR_NAMES[betColor] || betColor;
   const resultColorName = COLOR_NAMES[resultColor] || resultColor;
   
@@ -1301,204 +1237,60 @@ async function processOperationResult(userId: string, resultColor: string, resul
   operation.currentBetColor = undefined;
   
   if (isWin) {
-    // ✅ GANHOU - NOVA LÓGICA: Avança para próximo nível
-    // 💰 Só conta estatísticas no modo REAL
+    // ✅ GANHOU - NOVA LÓGICA: Stakes fixas por nível
     if (isRealMode) {
       operation.stats.wins++;
       operation.stats.profit += betAmount;
-      
-
     }
     
-    const modeLabel = isRealMode ? '💰 REAL' : '🔍 ANÁLISE';
-    // Lucro individual da aposta (sempre o valor da aposta)
     addWebSocketLog(userId, `✅ Vitória! Lucro de R$ ${betAmount.toFixed(2)}`, 'success');
     
-    // 🔍 MODO ANÁLISE: NÃO marca vitórias aqui - só marca quando perde
-    
-    // 🎯 NOVA LÓGICA: Registra vitória IMEDIATAMENTE quando ganha (modo análise)
-    const originalRealMode = isRealMode;
-    if (!originalRealMode) {
-      // Registra vitória do nível atual ANTES de avançar
-      // Registrar vitória no martingale (simplificado)
-      addWebSocketLog(userId, `📊 Vitória M${operation.martingaleLevel + 1} registrada`, 'success');
-      addWebSocketLog(userId, `✅ 🔍 ANÁLISE - Vitória M${operation.martingaleLevel + 1} registrada!`, 'success');
-      
-      // 🎯 NOVA VERIFICAÇÃO: Após registrar vitória, verificar se limiares foram atingidos
-      await checkReadyForRealMode(userId);
-      
-      // 🔍 CORREÇÃO: Se o modo mudou para real, NÃO incrementar martingaleLevel (já foi resetado para M1)
-      const newRealMode = canExitAnalysisMode(userId);
-      if (newRealMode !== originalRealMode) {
-        addWebSocketLog(userId, `🔍 MODO REAL ATIVADO - Mantendo M1 (não incrementando)`, 'info');
-        return; // Sair sem incrementar
-      }
-    }
-    
-    // ✅ LÓGICA MARTINGALE NORMAL: Vitória avança nível (apenas se ainda estiver no mesmo modo)
-    operation.martingaleLevel++; // Avança martingale
-    
-    // 🎯 LÓGICA REMOVIDA: Renovação agora acontece após apostas, não após resultados
-    
-    // ✅ Verificar se atingiu M2 (máximo da sequência)
-    if (operation.martingaleLevel >= 2) {
-              // 🔥 NOVO: Verificar se está em modo M2 direto
-        if (operation.m4DirectBetType) {
-          // addWebSocketLog(userId, `🔥 MODO M2 DIRETO - OBJETIVO CONCLUÍDO! Acertou M2!`, 'success');
-          addWebSocketLog(userId, `🎯 MISSÃO CUMPRIDA! Parando operação automaticamente.`, 'success');
-          
-          // 🎯 NOVO: Marcar missão como cumprida para impedir apostas futuras
-          operation.missionCompleted = true;
-          addWebSocketLog(userId, `🛡️ Proteção ativada: Sistema não apostará mais até reset manual`, 'info');
-          
-          // Parar operação completamente
-          resetOperationSafely(userId, 'MODO M2 DIRETO - Objetivo concluído', true);
-          
-          // Mostrar mensagem de sucesso específica do modo M2 direto
-          // addWebSocketLog(userId, `✅ 🔥 MODO M2 DIRETO CONCLUÍDO COM SUCESSO! 🔥`, 'success');
-          
-          return; // Parar operação
-        }
-      
-      // 🔄 CORREÇÃO: Usar contadores para determinar comportamento
-      const currentRealMode = canExitAnalysisMode(userId);
-      
-      if (!currentRealMode) {
-                  // 🔄 ANÁLISE: M2 atingido = ganhou no M2 → RESETAR ANÁLISE COMPLETA
-          addWebSocketLog(userId, `✅ 🔍 ANÁLISE - M2 GANHO! Resetando análise completa`, 'success');
-        
-        addWebSocketLog(userId, `🎯 LÓGICA: M2 já saiu, chances menores de sair outro → Recomeçando análise`, 'info');
-        
-        // 🔄 RESET COMPLETO: Limpar todos os contadores
-        resetAnalysisCounters(userId);
-        // Removido: funções que não existem mais
-        
-        // Reset para início da sequência (volta para M1)
-        operation.martingaleLevel = 0;
-        operation.waitingForResult = false;
-        operation.currentBetColor = undefined;
-        
-        // 🎯 NOVO: Verificar se está pronto para ativar modo real após reset para M1
-        // Removido: smartActivation não existe mais
-        
-        addWebSocketLog(userId, `🔄 Análise resetada - Recomeçando do M1 com contadores zerados`, 'info');
-        
-        return; // Não continua o fluxo normal
-      } else {
-        // Estratégia break-even removida
-        
-        // 💰 REAL: M2 atingido = sucesso → Volta para análise  
-        addWebSocketLog(userId, `🛑 REAL - M2 GANHO! Operação concluída com SUCESSO!`, 'success');
-        
-        addWebSocketLog(userId, `💰 Sequência M1-M2 completada - Resetando dados (preservando autenticação)`, 'success');
-        
-        // 🔧 NOTA: No modo REAL não precisamos registrar vitórias para limiares (só conta lucro)
-        
-        // 🔧 CORREÇÃO: Usar reset seguro que preserva autenticação
-        resetOperationSafely(userId, 'REAL - M2 concluído com sucesso', true); // true = resetar coleta de resultados
-        
-        // ✅ NOVO: Iniciar nova análise automaticamente após M2 ganho
-        addWebSocketLog(userId, `🔄 Iniciando nova análise automaticamente...`, 'info');
-        setTimeout(() => {
-          startSimpleOperation(userId);
-        }, 1000); // Aguarda 1 segundo para processar o reset
-      }
+    if (operation.martingaleLevel === 0) {
+      // Vitória no M1 → vai para M2 do mesmo nível
+      operation.martingaleLevel = 1;
+      const currentLevel = STAKE_LEVELS[operation.currentLevel - 1] || STAKE_LEVELS[0];
+      const multiplier = operation.stakeMultiplier || 1;
+      const multiplierText = multiplier > 1 ? ` (${multiplier}x)` : '';
+      addWebSocketLog(userId, `💰 Vitória no M1 → Próxima aposta será M2: R$ ${(currentLevel.m2 * multiplier).toFixed(2)}${multiplierText} (Nível ${operation.currentLevel})`, 'info');
     } else {
-      // ✅ Continua operação - mostrar próxima aposta
-      const currentRealMode = canExitAnalysisMode(userId);
-      const modeLabel = currentRealMode ? '💰 REAL' : '🔍 ANÁLISE';
-      // addWebSocketLog(userId, `🔄 ${modeLabel} - Próxima aposta: M${operation.martingaleLevel + 1}`, 'info');
+      // Vitória no M2 → MISSÃO CUMPRIDA
+      operation.martingaleLevel = 0;
+      operation.active = false;
+          operation.missionCompleted = true;
       
-      // ✅ Se ainda estiver no modo análise, continuar normalmente
-      if (!currentRealMode) {
-        addWebSocketLog(userId, `🔄 ${modeLabel} - Continuando análise no M${operation.martingaleLevel + 1}`, 'info');
-      }
+      addWebSocketLog(userId, `💰 Vitória no M2 → 🎯 MISSÃO CUMPRIDA!`, 'success');
+      addWebSocketLog(userId, `✅ Operação finalizada com sucesso - Lucro garantido!`, 'success');
+        
+      return;
     }
     
-  } else {
-    // ❌ PERDEU - NOVA LÓGICA: Volta para M1
-    // 💰 Só conta estatísticas no modo REAL
+      } else {
+    // ❌ PERDEU - NOVA LÓGICA: Avança para próximo nível
     if (isRealMode) {
       operation.stats.losses++;
       operation.stats.profit -= betAmount;
     }
     
-    const isGreenDefeat = resultColor === 'green';
-    const defeatReason = isGreenDefeat ? '(ZERO)' : `(${resultNumber})`;
-    
-    const modeLabel = isRealMode ? '💰 REAL' : '🔍 ANÁLISE';
     const resultCharacteristics = getNumberCharacteristics(resultNumber);
     addWebSocketLog(userId, `❌ Derrota! Prejuízo de -R$ ${betAmount.toFixed(2)}`, 'error');
     addWebSocketLog(userId, `🎲 Resultado: ${resultCharacteristics}`, 'info');
     
-    // 🔄 DERROTA NO MODO ANÁLISE: Verificar se foi derrota no M2
-    if (!isRealMode) {
-      // 🔄 NOVA LÓGICA: Se perdeu no M2, registrar derrota M2
-      if (operation.martingaleLevel === 1) { // M2 é índice 1
-        // Removido: recordM2Loss não existe mais
-        addWebSocketLog(userId, `💥 Derrota M2 registrada`, 'error');
-        
-        // Verificar se atingiu o limiar de derrotas M2
-        // Removido: checkReadyForRealMode não existe mais
-      }
-    }
+    // Avançar para próximo nível
+    const nextLevelIndex = operation.currentLevel;
+    if (nextLevelIndex < STAKE_LEVELS.length) {
+      operation.currentLevel = nextLevelIndex + 1;
+      operation.martingaleLevel = 0; // Volta para M1 do próximo nível
       
-    // ✅ NOVA LÓGICA: Qualquer derrota volta para M1
-    // addWebSocketLog(userId, `🔄 DERROTA: Voltando para M1`, 'info');
-    
-    // Reset para início da sequência
+      const nextLevel = STAKE_LEVELS[operation.currentLevel - 1];
+      const multiplier = operation.stakeMultiplier || 1;
+      const multiplierText = multiplier > 1 ? ` (${multiplier}x)` : '';
+      addWebSocketLog(userId, `⬆️ Avançando para Nível ${operation.currentLevel} → Próxima aposta M1: R$ ${(nextLevel.m1 * multiplier).toFixed(2)}${multiplierText}`, 'info');
+    } else {
+      // Chegou no último nível
+      addWebSocketLog(userId, `⚠️ Último nível atingido (${STAKE_LEVELS.length}) - Resetando para Nível 1`, 'error');
+      operation.currentLevel = 1;
     operation.martingaleLevel = 0;
-    
-    // 🎯 NOVO: Aplicar stake pendente após derrota
-    if (operation.pendingStake && operation.pendingStake > 0) {
-      const findEvolutionByStake = (stake: number) => {
-        return STAKE_EVOLUTIONS.find(e => e.m1 === stake) || STAKE_EVOLUTIONS[0];
-      };
-      
-      const evolution = findEvolutionByStake(operation.pendingStake);
-      const newSequence = [evolution.m1, evolution.m2];
-      operation.strategy.sequences = newSequence;
-      
-      addWebSocketLog(userId, `💰 Stake pendente aplicada após derrota: R$ ${operation.pendingStake.toFixed(2)}`, 'success');
-      addWebSocketLog(userId, `📊 Nova sequência: [${newSequence.map(v => v.toFixed(2)).join(', ')}]`, 'info');
-      
-      // Limpar stake pendente
-      operation.pendingStake = null;
     }
-    
-    // 🚀 NOVO: Aplicar progressão automática após derrota (se ativada)
-    if (operation.autoProgressionEnabled && operation.currentStakeIndex !== undefined) {
-      const nextIndex = Math.min(STAKE_EVOLUTIONS.length - 1, operation.currentStakeIndex + 1);
-      
-      // Só avança se não chegou no limite
-      if (nextIndex > operation.currentStakeIndex) {
-        operation.currentStakeIndex = nextIndex;
-        
-        const nextEvolution = STAKE_EVOLUTIONS[nextIndex];
-        const newSequence = [nextEvolution.m1, nextEvolution.m2];
-        operation.strategy.sequences = newSequence;
-        
-        addWebSocketLog(userId, `🚀 Progressão automática: Avançando para evolução ${nextEvolution.id}`, 'success');
-        addWebSocketLog(userId, `📊 Nova sequência: [${newSequence.map(v => v.toFixed(2)).join(', ')}]`, 'info');
-      } else {
-        addWebSocketLog(userId, `🚀 Progressão automática: Já no limite máximo (evolução ${STAKE_EVOLUTIONS[operation.currentStakeIndex].id})`, 'info');
-      }
-    }
-    
-    // 🚀 REMOVIDO: Aplicar progressão pendente após derrota - funcionalidade removida
-    
-    // 🎯 NOVO: Verificar se está pronto para ativar modo real após reset para M1
-    // Removido: smartActivation não existe mais
-    
-    // 💰 REAL: Derrota → CONTINUA no modo real (não volta para análise)
-    if (isRealMode) {
-      // addWebSocketLog(userId, `🔄 REAL - Derrota → Continuando no modo real (objetivo: M4)`, 'info');
-      // NÃO muda para análise - continua no modo real até conseguir M4
-    }
-    
-    // 🎯 LÓGICA REMOVIDA: Renovação agora acontece após apostas, não após resultados
-    
-    // ⏰ REMOVIDO: Renovação automática após derrota (já feita após apostas)
   }
 }
 
@@ -1800,14 +1592,14 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       // Log removido: informação técnica desnecessária
     // addWebSocketLog(userId, `💰 Sequência Personalizada (Stake R$ ${stake.toFixed(2)}) - M1-M4: [${calculatedSequence.map((v: number) => v.toFixed(2)).join(', ')}]`, 'info');
     } else {
-      // ✅ Calcular sequência baseada no tipValue usando as evoluções
-      const findEvolutionByStake = (stake: number) => {
-        return STAKE_EVOLUTIONS.find(e => e.m1 === stake) || STAKE_EVOLUTIONS[0];
+          // ✅ Calcular sequência baseada no tipValue usando os níveis
+    const findLevelByStake = (stake: number) => {
+      return STAKE_LEVELS.find(l => l.m1 === stake) || STAKE_LEVELS[0];
       };
 
-      const evolution = findEvolutionByStake(tipValue || 1.00);
-      calculatedSequence = [evolution.m1, evolution.m2];
-      strategyLabel = `Evolução ${evolution.id} - M1: R$ ${evolution.m1.toFixed(2)} | M2: R$ ${evolution.m2.toFixed(2)}`;
+    const level = findLevelByStake(tipValue || 1.00);
+    calculatedSequence = [level.m1, level.m2];
+    strategyLabel = `Nível ${level.level} - M1: R$ ${level.m1.toFixed(2)} | M2: R$ ${level.m2.toFixed(2)}`;
       // Log removido: informação técnica desnecessária
     // addWebSocketLog(userId, `🎯 Estratégia ${strategyLabel}`, 'info');
     }
@@ -1823,27 +1615,24 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
     gameResults[userId] = [];
     isFirstConnection[userId] = true; // Marcar como primeira conexão
     
-    // 🔍 NOVO: Preservar configurações de progressão automática se existirem
-    const existingAutoProgressionEnabled = operationState[userId]?.autoProgressionEnabled || false;
-    const existingInitialStakeIndex = operationState[userId]?.initialStakeIndex || 0;
-    const existingCurrentStakeIndex = operationState[userId]?.currentStakeIndex || 0;
+    // 🔍 NOVA LÓGICA: Preservar nível atual e multiplicador se existir
+    const existingLevel = operationState[userId]?.currentLevel || 1;
+    const existingMultiplier = operationState[userId]?.stakeMultiplier || 1;
     
     operationState[userId] = {
     active: false,
     martingaleLevel: 0,
     waitingForResult: false,
-    currentBetColor: undefined, // ✅ CORREÇÃO: Inicializar cor da aposta
-    lastBetAmount: undefined, // ✅ NOVO: Armazenar valor real da última aposta
+    currentBetColor: undefined,
+    lastBetAmount: undefined,
     
     strategy: {
       sequences: calculatedSequence,
       maxMartingale: 2
     },
-    // 🚀 NOVO: Preservar configurações de progressão automática
-    autoProgressionEnabled: existingAutoProgressionEnabled,
-    initialStakeIndex: existingInitialStakeIndex,
-    currentStakeIndex: existingCurrentStakeIndex,
-    // 🔍 SISTEMA SIMPLIFICADO: Removido analysisCounters
+    // 🚀 NOVA LÓGICA: Sistema de níveis fixos
+    currentLevel: existingLevel,
+    stakeMultiplier: existingMultiplier, // Preservar multiplicador existente
     stats: {
       totalBets: 0,
       wins: 0,
@@ -1931,6 +1720,10 @@ async function startSimpleOperation(userId: string) {
       missionCompleted: false, // 🎯 NOVO: Resetar flag de missão cumprida
       
     };
+    
+    // 🔢 NOVO: Log do multiplicador aplicado (sempre mostrar)
+    const appliedMultiplier = operationState[userId]?.stakeMultiplier || 1;
+    addWebSocketLog(userId, `🔢 Multiplicador aplicado: ${appliedMultiplier}x (todos os valores serão multiplicados)`, 'info');
     
     // 📊 NOVO: Polling será iniciado automaticamente quando houver apostas pendentes
     
@@ -2587,9 +2380,11 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           return;
         }
 
-        // ⏰ Verificação de renovação automática a cada mensagem
-        if (shouldRenewAutomatically(userId)) {
-          // Logs removidos: renovação automática é silenciosa
+        // ⏰ Verificação de renovação automática - OTIMIZADA
+        // 🔧 CORREÇÃO: Só verificar renovação se não há uma renovação em andamento
+        if (!renewalInProgress[userId] && shouldRenewAutomatically(userId)) {
+          renewalInProgress[userId] = true;
+          
           setTimeout(async () => {
             const renewed = await renewSession(userId);
             if (renewed) {
@@ -2601,7 +2396,10 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             } else {
               addWebSocketLog(userId, '❌ Falha na renovação automática', 'error');
             }
-          }, 2000); // Delay maior para evitar conflito com renovação pós-aposta
+            
+            // Liberar flag de renovação em andamento
+            renewalInProgress[userId] = false;
+          }, 2000);
         }
 
         // 🚫 REMOVIDO: Processamento de resultados via WebSocket
@@ -2818,7 +2616,14 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   // 🎯 VERIFICAÇÃO CRÍTICA: Não apostar se missão foi cumprida
   if (operation.missionCompleted) {
     addWebSocketLog(userId, '🛡️ Missão já cumprida - sistema protegido contra apostas automáticas', 'info');
+    addWebSocketLog(userId, '🎯 MISSÃO CUMPRIDA - Lucro garantido!', 'success');
     addWebSocketLog(userId, '💡 Use "Parar Operação" e "Iniciar Operação" para resetar se necessário', 'info');
+    return;
+  }
+  
+  // 🎯 VERIFICAÇÃO ADICIONAL: Não apostar se operação não estiver ativa
+  if (!operation.active) {
+    addWebSocketLog(userId, '🛡️ Operação não está ativa - não executando apostas', 'info');
     return;
   }
   
@@ -2849,8 +2654,22 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   // ✅ CORREÇÃO: Armazenar cor da aposta atual no estado da operação
   operation.currentBetColor = betColor as 'R' | 'B' | 'E' | 'O' | 'L' | 'H';
   
-  // ✅ Usar valor do martingale atual (M1, M2, M3, M4)
-  const betAmount = operation.strategy?.sequences?.[operation.martingaleLevel];
+  // ✅ NOVA LÓGICA: Stakes fixas por nível com multiplicador
+  let betAmount: number;
+  const currentLevel = STAKE_LEVELS[operation.currentLevel - 1] || STAKE_LEVELS[0];
+  const multiplier = operation.stakeMultiplier || 1;
+  
+  addWebSocketLog(userId, `🔍 DEBUG: Calculando aposta - Nível ${operation.currentLevel}, Multiplicador ${multiplier}x`, 'info');
+  
+  if (operation.martingaleLevel === 0) {
+    // M1 do nível atual com multiplicador
+    betAmount = currentLevel.m1 * multiplier;
+    addWebSocketLog(userId, `🔍 DEBUG: M1 - Valor base: R$ ${currentLevel.m1.toFixed(2)} × ${multiplier}x = R$ ${betAmount.toFixed(2)}`, 'info');
+  } else {
+    // M2 do nível atual com multiplicador
+    betAmount = currentLevel.m2 * multiplier;
+    addWebSocketLog(userId, `🔍 DEBUG: M2 - Valor base: R$ ${currentLevel.m2.toFixed(2)} × ${multiplier}x = R$ ${betAmount.toFixed(2)}`, 'info');
+  }
   
   // ✅ NOVO: Armazenar valor real da aposta
   operation.lastBetAmount = betAmount;
@@ -2953,10 +2772,27 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     // 🚀 REMOVIDO: Progressão automática removida
     const progressionText = '';
     
+    // ✅ NOVA LÓGICA: Mostrar qual tipo de aposta
+    const betType = operation.martingaleLevel === 0 ? 
+      `M1 (Nível ${operation.currentLevel})` : 
+      `M2 (Nível ${operation.currentLevel})`;
+    
+    const multiplierText = multiplier > 1 ? ` | ${multiplier}x` : '';
+    
+    // 🎯 NOVO: Mostrar progresso da missão
+    if (operation.martingaleLevel === 1) {
+      addWebSocketLog(userId, `🎯 MISSÃO EM ANDAMENTO: Apostando M2 - Se ganhar = MISSÃO CUMPRIDA!`, 'info');
+    }
+    
+    // 🔢 NOVO: Log do multiplicador sendo aplicado na aposta
+    if (multiplier > 1) {
+      addWebSocketLog(userId, `🔢 Multiplicador ${multiplier}x aplicado - Valor base: R$ ${(betAmount / multiplier).toFixed(2)} → Valor final: R$ ${betAmount.toFixed(2)}`, 'info');
+    }
+    
     if (isTemporaryGameId) {
-      addWebSocketLog(userId, `🎯 Aposta enviada: R$ ${betAmount.toFixed(2)} no ${colorName} (tentativa imediata)${progressionText}`, 'game');
+      addWebSocketLog(userId, `🎯 Aposta enviada: R$ ${betAmount.toFixed(2)} no ${colorName} [${betType}${multiplierText}] (tentativa imediata)${progressionText}`, 'game');
     } else {
-      addWebSocketLog(userId, `🎯 Aposta realizada: R$ ${betAmount.toFixed(2)} no ${colorName}${progressionText}`, 'game');
+      addWebSocketLog(userId, `🎯 Aposta realizada: R$ ${betAmount.toFixed(2)} no ${colorName} [${betType}${multiplierText}]${progressionText}`, 'game');
     }
     
     // ✅ NOVO: Marcar timestamp da primeira aposta após conexão
@@ -3092,37 +2928,19 @@ function resetOperationSafely(userId: string, reason: string = 'Reset automátic
   
   // Parar apenas a operação, sem afetar a autenticação
   if (operationState[userId]) {
-    // 🔍 NOVO: Salvar configurações de progressão automática antes do reset
-    const savedAutoProgressionEnabled = operationState[userId].autoProgressionEnabled;
-    const savedInitialStakeIndex = operationState[userId].initialStakeIndex;
-    const savedCurrentStakeIndex = operationState[userId].currentStakeIndex;
+    // 🔍 NOVO: Salvar nível atual e multiplicador antes do reset
+    const savedLevel = operationState[userId].currentLevel || 1;
+    const savedMultiplier = operationState[userId].stakeMultiplier || 1;
     
     operationState[userId].active = false;
     operationState[userId].waitingForResult = false;
     operationState[userId].currentBetColor = undefined;
-    operationState[userId].lastBetAmount = undefined; // ✅ NOVO: Limpar valor da aposta
+    operationState[userId].lastBetAmount = undefined;
     operationState[userId].martingaleLevel = 0;
-    // 🔧 NOVO: Limpar stake pendente quando operação reseta
-    operationState[userId].pendingStake = null;
     
-    // 🚀 NOVO: Resetar progressão automática para índice inicial após vitória
-    if (savedAutoProgressionEnabled && savedInitialStakeIndex !== undefined) {
-      const initialIndex = savedInitialStakeIndex;
-      operationState[userId].currentStakeIndex = initialIndex;
-      
-      const initialEvolution = STAKE_EVOLUTIONS[initialIndex];
-      operationState[userId].strategy.sequences = [initialEvolution.m1, initialEvolution.m2];
-      
-      addWebSocketLog(userId, `🚀 Progressão automática: Resetando para evolução inicial ${initialEvolution.id}`, 'success');
-      addWebSocketLog(userId, `📊 Sequência resetada: [${operationState[userId].strategy.sequences.map(v => v.toFixed(2)).join(', ')}]`, 'info');
-    }
-    
-    // 🔍 NOVO: Restaurar configurações de progressão automática após reset
-    operationState[userId].autoProgressionEnabled = savedAutoProgressionEnabled;
-    operationState[userId].initialStakeIndex = savedInitialStakeIndex;
-    if (savedCurrentStakeIndex !== undefined) {
-      operationState[userId].currentStakeIndex = savedCurrentStakeIndex;
-    }
+    // 🔍 NOVO: Restaurar nível e multiplicador após reset
+    operationState[userId].currentLevel = savedLevel;
+    operationState[userId].stakeMultiplier = savedMultiplier;
     
     // 🎯 NOVO: Manter flag de missão cumprida (não resetar automaticamente)
     // O usuário precisa iniciar nova operação para resetar
@@ -3166,11 +2984,13 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true, pres
   
   // Parar operação
   if (operationState[userId]) {
+    addWebSocketLog(userId, `🔍 DEBUG: stopAllConnections - multiplicador antes: ${operationState[userId].stakeMultiplier}x`, 'info');
     operationState[userId].active = false;
     operationState[userId].waitingForResult = false;
     operationState[userId].currentBetColor = undefined;
     // 🔧 NOVO: Limpar stake pendente quando operação para
-    operationState[userId].pendingStake = null;
+    // 🔧 REMOVIDO: pendingStake não existe mais na nova lógica
+    addWebSocketLog(userId, `🔍 DEBUG: stopAllConnections - multiplicador após: ${operationState[userId].stakeMultiplier}x`, 'info');
   }
   
   // Fechar WebSocket
@@ -3314,13 +3134,22 @@ async function getWebSocketLogs(userId: string) {
         detailedHistory: getDetailedHistory(userId),
         // 🚀 NOVO: Operation report incluído para otimizar requisições
         operationReport: operationReport,
-        // 🔧 NOVO: Informação sobre stake pendente
-        pendingStakeInfo: operation?.pendingStake ? {
-          hasPendingStake: true,
-          pendingStake: operation.pendingStake
-        } : {
-          hasPendingStake: false,
-          pendingStake: null
+              // 🔧 NOVA LÓGICA: Informação sobre níveis fixos com multiplicador
+      levelInfo: {
+        currentLevel: operation?.currentLevel || 1,
+        currentLevelData: (() => {
+          const baseLevel = STAKE_LEVELS[operation?.currentLevel - 1] || STAKE_LEVELS[0];
+          const multiplier = operation?.stakeMultiplier || 1;
+          return {
+            ...baseLevel,
+            m1: baseLevel.m1 * multiplier,
+            m2: baseLevel.m2 * multiplier,
+            cost: baseLevel.cost * multiplier
+          };
+        })(),
+        stakeMultiplier: operation?.stakeMultiplier || 1,
+        expectedProfit: (operation?.stakeMultiplier || 1) * 2, // Lucro fixo: multiplicador × R$ 2,00
+        totalLevels: STAKE_LEVELS.length
         },
         // Debugging info - removido
         debugInfo: null,
@@ -3596,8 +3425,14 @@ interface SimpleRenewalState {
 // Mapa para controlar renovações automáticas por usuário
 const autoRenewal: { [userId: string]: SimpleRenewalState } = {};
 
+// 🔧 NOVO: Controle para evitar renovações simultâneas
+const renewalInProgress: { [userId: string]: boolean } = {};
+
 // ⏰ Função para inicializar renovação automática
 function initializeAutoRenewal(userId: string) {
+  // 🔧 CORREÇÃO: Só inicializar se não existe para evitar logs excessivos
+  if (autoRenewal[userId]) return;
+  
   const now = Date.now();
   autoRenewal[userId] = {
     nextRenewalTime: now + (10 * 60 * 1000), // 10 minutos
@@ -3655,16 +3490,18 @@ function triggerRenewalAfterBet(userId: string) {
 function shouldRenewAutomatically(userId: string): boolean {
   const renewal = autoRenewal[userId];
   if (!renewal) {
+    // 🔧 CORREÇÃO: Só inicializar se não existe, evitando logs excessivos
     initializeAutoRenewal(userId);
     return false;
   }
 
   const now = Date.now();
   
+  // 🔧 CORREÇÃO: Verificar se já passou do tempo e não foi renovado recentemente
   if (now >= renewal.nextRenewalTime) {
-    // 🎯 ANTI-DUPLICAÇÃO: Verificar se não foi renovado recentemente (últimos 30 segundos)
+    // 🎯 ANTI-DUPLICAÇÃO: Verificar se não foi renovado recentemente (últimos 60 segundos)
     const timeSinceLastRenewal = now - renewal.lastRenewalTime;
-    if (timeSinceLastRenewal < 30 * 1000) {
+    if (timeSinceLastRenewal < 60 * 1000) { // Aumentado para 60 segundos
       // Renovação muito recente, pular
       return false;
     }
@@ -3685,6 +3522,11 @@ function clearAutoRenewal(userId: string) {
     delete autoRenewal[userId];
     addWebSocketLog(userId, '⏰ Renovação automática limpa', 'info');
   }
+  
+  // 🔧 NOVO: Limpar flag de renovação em andamento
+  if (renewalInProgress[userId]) {
+    delete renewalInProgress[userId];
+  }
 }
 
 // 🚀 REMOVIDO: Funções para gerenciar progressão automática - funcionalidade removida
@@ -3694,6 +3536,9 @@ function clearAutoRenewal(userId: string) {
 // - applyProgressionStake
 // - resetProgressionCounter
 // - getProgressionStatus
+
+// 💰 NOVA LÓGICA: Sistema de stakes fixas por nível
+// Funções antigas removidas - agora usa STAKE_LEVELS diretamente
 
 
 

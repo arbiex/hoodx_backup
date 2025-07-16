@@ -998,12 +998,10 @@ function shouldPollForResults(userId: string): boolean {
   const operation = operationState[userId];
   if (!operation) return false;
   
-  // Condições ESPECÍFICAS para fazer polling:
-  // 1. Há apostas pendentes aguardando resultado
+  // 🔧 CORREÇÃO: Só fazer polling se operação está ativa E há apostas pendentes
+  const hasActiveBets = operation.active && operation.waitingForResult && !!operation.lastGameId;
   
-  const hasActiveBets = operation.waitingForResult && !!operation.lastGameId;
-  
-  // 🎯 NOVO: Só fazer polling quando há apostas pendentes
+  // 🎯 ANTI-SPAM: Não fazer polling se não há apostas pendentes
   // Não fazer polling apenas por estar "operando" sem apostas
   return hasActiveBets;
 }
@@ -2461,9 +2459,11 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           return;
         }
 
-        // ⏰ Verificação de renovação automática a cada mensagem
-        if (shouldRenewAutomatically(userId)) {
-          // Logs removidos: renovação automática é silenciosa
+        // ⏰ Verificação de renovação automática - OTIMIZADA
+        // 🔧 CORREÇÃO: Só verificar renovação se não há uma renovação em andamento
+        if (!renewalInProgress[userId] && shouldRenewAutomatically(userId)) {
+          renewalInProgress[userId] = true;
+          
           setTimeout(async () => {
             const renewed = await renewSession(userId);
             if (renewed) {
@@ -2475,7 +2475,10 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             } else {
               addWebSocketLog(userId, '❌ Falha na renovação automática', 'error');
             }
-          }, 2000); // Delay maior para evitar conflito com renovação pós-aposta
+            
+            // Liberar flag de renovação em andamento
+            renewalInProgress[userId] = false;
+          }, 2000);
         }
 
         // 🚫 REMOVIDO: Processamento de resultados via WebSocket
@@ -3441,8 +3444,14 @@ interface SimpleRenewalState {
 // Mapa para controlar renovações automáticas por usuário
 const autoRenewal: { [userId: string]: SimpleRenewalState } = {};
 
+// 🔧 NOVO: Controle para evitar renovações simultâneas
+const renewalInProgress: { [userId: string]: boolean } = {};
+
 // ⏰ Função para inicializar renovação automática
 function initializeAutoRenewal(userId: string) {
+  // 🔧 CORREÇÃO: Só inicializar se não existe para evitar logs excessivos
+  if (autoRenewal[userId]) return;
+  
   const now = Date.now();
   autoRenewal[userId] = {
     nextRenewalTime: now + (10 * 60 * 1000), // 10 minutos
@@ -3500,16 +3509,18 @@ function triggerRenewalAfterBet(userId: string) {
 function shouldRenewAutomatically(userId: string): boolean {
   const renewal = autoRenewal[userId];
   if (!renewal) {
+    // 🔧 CORREÇÃO: Só inicializar se não existe, evitando logs excessivos
     initializeAutoRenewal(userId);
     return false;
   }
 
   const now = Date.now();
   
+  // 🔧 CORREÇÃO: Verificar se já passou do tempo e não foi renovado recentemente
   if (now >= renewal.nextRenewalTime) {
-    // 🎯 ANTI-DUPLICAÇÃO: Verificar se não foi renovado recentemente (últimos 30 segundos)
+    // 🎯 ANTI-DUPLICAÇÃO: Verificar se não foi renovado recentemente (últimos 60 segundos)
     const timeSinceLastRenewal = now - renewal.lastRenewalTime;
-    if (timeSinceLastRenewal < 30 * 1000) {
+    if (timeSinceLastRenewal < 60 * 1000) { // Aumentado para 60 segundos
       // Renovação muito recente, pular
       return false;
     }
@@ -3529,6 +3540,11 @@ function clearAutoRenewal(userId: string) {
   if (autoRenewal[userId]) {
     delete autoRenewal[userId];
     addWebSocketLog(userId, '⏰ Renovação automática limpa', 'info');
+  }
+  
+  // 🔧 NOVO: Limpar flag de renovação em andamento
+  if (renewalInProgress[userId]) {
+    delete renewalInProgress[userId];
   }
 }
 

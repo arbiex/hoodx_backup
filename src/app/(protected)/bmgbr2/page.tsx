@@ -54,60 +54,10 @@ export default function BMGBR2() {
     pragmaticUserId?: string;
   } | null>(null);
 
-  // 💰 NOVO: Estados para sistema de stake simplificado
-  const [selectedStakeIndex, setSelectedStakeIndex] = useState<number>(0); // Índice da evolução (0-39)
+  // 💰 NOVA LÓGICA: Sistema de stakes com multiplicador
+  const [stakeMultiplier, setStakeMultiplier] = useState<number>(1); // Multiplicador: 1x, 2x, 3x, 4x, 5x
   const [martingaleSequence, setMartingaleSequence] = useState<number[]>([]);
-  const [totalMartingaleAmount, setTotalMartingaleAmount] = useState<number>(0);
-  
-  // 🚀 NOVO: Estado para progressão automática de stake
-  const [autoProgressionEnabled, setAutoProgressionEnabled] = useState<boolean>(false);
-  const [initialStakeIndex, setInitialStakeIndex] = useState<number>(0); // Índice inicial para voltar após vitória
-  
-  // 💰 NOVO: 40 Evoluções de Stake predefinidas com M1 e M2
-  const STAKE_EVOLUTIONS = [
-    { id: 1, m1: 1.00, m2: 2.00 },
-    { id: 2, m1: 1.00, m2: 3.00 },
-    { id: 3, m1: 2.00, m2: 4.00 },
-    { id: 4, m1: 3.00, m2: 5.00 },
-    { id: 5, m1: 4.00, m2: 6.00 },
-    { id: 6, m1: 5.00, m2: 9.00 },
-    { id: 7, m1: 6.00, m2: 13.00 },
-    { id: 8, m1: 7.00, m2: 18.00 },
-    { id: 9, m1: 8.00, m2: 24.00 },
-    { id: 10, m1: 9.00, m2: 31.00 },
-    { id: 11, m1: 10.00, m2: 39.00 },
-    { id: 12, m1: 11.00, m2: 48.00 },
-    { id: 13, m1: 12.00, m2: 58.00 },
-    { id: 14, m1: 13.00, m2: 69.00 },
-    { id: 15, m1: 14.00, m2: 81.00 },
-    { id: 16, m1: 15.00, m2: 94.00 },
-    { id: 17, m1: 16.00, m2: 108.00 },
-    { id: 18, m1: 17.00, m2: 123.00 },
-    { id: 19, m1: 18.00, m2: 139.00 },
-    { id: 20, m1: 19.00, m2: 156.00 },
-    { id: 21, m1: 20.00, m2: 174.00 },
-    { id: 22, m1: 21.00, m2: 193.00 },
-    { id: 23, m1: 22.00, m2: 213.00 },
-    { id: 24, m1: 23.00, m2: 234.00 },
-    { id: 25, m1: 24.00, m2: 256.00 },
-    { id: 26, m1: 25.00, m2: 279.00 },
-    { id: 27, m1: 26.00, m2: 303.00 },
-    { id: 28, m1: 27.00, m2: 328.00 },
-    { id: 29, m1: 28.00, m2: 354.00 },
-    { id: 30, m1: 29.00, m2: 381.00 },
-    { id: 31, m1: 30.00, m2: 409.00 },
-    { id: 32, m1: 31.00, m2: 439.00 },
-    { id: 33, m1: 32.00, m2: 470.00 },
-    { id: 34, m1: 33.00, m2: 502.00 },
-    { id: 35, m1: 34.00, m2: 535.00 },
-    { id: 36, m1: 35.00, m2: 569.00 },
-    { id: 37, m1: 36.00, m2: 604.00 },
-    { id: 38, m1: 37.00, m2: 640.00 },
-    { id: 39, m1: 38.00, m2: 677.00 },
-    { id: 40, m1: 39.00, m2: 715.00 }
-  ];
-
-
+  const [totalMartingaleAmount, setTotalMartingaleAmount] = useState<number>(0); // M1 sempre fixo em R$ 1,00
 
   // Estados para WebSocket logs
   const [websocketLogs, setWebsocketLogs] = useState<Array<{ 
@@ -329,13 +279,52 @@ export default function BMGBR2() {
 
   // Função checkFrequencyThresholds removida - não mais necessária no modo M4 direto
 
-  // 💰 NOVA FUNÇÃO: Calcular sequência de martingale baseada na evolução selecionada
-  const calculateMartingaleSequence = (evolutionIndex: number): number[] => {
-    if (evolutionIndex < 0 || evolutionIndex >= STAKE_EVOLUTIONS.length) return [];
-    
-    const evolution = STAKE_EVOLUTIONS[evolutionIndex];
-    
-    return [evolution.m1, evolution.m2];
+  // 💰 NOVA LÓGICA: Array dos níveis de stake fixos com custos
+  const STAKE_LEVELS = [
+    { level: 1, m1: 1.0, m2: 1.0, cost: 1 },
+    { level: 2, m1: 1.0, m2: 2.0, cost: 2 },
+    { level: 3, m1: 1.5, m2: 2.5, cost: 3.5 },
+    { level: 4, m1: 2.0, m2: 3.0, cost: 5.5 },
+    { level: 5, m1: 2.5, m2: 4.0, cost: 8 },
+    { level: 6, m1: 3.0, m2: 5.0, cost: 11.5 },
+    { level: 7, m1: 4.0, m2: 6.0, cost: 16 },
+    { level: 8, m1: 5.0, m2: 8.0, cost: 22 },
+    { level: 9, m1: 6.0, m2: 10.0, cost: 30 },
+    { level: 10, m1: 8.0, m2: 12.0, cost: 40.5 },
+    { level: 11, m1: 10.0, m2: 15.0, cost: 54.5 },
+    { level: 12, m1: 12.0, m2: 20.0, cost: 73.5 },
+    { level: 13, m1: 15.0, m2: 25.0, cost: 98.5 },
+    { level: 14, m1: 20.0, m2: 30.0, cost: 132 },
+    { level: 15, m1: 25.0, m2: 40.0, cost: 176.5 },
+    { level: 16, m1: 30.0, m2: 50.0, cost: 236 },
+    { level: 17, m1: 40.0, m2: 65.0, cost: 315.5 },
+    { level: 18, m1: 50.0, m2: 80.0, cost: 421 },
+    { level: 19, m1: 65.0, m2: 105.0, cost: 562 },
+    { level: 20, m1: 80.0, m2: 130.0, cost: 750 },
+    { level: 21, m1: 105.0, m2: 170.0, cost: 1000 },
+    { level: 22, m1: 130.0, m2: 215.0, cost: 1334 },
+    { level: 23, m1: 170.0, m2: 280.0, cost: 1779 },
+    { level: 24, m1: 215.0, m2: 355.0, cost: 2372 },
+    { level: 25, m1: 280.0, m2: 465.0, cost: 3163 },
+    { level: 26, m1: 355.0, m2: 590.0, cost: 4218 },
+    { level: 27, m1: 465.0, m2: 775.0, cost: 5624 },
+    { level: 28, m1: 590.0, m2: 985.0, cost: 7499 },
+    { level: 29, m1: 2500.0, m2: 5001.0, cost: 9999 }
+  ];
+
+  // 💰 NOVA FUNÇÃO: Calcular stakes com multiplicador
+  const calculateStakesWithMultiplier = (level: number, multiplier: number) => {
+    const baseLevel = STAKE_LEVELS.find(l => l.level === level) || STAKE_LEVELS[0];
+    return {
+      m1: baseLevel.m1 * multiplier,
+      m2: baseLevel.m2 * multiplier
+    };
+  };
+
+  // 💰 NOVA FUNÇÃO: Calcular sequência de martingale (Nível 1 com multiplicador)
+  const calculateMartingaleSequence = (): number[] => {
+    const stakes = calculateStakesWithMultiplier(1, stakeMultiplier);
+    return [stakes.m1, stakes.m2];
   };
 
   // 💰 NOVA FUNÇÃO: Calcular valor total acumulado
@@ -343,14 +332,14 @@ export default function BMGBR2() {
     return sequence.reduce((total, value) => total + value, 0);
   };
 
-  // 💰 FUNÇÃO HELPER: Obter stake atual (M1) da evolução selecionada
+  // 💰 FUNÇÃO HELPER: Obter stake atual (M1) - Nível 1 com multiplicador
   const getCurrentStake = (): number => {
-    if (selectedStakeIndex < 0 || selectedStakeIndex >= STAKE_EVOLUTIONS.length) return 0;
-    return STAKE_EVOLUTIONS[selectedStakeIndex].m1;
+    const stakes = calculateStakesWithMultiplier(1, stakeMultiplier);
+    return stakes.m1;
   };
 
-  // 🚀 NOVA FUNÇÃO: Atualizar configuração de progressão automática
-  const updateAutoProgressionSetting = async (enabled: boolean) => {
+  // 🚀 NOVA FUNÇÃO: Atualizar multiplicador de stake
+  const updateStakeMultiplier = async (newMultiplier: number) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -363,9 +352,8 @@ export default function BMGBR2() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: user.id,
-          action: 'update-auto-progression',
-          enabled: enabled,
-          initialStakeIndex: selectedStakeIndex
+          action: 'update-strategy',
+          stakeMultiplier: newMultiplier
         })
       });
 
@@ -376,32 +364,32 @@ export default function BMGBR2() {
       const result = await response.json();
       
       if (result.success) {
-        console.log(`✅ Progressão automática ${enabled ? 'ativada' : 'desativada'}`);
+        console.log(`✅ Multiplicador de stake atualizado para ${newMultiplier}x`);
       } else {
         console.error('❌ Erro na resposta do backend:', result.error);
       }
     } catch (error) {
-      console.error('❌ Erro ao atualizar progressão automática:', error);
+      console.error('❌ Erro ao atualizar multiplicador de stake:', error);
     }
   };
 
-  // 💰 EFEITO: Recalcular sequência quando stake muda
+  // 💰 EFEITO: Recalcular sequência quando multiplicador muda
   useEffect(() => {
-    const newSequence = calculateMartingaleSequence(selectedStakeIndex);
+    const newSequence = calculateMartingaleSequence();
     setMartingaleSequence(newSequence);
     setTotalMartingaleAmount(calculateTotalAmount(newSequence));
-  }, [selectedStakeIndex]);
+  }, [stakeMultiplier]);
 
   // 💰 EFEITO: Inicializar sequência na primeira renderização
   useEffect(() => {
     if (martingaleSequence.length === 0) {
-      const initialSequence = calculateMartingaleSequence(selectedStakeIndex);
+      const initialSequence = calculateMartingaleSequence();
       setMartingaleSequence(initialSequence);
       setTotalMartingaleAmount(calculateTotalAmount(initialSequence));
     }
   }, []);
 
-  // Removed: Stop Gain effects
+  // 🚀 REMOVIDO: Função de progressão automática não aplicável à nova lógica
 
   // 🔥 NOVO: Inicializar coleta de insights automaticamente
   useEffect(() => {
@@ -574,10 +562,7 @@ export default function BMGBR2() {
     // Função removida - progressão automática removida
   };
 
-  // 🚀 EFEITO: Verificar se progressão pode ser reativada quando stake ou limite mudar
-  useEffect(() => {
-    // Efeito removido - progressão automática removida
-  }, [selectedStakeIndex]);
+  // 🚀 REMOVIDO: Efeito de progressão automática não aplicável à nova lógica
 
   // 🎯 FUNÇÃO INTELIGENTE: Determina quando é seguro parar a operação
   const checkCanSafelyStop = () => {
@@ -634,7 +619,7 @@ export default function BMGBR2() {
   // 🚀 NOVA: Verificar reativação da progressão quando limite máximo muda
   useEffect(() => {
     // Função removida - progressão automática removida
-  }, [selectedStakeIndex]);
+  }, []);
 
   // ✅ NOVO: Verificar estado quando conexão mudar
   useEffect(() => {
@@ -1907,6 +1892,12 @@ export default function BMGBR2() {
         throw new Error(connectResult.error || 'Erro ao conectar');
       }
 
+      // ✅ ETAPA 1.5: Enviar multiplicador após conexão estabelecida
+      await updateStakeMultiplier(stakeMultiplier);
+      
+      // ✅ ETAPA 1.6: Aguardar um pouco para garantir que foi salvo
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // ✅ ETAPA 2: Iniciar operação (start-operation)
       const operationResponse = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
@@ -2184,13 +2175,14 @@ export default function BMGBR2() {
         selectedStake: getCurrentStake() // <-- Enviar o stake selecionado
       })
     });
-        }, [selectedStakeIndex]);
+        }, []);
 
   // 🔥 NOVO: Atualizar tipo de aposta dinamicamente durante operação
   const previousBetTypeRef = useRef<string | null>(null);
   
   useEffect(() => {
-    if (!userIdRef.current || !isOperating) return;
+    // 🔧 CORREÇÃO: Verificar se está realmente operando e conectado
+    if (!userIdRef.current || !isOperating || !connectionStatus.connected) return;
     
     // Evitar chamadas desnecessárias - só executar se o tipo de aposta realmente mudou
     if (previousBetTypeRef.current === m4DirectBetType) return;
@@ -2219,7 +2211,7 @@ export default function BMGBR2() {
     };
 
     updateBetType();
-  }, [m4DirectBetType, isOperating]);
+  }, [m4DirectBetType, isOperating, connectionStatus.connected]);
 
 
   useEffect(() => {
@@ -2846,107 +2838,114 @@ export default function BMGBR2() {
 
                 </div>
 
-                {/* 💰 NOVO: Defina sua Stake - 40 Evoluções */}
+                {/* 💰 NOVO: Lógica de Stakes com Multiplicador */}
                 <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-3">
                   <label className="text-sm font-semibold text-blue-400 font-mono">
-                    Defina sua Stake
+                    Lógica de Stakes
                   </label>
                   <div className="text-xs text-gray-400 font-mono">
-                    Use os botões +/- para navegar entre as stakes disponíveis
+                    Sistema de 29 níveis fixos com multiplicador personalizado
                   </div>
                   
-                  {/* Controle de Seleção */}
-                  <div className="flex items-center gap-2">
-                    {/* Botão Menos */}
-                    <button
-                      onClick={() => {
-                        const newIndex = Math.max(0, selectedStakeIndex - 1);
-                        setSelectedStakeIndex(newIndex);
-                        // Atualizar sequência imediatamente
-                        const newSequence = calculateMartingaleSequence(newIndex);
-                        setMartingaleSequence(newSequence);
-                        setTotalMartingaleAmount(calculateTotalAmount(newSequence));
-                        // Enviar para backend também
-                        updateStakeDirectly(STAKE_EVOLUTIONS[newIndex].m1);
-                      }}
-                      disabled={selectedStakeIndex <= 0}
-                      className="w-10 h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-                    >
-                      -
-                    </button>
-                    
-                    {/* Input de Valor */}
-                    <div className="flex-1 relative">
-                      <input
-                        type="text"
-                        value={formatCurrency(STAKE_EVOLUTIONS[selectedStakeIndex]?.m1 || 0)}
-                        readOnly
-                        className="w-full h-10 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center text-white font-mono text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all duration-200"
-                        placeholder="R$ 1,00"
-                      />
-                    </div>
-                    
-                    {/* Botão Mais */}
-                    <button
-                      onClick={() => {
-                        const newIndex = Math.min(STAKE_EVOLUTIONS.length - 1, selectedStakeIndex + 1);
-                        setSelectedStakeIndex(newIndex);
-                        // Atualizar sequência imediatamente
-                        const newSequence = calculateMartingaleSequence(newIndex);
-                        setMartingaleSequence(newSequence);
-                        setTotalMartingaleAmount(calculateTotalAmount(newSequence));
-                        // Enviar para backend também
-                        updateStakeDirectly(STAKE_EVOLUTIONS[newIndex].m1);
-                      }}
-                      disabled={selectedStakeIndex >= STAKE_EVOLUTIONS.length - 1}
-                      className="w-10 h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-                    >
-                      +
-                    </button>
-                  </div>
-                  
-                  {/* Informações da Evolução Selecionada */}
-                  <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                    <div className="text-gray-400">
-                      Primeira aposta (M1): <span className="text-white">{formatCurrency(martingaleSequence[0] || 0)}</span>
-                    </div>
-                    <div className="text-gray-400">
-                      Segunda aposta (M2): <span className="text-white">{formatCurrency(martingaleSequence[1] || 0)}</span>
-                    </div>
-                  </div>
-                  
-                  {/* 🚀 NOVO: Progressão Automática */}
-                  <div className="mt-3 pt-3 border-t border-blue-500/10">
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs text-gray-400 font-mono">
-                        Progressão Automática
-                        <div className="text-xs text-gray-500 mt-1">
-                          {autoProgressionEnabled ? 'Aumenta stake a cada derrota' : 'Stake fixa'}
-                        </div>
-                      </div>
+                  {/* Multiplicador */}
+                  <div className="space-y-2">
+                    <div className="text-xs text-gray-400 font-mono">Multiplicador</div>
+                    <div className="flex items-center gap-2">
+                      {/* Botão Menos */}
                       <button
                         onClick={() => {
-                          const newState = !autoProgressionEnabled;
-                          setAutoProgressionEnabled(newState);
-                          
-                          // Se está ativando, definir índice inicial como atual
-                          if (newState) {
-                            setInitialStakeIndex(selectedStakeIndex);
-                          }
-                          
-                          // Enviar para backend
-                          updateAutoProgressionSetting(newState);
+                              const newMultiplier = Math.max(1, stakeMultiplier - 1);
+    setStakeMultiplier(newMultiplier);
+    updateStakeMultiplier(newMultiplier);
                         }}
-                        className={`
-                          px-3 py-1 rounded-full text-xs font-mono font-semibold transition-all duration-200
-                          ${autoProgressionEnabled 
-                            ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
-                            : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
-                          }
-                        `}
+                        disabled={stakeMultiplier <= 1}
+                        className="w-10 h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                       >
-                        {autoProgressionEnabled ? 'ATIVADO' : 'DESATIVADO'}
+                        -
                       </button>
+                      
+                      {/* Input de Valor */}
+                      <div className="flex-1 relative">
+                        <input
+                          type="text"
+                          value={`${stakeMultiplier}x`}
+                          readOnly
+                          className="w-full h-10 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center text-white font-mono text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all duration-200"
+                          placeholder="1x"
+                        />
+                      </div>
+                      
+                      {/* Botão Mais */}
+                      <button
+                        onClick={() => {
+                              const newMultiplier = Math.min(5, stakeMultiplier + 1);
+    setStakeMultiplier(newMultiplier);
+    updateStakeMultiplier(newMultiplier);
+                        }}
+                        disabled={stakeMultiplier >= 5}
+                        className="w-10 h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  
+
+                  
+                  {/* Informações da Lógica */}
+                  <div className="mt-3 pt-3 border-t border-blue-500/10">
+                    <div className="text-xs text-gray-400 font-mono">
+                      <div className="mb-1">
+                        <span className="text-blue-400">Multiplicador:</span> {stakeMultiplier}x aplicado aos valores base
+                      </div>
+                      <div className="mb-1">
+                        <span className="text-green-400">Lucro fixo:</span> +{formatCurrency(stakeMultiplier * 2)} (quando acerta M2)
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        Lucro é igual para todos os níveis • Multiplicador × R$ 2,00
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Tabela de Todos os Níveis */}
+                  <div className="mt-4 pt-4 border-t border-blue-500/10">
+                    <div className="text-xs text-blue-400 font-mono font-semibold mb-3">
+                      TABELA COMPLETA - 29 NÍVEIS (Multiplicador: {stakeMultiplier}x)
+                    </div>
+                    
+                    <div className="max-h-48 overflow-y-auto border border-gray-600/30 rounded-lg bg-gray-900/30">
+                      <table className="w-full text-xs font-mono">
+                        <thead className="sticky top-0 bg-gray-800/80 border-b border-gray-600/30">
+                          <tr>
+                            <th className="px-2 py-1 text-left text-gray-400">Nível</th>
+                            <th className="px-2 py-1 text-right text-gray-400">M1</th>
+                            <th className="px-2 py-1 text-right text-gray-400">M2</th>
+                            <th className="px-2 py-1 text-right text-gray-400">Custo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {STAKE_LEVELS.map((level, index) => (
+                            <tr key={level.level} className={`border-b border-gray-700/20 hover:bg-gray-800/20 ${index % 2 === 0 ? 'bg-gray-800/10' : ''}`}>
+                              <td className="px-2 py-1 text-white font-semibold">{level.level}</td>
+                              <td className="px-2 py-1 text-right text-green-400">
+                                {formatCurrency(level.m1 * stakeMultiplier)}
+                              </td>
+                              <td className="px-2 py-1 text-right text-yellow-400">
+                                {formatCurrency(level.m2 * stakeMultiplier)}
+                              </td>
+                              <td className="px-2 py-1 text-right text-red-400">
+                                {formatCurrency(level.cost * stakeMultiplier)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    
+                    <div className="mt-2 text-xs text-gray-500 font-mono">
+                      <span className="text-green-400">M1:</span> Primeira aposta | 
+                      <span className="text-yellow-400"> M2:</span> Segunda aposta | 
+                      <span className="text-red-400"> Custo:</span> Banca necessária
                     </div>
                   </div>
                 </div>

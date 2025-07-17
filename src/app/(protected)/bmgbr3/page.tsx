@@ -1,11 +1,11 @@
 /**
- * 🧪 BMGBR2 - VERSÃO DE TESTES
+ * 🧪 BMGBR3 - VERSÃO DE TESTES
  * 
  * Esta é uma cópia da página BMGBR original para testar novas funcionalidades
  * sem interferir no sistema em produção.
  * 
- * API: /api/bmgbr2/blaze/pragmatic/blaze-megarouletebr
- * Página: /bmgbr2
+ * API: /api/bmgbr3/blaze/pragmatic/blaze-megarouletebr
+ * Página: /bmgbr3
  */
 'use client';
 
@@ -42,7 +42,7 @@ import OperationsCard from '@/components/OperationsCard';
  * 🎯 RESULTADO: Sistema ultra-eficiente, polling verdadeiramente silencioso
  */
 
-export default function BMGBR2() {
+export default function BMGBR3() {
   // Estados básicos
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -115,7 +115,8 @@ export default function BMGBR2() {
     connected: boolean;
     error?: string;
     lastUpdate: number;
-  }>({ connected: false, lastUpdate: Date.now() });
+    cached?: boolean; // Cache para evitar piscar
+  }>({ connected: false, lastUpdate: Date.now(), cached: false });
 
   // Estados para operação
   const [isOperating, setIsOperating] = useState(false);
@@ -215,6 +216,12 @@ export default function BMGBR2() {
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [isInsightsActive, setIsInsightsActive] = useState(false);
   const insightsPollingRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // 🎯 NOVO: Sistema de polling inteligente
+  const [pollingMode, setPollingMode] = useState<'inactive' | 'waiting' | 'normal'>('inactive');
+  
+  // 🔧 NOVO: Estado para rastrear erros consecutivos
+  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
 
   // 🔥 NOVO: Estado para controlar quantos resultados mostrar
   const [visibleResultsCount, setVisibleResultsCount] = useState(20); // 20 resultados fixos
@@ -280,37 +287,18 @@ export default function BMGBR2() {
 
   // Função checkFrequencyThresholds removida - não mais necessária no modo M4 direto
 
-  // 💰 NOVA LÓGICA: Array dos níveis de stake fixos com custos
+  // 💰 NOVA LÓGICA: Array dos níveis de stake fixos com custos (10 níveis)
   const STAKE_LEVELS = [
-    { level: 1, m1: 1.00, m2: 1.00, cost: 2.00 },
-    { level: 2, m1: 1.00, m2: 2.00, cost: 3.00 },
-    { level: 3, m1: 1.50, m2: 2.50, cost: 4.00 },
-    { level: 4, m1: 2.00, m2: 3.50, cost: 5.50 },
-    { level: 5, m1: 2.50, m2: 5.00, cost: 7.50 },
-    { level: 6, m1: 3.50, m2: 6.50, cost: 10.00 },
-    { level: 7, m1: 4.50, m2: 9.00, cost: 13.50 },
-    { level: 8, m1: 6.00, m2: 12.00, cost: 18.00 },
-    { level: 9, m1: 8.00, m2: 16.00, cost: 24.00 },
-    { level: 10, m1: 10.50, m2: 21.50, cost: 32.00 },
-    { level: 11, m1: 14.00, m2: 28.50, cost: 42.50 },
-    { level: 12, m1: 19.00, m2: 37.50, cost: 56.50 },
-    { level: 13, m1: 25.00, m2: 50.50, cost: 75.50 },
-    { level: 14, m1: 33.50, m2: 67.00, cost: 100.50 },
-    { level: 15, m1: 44.50, m2: 89.50, cost: 134.00 },
-    { level: 16, m1: 59.50, m2: 119.00, cost: 178.50 },
-    { level: 17, m1: 79.50, m2: 158.50, cost: 238.00 },
-    { level: 18, m1: 106.00, m2: 211.50, cost: 317.50 },
-    { level: 19, m1: 141.00, m2: 282.00, cost: 423.00 },
-    { level: 20, m1: 188.00, m2: 376.00, cost: 564.00 },
-    { level: 21, m1: 250.00, m2: 502.00, cost: 752.00 },
-    { level: 22, m1: 334.00, m2: 668.00, cost: 1002.00 },
-    { level: 23, m1: 445.00, m2: 1336.00, cost: 1781.00 },
-    { level: 24, m1: 593.00, m2: 1781.00, cost: 2374.00 },
-    { level: 25, m1: 791.00, m2: 2374.00, cost: 3165.00 },
-    { level: 26, m1: 1055.00, m2: 3165.00, cost: 4220.00 },
-    { level: 27, m1: 1406.00, m2: 4220.00, cost: 5626.00 },
-    { level: 28, m1: 1875.00, m2: 3751.00, cost: 5626.00 },
-    { level: 29, m1: 2500.00, m2: 5001.00, cost: 7501.00 }
+    { level: 1, m1: 0.5, m2: 1.0, cost: 1.5 },
+    { level: 2, m1: 1.0, m2: 1.5, cost: 2.5 },
+    { level: 3, m1: 1.5, m2: 2.5, cost: 4.0 },
+    { level: 4, m1: 2.5, m2: 4.0, cost: 6.5 },
+    { level: 5, m1: 4.0, m2: 6.5, cost: 10.5 },
+    { level: 6, m1: 6.5, m2: 10.5, cost: 17.0 },
+    { level: 7, m1: 10.5, m2: 17.0, cost: 27.5 },
+    { level: 8, m1: 17.0, m2: 27.5, cost: 44.5 },
+    { level: 9, m1: 27.5, m2: 44.5, cost: 72.0 },
+    { level: 10, m1: 44.5, m2: 72.0, cost: 116.5 }
   ];
 
   // 💰 NOVA FUNÇÃO: Calcular stakes com multiplicador
@@ -348,7 +336,7 @@ export default function BMGBR2() {
         return;
       }
 
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -406,8 +394,10 @@ export default function BMGBR2() {
         
         // Se tem token configurado, iniciar coleta automaticamente
         if (userTokens && userTokens.length > 0 && userTokens.some(token => token.is_active && token.token && token.token.trim() !== '')) {
-          console.log('🔥 Iniciando coleta de insights automaticamente...');
           await startInsightsCollection();
+        } else {
+          // Se não tem token, manter polling inativo
+          setPollingMode('inactive');
         }
       }
     };
@@ -488,7 +478,7 @@ export default function BMGBR2() {
 
   // 🎯 NOVA FUNÇÃO: Calcular valor alvo do Stop Gain baseado no stake
   const calculateStopGainTarget = (percentage: number): number => {
-    const baseAmount = totalMartingaleAmount * 6; // 6x o total do martingale como base
+    const baseAmount = totalMartingaleAmount * 3; // 3x o total do martingale como base
     return (baseAmount * percentage) / 100;
   };
 
@@ -599,6 +589,61 @@ export default function BMGBR2() {
     checkCanSafelyStop();
   }, [isOperating, operationActive, operationState, bettingWindow, stopButtonControl]);
 
+  // 🎯 NOVO: Controlar modo de polling baseado no estado da operação
+  useEffect(() => {
+    if (operationState?.waitingForResult) {
+      // Aguardando resultado - polling rápido
+      updatePollingMode('waiting');
+      
+      // Garantir que polling está ativo quando aguardando resultado
+      if (!isInsightsActive) {
+        startInsightsPolling();
+        setIsInsightsActive(true);
+      }
+    } else if (isOperating && operationActive) {
+      // Operação ativa mas não aguardando resultado - polling normal
+      updatePollingMode('normal');
+      
+      // Manter polling ativo durante operação
+      if (!isInsightsActive) {
+        startInsightsPolling();
+        setIsInsightsActive(true);
+      }
+    } else {
+      // Operação inativa - manter polling lento se temos tokens
+      updatePollingMode('inactive');
+      
+      // 🔧 NOVO: Manter polling ativo se temos tokens válidos
+      if (authTokens?.ppToken && !isInsightsActive) {
+        startInsightsPolling();
+        setIsInsightsActive(true);
+      }
+      
+      // Só desativar polling se não temos tokens
+      if (!authTokens?.ppToken && isInsightsActive) {
+        stopInsightsPolling();
+        setIsInsightsActive(false);
+      }
+    }
+  }, [operationState?.waitingForResult, isOperating, operationActive, isInsightsActive, authTokens?.ppToken]);
+
+  // 🚫 CACHE: Atualizar status da conexão apenas quando necessário
+  const updateConnectionStatusCached = useCallback((connected: boolean, error?: string) => {
+    setConnectionStatus(prev => {
+      // Só atualiza se o status realmente mudou
+      if (prev.connected === connected && prev.error === error) {
+        return prev;
+      }
+      
+      return {
+        connected,
+        error,
+        lastUpdate: Date.now(),
+        cached: true
+      };
+    });
+  }, []);
+
   // 🔄 NOVO: Função para resetar configurações de segurança
   const resetSafetySettings = () => {
     // Estados de status seguro e frequência removidos - apenas M4 direto
@@ -615,7 +660,31 @@ export default function BMGBR2() {
   // 🔄 NOVO: Resetar configurações de segurança na inicialização
   useEffect(() => {
     resetSafetySettings();
+    
+    // Inicializar contador de erros consecutivos
+    const errorCount = parseInt(localStorage.getItem('bmgbr3_error_count') || '0');
+    setConsecutiveErrors(errorCount);
   }, []);
+
+  // 🔧 NOVO: Função para forçar regeneração de tokens
+  const forceTokenRegeneration = () => {
+    setAuthTokens(null);
+    localStorage.removeItem('bmgbr3_error_count');
+    setOperationError(null);
+    setOperationSuccess('🔧 Tokens limpos com sucesso! Novos tokens serão gerados na próxima operação.');
+    console.log('🔧 [RECONEXÃO] Tokens forçadamente regenerados pelo usuário');
+    
+    if (consecutiveErrors > 0) {
+      console.log(`🔧 [RECONEXÃO] Limpeza forçada após ${consecutiveErrors} erros consecutivos`);
+    }
+    
+    setConsecutiveErrors(0);
+    
+    // Limpar mensagem de sucesso após 5 segundos
+    setTimeout(() => {
+      setOperationSuccess(null);
+    }, 5000);
+  };
 
   // 🚀 NOVA: Verificar reativação da progressão quando limite máximo muda
   useEffect(() => {
@@ -734,13 +803,13 @@ export default function BMGBR2() {
       setInsightsLoading(true);
       setInsightsError(null);
 
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights', {
+      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          user_id: user.id,
+          user_id: `polling_${user.id}`,
           action: 'start'
         })
       });
@@ -767,13 +836,13 @@ export default function BMGBR2() {
     try {
       setInsightsLoading(true);
 
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights', {
+      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          user_id: user.id,
+          user_id: `polling_${user.id}`,
           action: 'stop'
         })
       });
@@ -803,9 +872,20 @@ export default function BMGBR2() {
     // Fazer primeira requisição imediatamente
     pollInsightsData();
 
-    // 🔇 POLLING ULTRA-SILENCIOSO: Só dispara quando há mudanças REAIS
-    // 🎯 POLLING OTIMIZADO: Menos frequente para reduzir "piscar" dos dados
-    insightsPollingRef.current = setInterval(pollInsightsData, 8000); // 8s balanceado
+    // 🎯 POLLING INTELIGENTE: Adapta baseado no estado da operação
+    const interval = getPollingInterval();
+    insightsPollingRef.current = setInterval(pollInsightsData, interval);
+  };
+
+  // 🎯 NOVO: Sistema de polling inteligente baseado no estado
+  const getPollingInterval = () => {
+    const intervals = {
+      waiting: 1000,  // 1s - Polling rápido quando aguardando resultado
+      normal: 5000,   // 5s - Polling normal durante operação
+      inactive: 15000 // 15s - Polling lento quando inativo
+    };
+    
+    return intervals[pollingMode] || intervals.inactive;
   };
 
   const stopInsightsPolling = () => {
@@ -815,19 +895,35 @@ export default function BMGBR2() {
     }
   };
 
+  // 🎯 NOVO: Atualizar modo de polling e reiniciar com novo intervalo
+  const updatePollingMode = (mode: 'inactive' | 'waiting' | 'normal') => {
+    if (pollingMode !== mode) {
+      setPollingMode(mode);
+      
+      // Reiniciar polling com novo intervalo
+      if (isInsightsActive) {
+        startInsightsPolling();
+      }
+    }
+  };
+
   // 🔇 POLLING ULTRA-SILENCIOSO: Zero logs, só dispara quando há mudanças REAIS
   const pollInsightsData = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    // 🚫 DEBOUNCE: Evita chamadas simultâneas
+    if (insightsLoading) return;
+    setInsightsLoading(true);
+
     try {
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights', {
+      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          user_id: user.id,
+          user_id: `polling_${user.id}`,
           action: 'get'
         })
       });
@@ -879,6 +975,9 @@ export default function BMGBR2() {
       }
     } catch (error) {
       // 🔇 SILENCIOSO TOTAL: Zero logs, zero console
+    } finally {
+      // 🚫 DEBOUNCE: Libera o lock após completar
+      setInsightsLoading(false);
     }
   };
 
@@ -1760,6 +1859,12 @@ export default function BMGBR2() {
 
   // 💰 NOVA FUNÇÃO: Atualizar função de início de operação para usar a sequência personalizada
   const startOperation = async (tipValue: number, forcedBetType?: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | 'standby') => {
+    // 🔧 TIMEOUT: Adicionar timeout geral para evitar travamento
+    const operationTimeout = setTimeout(() => {
+      setOperationError('Timeout na operação - tente novamente');
+      setOperationLoading(false);
+    }, 30000); // 30 segundos timeout
+    
     try {
     setOperationLoading(true);
     setOperationError(null);
@@ -1787,7 +1892,7 @@ export default function BMGBR2() {
       // 🤖 REMOVIDO: Log de oportunidades não é mais necessário - usa contadores em tempo real
 
       // ✅ ETAPA 1: Buscar token da Blaze
-      const tokenResponse = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const tokenResponse = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1801,61 +1906,78 @@ export default function BMGBR2() {
         throw new Error('Token da Blaze não configurado. Acesse /config para configurar.');
       }
       
-      // ✅ ETAPA 2: Gerar tokens via Supabase Edge Function (evita erro 451)
-      const realBrowserHeaders = {
-        'sec-ch-ua': (navigator as any).userAgentData?.brands?.map((brand: any) => 
-          `"${brand.brand}";v="${brand.version}"`).join(', ') || '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-        'sec-ch-ua-mobile': (navigator as any).userAgentData?.mobile ? '?1' : '?0',
-        'sec-ch-ua-platform': `"${(navigator as any).userAgentData?.platform || 'Windows'}"`,
-        'DNT': '1',
-        'Upgrade-Insecure-Requests': '1',
-        'Pragma': 'no-cache',
-        'Cache-Control': 'no-cache',
-        'X-Requested-With': 'XMLHttpRequest'
-      };
-
-      const authResponse = await fetch('https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA'
-        },
-        body: JSON.stringify({
-          action: 'generate-tokens',
-          blazeToken: tokenData.token,
-          userAgent: navigator.userAgent,
-          acceptLanguage: navigator.language,
-          selectedCurrencyType: 'BRL',
-          realBrowserHeaders: realBrowserHeaders
-        })
-      });
-
-      if (!authResponse.ok) {
-        const errorText = await authResponse.text();
-        throw new Error(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
-      }
-
-      const authResult = await authResponse.json();
+      // 🔧 NOVO: Verificar se já temos tokens válidos antes de gerar novos
+      let authData = authTokens;
       
-      if (!authResult.success || !authResult.data) {
-        throw new Error(authResult.error || 'Falha na geração de tokens via Edge Function');
-      }
-
-      // Preparar dados de autenticação
-      const authData = authResult.data;
-      setAuthTokens(authData);
+      // Só gerar novos tokens se não temos ou se forçamos regeneração
+      const shouldGenerateNewTokens = !authTokens?.ppToken || !authTokens?.jsessionId;
       
-      // ✅ Debug: Mostrar que os tokens foram atualizados
+      if (shouldGenerateNewTokens) {
+        console.log('🔧 [RECONEXÃO] Gerando novos tokens...');
+      } else {
+        console.log('🔧 [RECONEXÃO] Reutilizando tokens existentes...');
+      }
+      
+      if (shouldGenerateNewTokens) {
+        // ✅ ETAPA 2: Gerar tokens via Supabase Edge Function (evita erro 451)
+        const realBrowserHeaders = {
+          'sec-ch-ua': (navigator as any).userAgentData?.brands?.map((brand: any) => 
+            `"${brand.brand}";v="${brand.version}"`).join(', ') || '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+          'sec-ch-ua-mobile': (navigator as any).userAgentData?.mobile ? '?1' : '?0',
+          'sec-ch-ua-platform': `"${(navigator as any).userAgentData?.platform || 'Windows'}"`,
+          'DNT': '1',
+          'Upgrade-Insecure-Requests': '1',
+          'Pragma': 'no-cache',
+          'Cache-Control': 'no-cache',
+          'X-Requested-With': 'XMLHttpRequest'
+        };
+
+        const authResponse = await fetch('https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA'
+          },
+          body: JSON.stringify({
+            action: 'generate-tokens',
+            blazeToken: tokenData.token,
+            userAgent: navigator.userAgent,
+            acceptLanguage: navigator.language,
+            selectedCurrencyType: 'BRL',
+            realBrowserHeaders: realBrowserHeaders
+          })
+        });
+
+        if (!authResponse.ok) {
+          const errorText = await authResponse.text();
+          throw new Error(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
+        }
+
+        const authResult = await authResponse.json();
+        
+        if (!authResult.success || !authResult.data) {
+          throw new Error(authResult.error || 'Falha na geração de tokens via Edge Function');
+        }
+
+        // Preparar dados de autenticação
+        authData = authResult.data;
+        setAuthTokens(authData);
+      }
+      
+      // ✅ Verificar se temos tokens válidos
+      if (!authData?.ppToken || !authData?.jsessionId) {
+        throw new Error('Falha ao obter tokens de autenticação válidos');
+      }
       
       // ✅ ETAPA 3: Conectar usando tokens gerados via Edge Function
-      const connectResponse = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const connectResponse = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           userId: user.id,
-          action: 'bet-connect',
+          action: 'connect',
           tipValue: tipValue,
           // 💰 ENVIAR SEQUÊNCIA PERSONALIZADA
           customMartingaleSequence: martingaleSequence,
@@ -1891,17 +2013,84 @@ export default function BMGBR2() {
       const connectResult = await connectResponse.json();
 
       if (!connectResult.success) {
+        console.error('🔧 [RECONEXÃO] Erro na resposta de conexão:', connectResult.error);
+        
+        // Se o erro é relacionado a tokens, limpar para forçar regeneração
+        if (connectResult.error?.includes('Token') || connectResult.error?.includes('auth')) {
+          setAuthTokens(null);
+          console.log('🔧 [RECONEXÃO] Tokens limpos devido ao erro de conexão');
+        }
+        
         throw new Error(connectResult.error || 'Erro ao conectar');
       }
 
-      // ✅ ETAPA 1.5: Enviar multiplicador após conexão estabelecida
+      console.log('🔧 [RECONEXÃO] Conexão estabelecida com sucesso');
+
+      // ✅ ETAPA 1.5: Verificar status da conexão com retry
+      let connectionVerified = false;
+      let retryCount = 0;
+      const maxRetries = 3;
+
+      while (!connectionVerified && retryCount < maxRetries) {
+        try {
+          // Mostrar feedback visual ao usuário
+          setOperationError(`Verificando conexão... (${retryCount + 1}/${maxRetries})`);
+          
+          await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Aguardar 1s, 2s, 3s
+          
+          const statusResponse = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.id,
+              action: 'get-connection-status'
+            })
+          });
+
+          const statusResult = await statusResponse.json();
+          
+          if (statusResult.success && statusResult.data?.connected) {
+            connectionVerified = true;
+            setOperationError(null); // Limpar mensagem de verificação
+            console.log('🔧 [RECONEXÃO] Status da conexão verificado');
+          } else {
+            retryCount++;
+            console.log(`🔧 [RECONEXÃO] Tentativa ${retryCount}/${maxRetries} - conexão ainda não estabelecida`);
+          }
+        } catch (error) {
+          retryCount++;
+          console.log(`🔧 [RECONEXÃO] Erro na tentativa ${retryCount}/${maxRetries}:`, error);
+        }
+      }
+
+      if (!connectionVerified) {
+        console.log('🔧 [RECONEXÃO] Prosseguindo sem verificação de status - tentaremos conectar mesmo assim');
+        setOperationError(null); // Limpar mensagem de verificação
+        
+        // Fazer uma tentativa simples de ping para verificar se a API está respondendo
+        try {
+          await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.id,
+              action: 'get-websocket-logs'
+            })
+          });
+          console.log('🔧 [RECONEXÃO] API respondendo normalmente');
+        } catch (pingError) {
+          console.warn('🔧 [RECONEXÃO] API pode estar com problemas:', pingError);
+        }
+      }
+
+      // ✅ ETAPA 1.6: Enviar multiplicador após conexão estabelecida
       await updateStakeMultiplier(stakeMultiplier);
       
-      // ✅ ETAPA 1.6: Aguardar um pouco para garantir que foi salvo
+      // ✅ ETAPA 1.7: Aguardar um pouco para garantir que foi salvo
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // ✅ ETAPA 2: Iniciar operação (start-operation)
-      const operationResponse = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const operationResponse = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1915,6 +2104,14 @@ export default function BMGBR2() {
       const operationResult = await operationResponse.json();
 
       if (!operationResult.success) {
+        console.error('🔧 [RECONEXÃO] Erro ao iniciar operação:', operationResult.error);
+        
+        // Se o erro é relacionado a conexão, tentar limpar tokens
+        if (operationResult.error?.includes('conexão') || operationResult.error?.includes('WebSocket')) {
+          setAuthTokens(null);
+          console.log('🔧 [RECONEXÃO] Tokens limpos devido ao erro de operação');
+        }
+        
         throw new Error(operationResult.error || 'Erro ao iniciar operação');
       }
       
@@ -1926,10 +2123,51 @@ export default function BMGBR2() {
       startMonitoring();
       }, 1000);
 
+      console.log('🔧 [RECONEXÃO] Operação iniciada com sucesso');
+      
+              // Limpar contador de erros após sucesso
+        localStorage.removeItem('bmgbr3_error_count');
+        setConsecutiveErrors(0);
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      setOperationError(errorMessage);
+      
+              // Melhorar mensagem de erro para o usuário
+        let userFriendlyMessage = errorMessage;
+        if (errorMessage.includes('Token')) {
+          userFriendlyMessage = 'Erro de autenticação. Acesse /config para reconfigurar seu token.';
+        } else if (errorMessage.includes('conexão')) {
+          userFriendlyMessage = 'Erro de conexão. Tente novamente ou use o botão "Forçar Reconexão".';
+        } else if (errorMessage.includes('Timeout')) {
+          userFriendlyMessage = 'Operação demorou muito para responder. Tente novamente ou use "Forçar Reconexão".';
+        }
+      
+      setOperationError(userFriendlyMessage);
+      console.error('🔧 [RECONEXÃO] Erro na operação:', errorMessage);
+      
+      // Em caso de erro, limpar tokens para forçar regeneração na próxima tentativa
+      if (errorMessage.includes('Token') || errorMessage.includes('auth')) {
+        setAuthTokens(null);
+        console.log('🔧 [RECONEXÃO] Tokens limpos devido ao erro de autenticação');
+      } else if (errorMessage.includes('conexão') || errorMessage.includes('WebSocket')) {
+        // Para erros de conexão, só limpar tokens se for persistente
+        const errorCount = parseInt(localStorage.getItem('bmgbr3_error_count') || '0');
+        const newErrorCount = errorCount + 1;
+        
+        if (newErrorCount >= 2) {
+          setAuthTokens(null);
+          console.log('🔧 [RECONEXÃO] Tokens limpos após múltiplas falhas de conexão');
+          localStorage.removeItem('bmgbr3_error_count');
+          setConsecutiveErrors(0);
+        } else {
+          localStorage.setItem('bmgbr3_error_count', newErrorCount.toString());
+          setConsecutiveErrors(newErrorCount);
+          console.log('🔧 [RECONEXÃO] Erro de conexão registrado, tentativas:', newErrorCount);
+        }
+      }
     } finally {
+      // 🔧 TIMEOUT: Limpar timeout
+      clearTimeout(operationTimeout);
       setOperationLoading(false);
     }
   };
@@ -1953,7 +2191,7 @@ export default function BMGBR2() {
           throw new Error('Usuário não autenticado');
         }
         
-        const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1979,6 +2217,18 @@ export default function BMGBR2() {
         setRealModeActivationAttempted(false); // 🔥 NOVO: Resetar flag de tentativa de ativação
         // Estados pendentes removidos
         monitoringRef.current = false;
+        
+        // 🔧 NOVO: Preservar tokens para próxima operação
+        // NÃO limpar authTokens aqui - eles serão reutilizados
+        
+        // 🔧 NOVO: Manter polling de insights ativo se houver token
+        if (authTokens?.ppToken) {
+          updatePollingMode('inactive'); // Modo inativo mas mantém polling
+        }
+        
+        // 🔧 NOVO: Limpar contador de erros após parada bem-sucedida
+        localStorage.removeItem('bmgbr3_error_count');
+        setConsecutiveErrors(0);
         
         // Removed: Stop gain reset
           
@@ -2014,6 +2264,12 @@ export default function BMGBR2() {
       // ✅ NOVO: Imediatamente forçar exibição como operando
       setForceOperatingDisplay(true);
       
+      // 🔧 NOVO: Reativar polling se não estiver ativo
+      if (!isInsightsActive) {
+        setIsInsightsActive(true);
+        startInsightsPolling();
+      }
+      
       // 🔄 NOVO: Atualizar dados históricos antes de iniciar a operação
       try {
         await loadFullHistoryRecords();
@@ -2039,7 +2295,7 @@ export default function BMGBR2() {
     while (monitoringRef.current) {
     try {
       // 🚀 OTIMIZADO: Agora o backend inclui operation report no get-websocket-logs
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2136,9 +2392,9 @@ export default function BMGBR2() {
 
       // 🛑 POLLING HISTÓRICO REMOVIDO: Dados vêm apenas do insights
 
-      // 🎯 POLLING INTELIGENTE: Mais rápido quando operando, mais lento quando inativo
-      const pollingInterval = isOperating ? 2000 : 5000; // 2s quando operando, 5s quando inativo
-      await new Promise(resolve => setTimeout(resolve, pollingInterval));
+        // 🎯 POLLING INTELIGENTE: Reduzido para evitar sobrecarga
+  const pollingInterval = isOperating ? 3000 : 8000; // 3s quando operando, 8s quando inativo
+  await new Promise(resolve => setTimeout(resolve, pollingInterval));
     }
     
   };
@@ -2146,7 +2402,7 @@ export default function BMGBR2() {
   // Buscar relatório
   const fetchOperationReport = async () => {
     try {
-      const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2168,7 +2424,7 @@ export default function BMGBR2() {
   // Reset relatório
   const resetOperationReport = async () => {
     try {
-      const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2190,7 +2446,7 @@ export default function BMGBR2() {
   // 2. Função para atualizar o backend sempre que o switch mudar
   useEffect(() => {
     if (!userIdRef.current) return;
-          fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+          fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2216,7 +2472,7 @@ export default function BMGBR2() {
 
     const updateBetType = async () => {
       try {
-        const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2229,6 +2485,33 @@ export default function BMGBR2() {
         const result = await response.json();
         if (result.success) {
           console.log('Tipo de aposta atualizado:', result.message);
+          
+          // 🎯 NOVO: Se houve reset para M1 N1, atualizar visualmente
+          if (result.resetToM1) {
+            // Forçar atualização do relatório para mostrar reset visual
+            setTimeout(() => {
+              fetchOperationReport();
+            }, 500);
+            
+            // Mostrar notificação específica de mudança de tipo
+            const betTypeNames = {
+              'await': 'AGUARDAR',
+              'red': 'VERMELHO',
+              'black': 'PRETO',
+              'even': 'PAR',
+              'odd': 'ÍMPAR',
+              'low': 'BAIXAS (1-18)',
+              'high': 'ALTAS (19-36)'
+            };
+            
+            const typeName = betTypeNames[m4DirectBetType as keyof typeof betTypeNames];
+            setOperationSuccess(`🎯 Tipo alterado para ${typeName} - Reiniciado no M1 N1`);
+            setTimeout(() => setOperationSuccess(null), 4000);
+          } else {
+            // Notificação padrão para mudanças sem reset
+            setOperationSuccess(`✅ ${result.message}`);
+            setTimeout(() => setOperationSuccess(null), 2000);
+          }
         }
       } catch (error) {
         console.error('Erro ao atualizar tipo de aposta:', error);
@@ -2238,6 +2521,99 @@ export default function BMGBR2() {
     updateBetType();
   }, [m4DirectBetType, isOperating, connectionStatus.connected]);
 
+  // 🤖 NOVO: Modo Automático - Detecta e opera automaticamente tipos com 15+ rodadas
+  useEffect(() => {
+    // Só atuar quando estiver operando e em modo "aguardar"
+    if (!isOperating || m4DirectBetType !== 'await' || !insightsComparison.hasData) {
+      return;
+    }
+
+    // Converter valores para números, tratando casos especiais
+    const parseRounds = (value: any): number => {
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        const cleaned = value.replace(/[^\d]/g, '');
+        const num = parseInt(cleaned);
+        return isNaN(num) ? 0 : num;
+      }
+      return 0;
+    };
+
+    // Obter dados de rodadas sem sair para cada tipo
+    const roundsData = {
+      red: parseRounds(insightsComparison.roundsSinceLastSequence?.red),
+      black: parseRounds(insightsComparison.roundsSinceLastSequence?.black),
+      even: parseRounds(insightsComparison.roundsSinceLastSequence?.even),
+      odd: parseRounds(insightsComparison.roundsSinceLastSequence?.odd),
+      low: parseRounds(insightsComparison.roundsSinceLastSequence?.low),
+      high: parseRounds(insightsComparison.roundsSinceLastSequence?.high)
+    };
+
+    // Filtrar tipos com 15+ rodadas
+    const candidatos = Object.entries(roundsData)
+      .filter(([_, rounds]) => rounds >= 15)
+      .sort((a, b) => b[1] - a[1]); // Ordenar por maior número de rodadas
+
+    // Se encontrou candidatos, automaticamente mudar para o melhor
+    if (candidatos.length > 0) {
+      const [melhorTipo, rodadas] = candidatos[0];
+      
+      // Mapear tipos para valores aceitos pelo sistema
+      const tipoMapping: { [key: string]: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' } = {
+        'red': 'red',
+        'black': 'black', 
+        'even': 'even',
+        'odd': 'odd',
+        'low': 'low',
+        'high': 'high'
+      };
+
+      const novoTipo = tipoMapping[melhorTipo];
+      if (novoTipo && novoTipo !== m4DirectBetType) {
+        console.log(`🤖 MODO AUTOMÁTICO: Detectado ${melhorTipo} com ${rodadas} rodadas - Mudando automaticamente`);
+        setM4DirectBetType(novoTipo);
+        
+        // Mostrar notificação de ativação automática
+        const nomesTipos = {
+          'red': 'VERMELHO',
+          'black': 'PRETO', 
+          'even': 'PAR',
+          'odd': 'ÍMPAR',
+          'low': 'BAIXAS (1-18)',
+          'high': 'ALTAS (19-36)'
+        };
+        
+        const nomeTipo = nomesTipos[melhorTipo as keyof typeof nomesTipos];
+        setOperationSuccess(`🤖 MODO AUTOMÁTICO: ${nomeTipo} detectado (${rodadas} rodadas)`);
+        setTimeout(() => setOperationSuccess(null), 5000);
+      }
+    }
+  }, [
+    isOperating, 
+    m4DirectBetType, 
+    insightsComparison.hasData,
+    insightsComparison.roundsSinceLastSequence?.red,
+    insightsComparison.roundsSinceLastSequence?.black,
+    insightsComparison.roundsSinceLastSequence?.even,
+    insightsComparison.roundsSinceLastSequence?.odd,
+    insightsComparison.roundsSinceLastSequence?.low,
+    insightsComparison.roundsSinceLastSequence?.high
+  ]);
+
+  // 🔄 NOVO: Transição automática após finalização de operação
+  useEffect(() => {
+    // Quando operação para e não estamos em modo "aguardar", retornar automaticamente
+    if (!isOperating && m4DirectBetType !== 'await') {
+      const timer = setTimeout(() => {
+        console.log('🔄 TRANSIÇÃO AUTOMÁTICA: Operação finalizada - Retornando ao modo aguardar');
+        setM4DirectBetType('await');
+        setOperationSuccess('🔄 Retornando ao modo automático para detectar próximo candidato');
+        setTimeout(() => setOperationSuccess(null), 4000);
+      }, 2000); // Aguardar 2 segundos antes de retornar
+
+      return () => clearTimeout(timer);
+    }
+  }, [isOperating, m4DirectBetType]);
 
   useEffect(() => {
     if (userIdRef.current && isOperating) {
@@ -2293,7 +2669,7 @@ export default function BMGBR2() {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
           
-          const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+          const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2438,7 +2814,7 @@ export default function BMGBR2() {
 
       // Se há operação ativa OU aguardando resultado, aguarda derrota para aplicar
       if (isOperating || operationState?.waitingForResult) {
-        const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2461,7 +2837,7 @@ export default function BMGBR2() {
         }
       } else {
         // Se não há operação, aplica imediatamente no backend também
-        const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2719,7 +3095,7 @@ export default function BMGBR2() {
 
 
 
-          {/* Card OPERAÇÕES */}
+                    {/* Card OPERAÇÕES */}
           <OperationsCard operationReport={operationReport} />
 
           {/* Card Operação */}
@@ -2850,7 +3226,7 @@ export default function BMGBR2() {
                       <Zap className="h-4 w-4 mr-2" />
                     )}
                     {operationLoading 
-                      ? 'CONECTANDO...' 
+                      ? operationError?.includes('Verificando') ? operationError : 'CONECTANDO...'
                       : ((isOperating || forceOperatingDisplay) && (connectionStatus.connected || forceOperatingDisplay)) 
                         ? 'PARAR'
                         : martingaleSequence.length === 0
@@ -2861,6 +3237,82 @@ export default function BMGBR2() {
 
                   {/* ✅ NOVO: Mostrar informações da estratégia quando não operando */}
 
+                  {/* 🔧 NOVO: Botão para forçar regeneração de tokens */}
+                  {!isOperating && !forceOperatingDisplay && operationError && !operationLoading && 
+                   (operationError.includes('conexão') || operationError.includes('Timeout') || operationError.includes('Token') || operationError.includes('WebSocket')) && (
+                    <Button 
+                      onClick={forceTokenRegeneration}
+                      className={`w-full font-mono transition-all duration-300 ${
+                        consecutiveErrors > 1
+                          ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30 animate-pulse'
+                          : 'bg-orange-500/20 border border-orange-500/50 text-orange-400 hover:bg-orange-500/30'
+                      }`}
+                      variant="outline"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      {consecutiveErrors > 1 ? 'RECONEXÃO URGENTE' : 'FORÇAR RECONEXÃO'}
+                    </Button>
+                  )}
+
+                </div>
+
+                {/* 🔥 SEÇÃO: Tipo de Aposta */}
+                <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20 space-y-3">
+                  <label className="text-sm font-semibold font-mono text-purple-400">
+                    Tipo de Aposta {m4DirectBetType === 'await' && isOperating && (
+                      <span className="text-xs text-blue-400 ml-2">🤖 MODO AUTOMÁTICO</span>
+                    )}
+                  </label>
+                  <div className="text-xs text-gray-400 font-mono">
+                    {m4DirectBetType === 'await' && isOperating ? 
+                      'Monitorando tipos com 15+ rodadas - Sistema irá apostar automaticamente' :
+                      'Selecione um tipo de aposta'
+                    }
+                  </div>
+                  
+                  {/* 🔥 SELEÇÃO: Tipo de aposta */}
+                  <div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { value: 'await', label: 'AGUARDAR', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
+                        { value: 'red', label: 'VERMELHO', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
+                        { value: 'black', label: 'PRETO', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' },
+                        { value: 'even', label: 'PAR', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+                        { value: 'odd', label: 'ÍMPAR', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+                        { value: 'low', label: 'BAIXAS (1-18)', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+                        { value: 'high', label: 'ALTAS (19-36)', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+                      ].map((option) => (
+                        <button
+                          key={option.value}
+                          onClick={() => setM4DirectBetType(option.value as typeof m4DirectBetType)}
+                          disabled={false} // Sempre habilitado para permitir troca durante operação
+                          className={`p-2 rounded text-xs font-mono border transition-all ${
+                            m4DirectBetType === option.value
+                              ? option.color
+                              : 'bg-gray-800/50 text-gray-400 border-gray-600/30 hover:bg-gray-700/50'
+                          } cursor-pointer`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                                         <div className="mt-2 text-xs text-gray-500 font-mono">
+                         <span>Aposta selecionada: <span className="text-purple-400">{
+                         m4DirectBetType === 'await' ? (isOperating ? 'AGUARDAR (Modo Automático)' : 'AGUARDAR') :
+                           m4DirectBetType === 'red' ? 'VERMELHO' :
+                           m4DirectBetType === 'black' ? 'PRETO' :
+                           m4DirectBetType === 'even' ? 'PAR' :
+                           m4DirectBetType === 'odd' ? 'ÍMPAR' :
+                           m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
+                           'ALTAS (19-36)'
+                         }</span></span>
+                         {m4DirectBetType === 'await' && isOperating && (
+                           <div className="mt-1 text-xs text-blue-400">
+                             🔍 Procurando tipos com 15+ rodadas no INSIGHTS DE DADOS
+                           </div>
+                         )}
+                     </div>
+                  </div>
                 </div>
 
                 {/* 💰 NOVO: Lógica de Stakes com Multiplicador */}
@@ -2869,7 +3321,7 @@ export default function BMGBR2() {
                     Lógica de Stakes
                   </label>
                   <div className="text-xs text-gray-400 font-mono">
-                    Sistema de 29 níveis fixos com multiplicador personalizado
+                                            Sistema de 10 níveis fixos com multiplicador personalizado
                   </div>
                   
                   {/* Multiplicador */}
@@ -2924,7 +3376,7 @@ export default function BMGBR2() {
                         <span className="text-blue-400">Multiplicador:</span> {stakeMultiplier}x aplicado aos valores base
                       </div>
                       <div className="mb-1">
-                        <span className="text-green-400">Lucro fixo:</span> +{formatCurrency(stakeMultiplier * 1.00)} (quando acerta)
+                        <span className="text-green-400">Lucro fixo:</span> +{formatCurrency(stakeMultiplier * 1.0)} (quando acerta M2)
                       </div>
                       <div className="text-xs text-gray-500">
                         Lucro é igual para todos os níveis • Multiplicador × R$ 1,00
@@ -2935,7 +3387,7 @@ export default function BMGBR2() {
                   {/* Tabela de Todos os Níveis */}
                   <div className="mt-4 pt-4 border-t border-blue-500/10">
                     <div className="text-xs text-blue-400 font-mono font-semibold mb-3">
-                      TABELA COMPLETA - 29 NÍVEIS (Multiplicador: {stakeMultiplier}x)
+                      TABELA COMPLETA - 10 NÍVEIS (Multiplicador: {stakeMultiplier}x)
                     </div>
                     
                     <div className="max-h-48 overflow-y-auto border border-gray-600/30 rounded-lg bg-gray-900/30">
@@ -2971,55 +3423,6 @@ export default function BMGBR2() {
                       <span className="text-green-400">M1:</span> Primeira aposta | 
                       <span className="text-yellow-400"> M2:</span> Segunda aposta | 
                       <span className="text-red-400"> Custo:</span> Banca necessária
-                    </div>
-                  </div>
-                </div>
-
-                {/* 🔥 SEÇÃO: Tipo de Aposta */}
-                <div className="mt-4 space-y-3 p-3 rounded-lg bg-purple-500/5 border border-purple-500/20">
-                  <label className="text-sm font-semibold font-mono text-purple-400">
-                    Tipo de Aposta
-                  </label>
-                  <div className="text-xs text-gray-400 font-mono">
-                    Selecione um tipo de aposta
-                  </div>
-                  
-                  {/* 🔥 SELEÇÃO: Tipo de aposta */}
-                  <div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { value: 'await', label: 'AGUARDAR', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
-                        { value: 'red', label: 'VERMELHO', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
-                        { value: 'black', label: 'PRETO', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' },
-                        { value: 'even', label: 'PAR', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-                        { value: 'odd', label: 'ÍMPAR', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-                        { value: 'low', label: 'BAIXAS (1-18)', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
-                        { value: 'high', label: 'ALTAS (19-36)', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
-                      ].map((option) => (
-                        <button
-                          key={option.value}
-                          onClick={() => setM4DirectBetType(option.value as typeof m4DirectBetType)}
-                          disabled={false} // Sempre habilitado para permitir troca durante operação
-                          className={`p-2 rounded text-xs font-mono border transition-all ${
-                            m4DirectBetType === option.value
-                              ? option.color
-                              : 'bg-gray-800/50 text-gray-400 border-gray-600/30 hover:bg-gray-700/50'
-                          } cursor-pointer`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="mt-2 text-xs text-gray-500 font-mono">
-                        <span>Aposta selecionada: <span className="text-purple-400">{
-                        m4DirectBetType === 'await' ? 'AGUARDAR' :
-                          m4DirectBetType === 'red' ? 'VERMELHO' :
-                          m4DirectBetType === 'black' ? 'PRETO' :
-                          m4DirectBetType === 'even' ? 'PAR' :
-                          m4DirectBetType === 'odd' ? 'ÍMPAR' :
-                          m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
-                          'ALTAS (19-36)'
-                        }</span></span>
                     </div>
                   </div>
                 </div>

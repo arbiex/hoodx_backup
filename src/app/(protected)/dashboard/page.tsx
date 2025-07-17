@@ -112,7 +112,7 @@ export default function Dashboard() {
   const { credits, loading: creditsLoading } = useCredits()
   
   // Usar hook de rede para dados de comissão
-  const { commissionBalance, networkStats, referralInfo, loading: networkLoading } = useNetwork()
+  const { agentData, networkData, generateReferralLink, loading: networkLoading } = useNetwork()
   const router = useRouter()
   
   // Hook de alertas sonoros removido - funcionalidade não utilizada

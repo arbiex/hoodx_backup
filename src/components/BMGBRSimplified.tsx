@@ -34,10 +34,19 @@ export default function BMGBRSimplified() {
     },
     onStatusChange: (status) => {
       setOperating(status.operating);
-      setConnectionStatus({
-        connected: status.connected,
-        lastUpdate: Date.now()
-      });
+      
+      // Converter status para string baseado na estrutura nova
+      let statusString: 'INATIVO' | 'CONECTANDO' | 'CONECTADO' | 'EM_OPERACAO' = 'INATIVO';
+      
+      if (status.operating) {
+        statusString = 'EM_OPERACAO';
+      } else if (status.connected) {
+        statusString = 'CONECTADO';
+      } else {
+        statusString = 'INATIVO';
+      }
+      
+      setConnectionStatus(statusString);
     }
   });
 
@@ -50,7 +59,7 @@ export default function BMGBRSimplified() {
     setOperationError(null);
     setOperationSuccess(null);
 
-    const result = await operations.startOperation(state.selectedStake, state.m4DirectBetType);
+    const result = await operations.startOperation(state.selectedStake, 'await'); // Valor padrão para m4DirectBetType
     
     if (result.success) {
       setOperating(true);
@@ -144,8 +153,8 @@ export default function BMGBRSimplified() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400 font-mono text-sm">Conexão:</span>
-                  <span className={`font-mono text-sm ${state.connectionStatus.connected ? 'text-green-400' : 'text-red-400'}`}>
-                    {state.connectionStatus.connected ? 'CONECTADO' : 'DESCONECTADO'}
+                  <span className={`font-mono text-sm ${state.connectionStatus === 'CONECTADO' || state.connectionStatus === 'EM_OPERACAO' ? 'text-green-400' : 'text-red-400'}`}>
+                    {state.connectionStatus === 'CONECTADO' || state.connectionStatus === 'EM_OPERACAO' ? 'CONECTADO' : 'DESCONECTADO'}
                   </span>
                 </div>
                 <div className="flex justify-between">

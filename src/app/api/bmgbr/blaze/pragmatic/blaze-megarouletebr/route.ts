@@ -2930,10 +2930,16 @@ function getNumberCharacteristics(number: number): string {
 
 async function debitUserCredits(userId: string, amount: number) {
   try {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
-    );
+    // ✅ VALIDAÇÃO: Verificar se as variáveis de ambiente estão configuradas
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('❌ [DEBIT-CONFIG] Variáveis de ambiente do Supabase não configuradas');
+      return false;
+    }
+    
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { error } = await supabase.rpc('debit_user_credits', {
       p_user_id: userId,

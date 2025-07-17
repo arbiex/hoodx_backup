@@ -11,7 +11,7 @@ import { getBaseUrl } from '@/lib/utils';
 
 interface MegaRouletteConfig {
   userId: string;
-  action?: 'bet-connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic' | 'get-sessions-history' | 'blaze-proxy' | 'pragmatic-proxy' | 'debug-auth' | 'get-blaze-token' | 'frontend-auth' | 'generate-client-tokens' | 'update-strategy' | 'update-stake' | 'update-bet-type' | 'force-check-api-results' | 'set-pending-stake' | 'update-auto-progression';
+  action?: 'bet-connect' | 'connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic' | 'get-sessions-history' | 'blaze-proxy' | 'pragmatic-proxy' | 'debug-auth' | 'get-blaze-token' | 'frontend-auth' | 'generate-client-tokens' | 'generate-tokens' | 'update-strategy' | 'update-stake' | 'update-bet-type' | 'force-check-api-results' | 'set-pending-stake' | 'update-auto-progression' | 'activate-real-mode';
   forceClientSideAuth?: boolean;
   blazeToken?: string;
   selectedCurrencyType?: string;
@@ -63,7 +63,7 @@ const operationState: { [userId: string]: {
   // 🎯 NOVO: Controle de missão cumprida
   missionCompleted?: boolean;
   // 🚀 NOVA LÓGICA: Sistema de níveis fixos
-  currentLevel: number; // Nível atual (1-29)
+  currentLevel: number; // Nível atual (1-10)
   stakeMultiplier: number; // Multiplicador de stake (1x, 2x, 3x, 4x, 5x)
 } } = {};
 
@@ -197,37 +197,18 @@ function updateLastHistoryEntryNumber(userId: string, resultNumber: number, game
 
 // Sistema de humanização removido
 
-// 💰 29 Níveis de Stakes Fixas - M1 e M2 predefinidos
+// 💰 10 Níveis de Stakes Fixas - M1 e M2 predefinidos
 const STAKE_LEVELS = [
-  { level: 1, m1: 1.0, m2: 1.0, cost: 1 },
-  { level: 2, m1: 1.0, m2: 2.0, cost: 2 },
-  { level: 3, m1: 1.5, m2: 2.5, cost: 3.5 },
-  { level: 4, m1: 2.0, m2: 3.0, cost: 5.5 },
-  { level: 5, m1: 2.5, m2: 4.0, cost: 8 },
-  { level: 6, m1: 3.0, m2: 5.0, cost: 11.5 },
-  { level: 7, m1: 4.0, m2: 6.0, cost: 16 },
-  { level: 8, m1: 5.0, m2: 8.0, cost: 22 },
-  { level: 9, m1: 6.0, m2: 10.0, cost: 30 },
-  { level: 10, m1: 8.0, m2: 12.0, cost: 40.5 },
-  { level: 11, m1: 10.0, m2: 15.0, cost: 54.5 },
-  { level: 12, m1: 12.0, m2: 20.0, cost: 73.5 },
-  { level: 13, m1: 15.0, m2: 25.0, cost: 98.5 },
-  { level: 14, m1: 20.0, m2: 30.0, cost: 132 },
-  { level: 15, m1: 25.0, m2: 40.0, cost: 176.5 },
-  { level: 16, m1: 30.0, m2: 50.0, cost: 236 },
-  { level: 17, m1: 40.0, m2: 65.0, cost: 315.5 },
-  { level: 18, m1: 50.0, m2: 80.0, cost: 421 },
-  { level: 19, m1: 65.0, m2: 105.0, cost: 562 },
-  { level: 20, m1: 80.0, m2: 130.0, cost: 750 },
-  { level: 21, m1: 105.0, m2: 170.0, cost: 1000 },
-  { level: 22, m1: 130.0, m2: 215.0, cost: 1334 },
-  { level: 23, m1: 170.0, m2: 280.0, cost: 1779 },
-  { level: 24, m1: 215.0, m2: 355.0, cost: 2372 },
-  { level: 25, m1: 280.0, m2: 465.0, cost: 3163 },
-  { level: 26, m1: 355.0, m2: 590.0, cost: 4218 },
-  { level: 27, m1: 465.0, m2: 775.0, cost: 5624 },
-  { level: 28, m1: 590.0, m2: 985.0, cost: 7499 },
-  { level: 29, m1: 2500.0, m2: 5001.0, cost: 9999 }
+  { level: 1, m1: 0.5, m2: 1.0, cost: 1.5 },
+  { level: 2, m1: 1.0, m2: 1.5, cost: 2.5 },
+  { level: 3, m1: 1.5, m2: 2.5, cost: 4.0 },
+  { level: 4, m1: 2.5, m2: 4.0, cost: 6.5 },
+  { level: 5, m1: 4.0, m2: 6.5, cost: 10.5 },
+  { level: 6, m1: 6.5, m2: 10.5, cost: 17.0 },
+  { level: 7, m1: 10.5, m2: 17.0, cost: 27.5 },
+  { level: 8, m1: 17.0, m2: 27.5, cost: 44.5 },
+  { level: 9, m1: 27.5, m2: 44.5, cost: 72.0 },
+  { level: 10, m1: 44.5, m2: 72.0, cost: 116.5 }
 ];
 
 // Funções de sessão simplificadas (removidas - não essenciais)
@@ -312,6 +293,7 @@ export async function POST(request: NextRequest) {
     // Ações disponíveis
     switch (action) {
       case 'bet-connect':
+      case 'connect':
         return await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
           userAgent: userFingerprint?.userAgent || clientUserAgent,
           language: clientLanguage,
@@ -370,6 +352,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(tokenResult);
 
       case 'generate-client-tokens':
+      case 'generate-tokens':
         if (!blazeToken) {
           return NextResponse.json({
             success: false,
@@ -648,6 +631,7 @@ export async function POST(request: NextRequest) {
         // 🤖 NOVO: Endpoint para atualizar tipo de aposta dinamicamente durante operação
         if (userId && operationState[userId]) {
           const newBetType = requestBody.m4DirectBetType;
+          const previousBetType = operationState[userId].m4DirectBetType;
           
           if (!newBetType) {
             return NextResponse.json({
@@ -663,6 +647,30 @@ export async function POST(request: NextRequest) {
               error: 'Tipo de aposta inválido'
             }, { status: 400 });
           }
+          
+                     // 🔥 NOVO: Resetar para M1 N1 quando trocar tipo de aposta (exceto se continuar em 'await')
+           const shouldResetToM1 = previousBetType !== newBetType && newBetType !== 'await';
+           
+           if (shouldResetToM1) {
+             // Resetar Martingale para nível 0 (M1 N1)
+             operationState[userId].martingaleLevel = 0;
+             operationState[userId].waitingForResult = false;
+             operationState[userId].currentBetColor = undefined;
+             operationState[userId].lastBetAmount = undefined;
+             
+             // 🚀 NOVO: Resetar para nível 1 e multiplicador 1x (M1 N1)
+             operationState[userId].currentLevel = 1;
+             operationState[userId].stakeMultiplier = 1;
+             
+             // Resetar stats da operação
+             operationState[userId].stats.totalBets = 0;
+             operationState[userId].stats.wins = 0;
+             operationState[userId].stats.losses = 0;
+             operationState[userId].stats.profit = 0;
+             operationState[userId].stats.startedAt = Date.now();
+             
+             addWebSocketLog(userId, `🔄 RESET: Mudança de aposta detectada → Reiniciando no M1 N1`, 'success');
+           }
           
           // Atualizar tipo de aposta no estado da operação
           operationState[userId].m4DirectBetType = newBetType;
@@ -681,14 +689,39 @@ export async function POST(request: NextRequest) {
           };
           
           const typeName = betTypeNames[newBetType as keyof typeof betTypeNames];
-          // Log removido para evitar repetição excessiva
-          // addWebSocketLog(userId, `🤖 Auto Bot: Tipo de aposta atualizado para ${typeName}`, 'success');
           
-          return NextResponse.json({
-            success: true,
-            message: `Tipo de aposta atualizado para ${typeName}`,
-            newBetType: newBetType
-          });
+                     if (shouldResetToM1) {
+             addWebSocketLog(userId, `🎯 NOVO TIPO: ${typeName} → Começando apostas no M1 N1`, 'success');
+           }
+           
+           // 🚀 NOVO: Se mudou de 'await' para outro tipo, tentar apostar imediatamente se apostas estiverem abertas
+           if (previousBetType === 'await' && newBetType !== 'await' && operationState[userId]?.active) {
+             // Verificar se há uma janela de apostas ativa e WebSocket conectado
+             const wsConnection = activeWebSockets[userId];
+             if (wsConnection?.ws && connectionStatus[userId]?.connected) {
+               setTimeout(async () => {
+                 try {
+                   // Obter gameId atual da operação ou do último jogo
+                   const currentGameId = operationState[userId]?.lastGameId;
+                   if (currentGameId) {
+                     // Tentar fazer aposta imediata se condições permitirem
+                     await executeSimpleBet(userId, currentGameId, wsConnection.ws);
+                     addWebSocketLog(userId, `⚡ APOSTA IMEDIATA: Transição de aguardar → ${typeName}`, 'success');
+                   }
+                 } catch (error) {
+                   // Se não conseguir apostar agora, apostará no próximo ciclo normalmente
+                   console.log('Aposta imediata não disponível, aguardando próximo ciclo');
+                 }
+               }, 100); // Delay mínimo para garantir que a atualização foi processada
+             }
+           }
+           
+           return NextResponse.json({
+             success: true,
+             message: `Tipo de aposta atualizado para ${typeName}${shouldResetToM1 ? ' (Resetado para M1 N1)' : ''}`,
+             newBetType: newBetType,
+             resetToM1: shouldResetToM1
+           });
         }
         
         return NextResponse.json({
@@ -925,7 +958,7 @@ async function checkForNewResults(userId: string): Promise<void> {
 
     
     // 🎯 SOLUÇÃO: Usar getBaseUrl() para funcionar tanto no localhost quanto em produção
-    const response = await fetch(`${getBaseUrl()}/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights`, {
+    const response = await fetch(`${getBaseUrl()}/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -1260,6 +1293,10 @@ async function processOperationResult(userId: string, resultColor: string, resul
       
       addWebSocketLog(userId, `💰 Vitória no M2 → 🎯 MISSÃO CUMPRIDA!`, 'success');
       addWebSocketLog(userId, `✅ Operação finalizada com sucesso - Lucro garantido!`, 'success');
+      
+      // 🤖 NOVO: Retornar automaticamente ao modo aguardar para próximo candidato
+      operation.m4DirectBetType = 'await';
+      addWebSocketLog(userId, `🤖 MODO AUTOMÁTICO: Retornando ao aguardar para detectar próximo candidato`, 'info');
         
       return;
     }
@@ -1286,10 +1323,20 @@ async function processOperationResult(userId: string, resultColor: string, resul
       const multiplierText = multiplier > 1 ? ` (${multiplier}x)` : '';
       addWebSocketLog(userId, `⬆️ Avançando para Nível ${operation.currentLevel} → Próxima aposta M1: R$ ${(nextLevel.m1 * multiplier).toFixed(2)}${multiplierText}`, 'info');
     } else {
-      // Chegou no último nível
-      addWebSocketLog(userId, `⚠️ Último nível atingido (${STAKE_LEVELS.length}) - Resetando para Nível 1`, 'error');
-      operation.currentLevel = 1;
-    operation.martingaleLevel = 0;
+      // Chegou no último nível (10) - Aceitar prejuízo e finalizar
+      addWebSocketLog(userId, `⚠️ Último nível atingido (${STAKE_LEVELS.length}) - Aceitando prejuízo e finalizando operação`, 'error');
+      addWebSocketLog(userId, `❌ Operação finalizada com prejuízo - Todos os níveis foram tentados`, 'error');
+      
+      operation.active = false;
+      operation.missionCompleted = false; // Missão não cumprida
+      operation.martingaleLevel = 0;
+      operation.currentLevel = 1; // Reset para próxima operação
+      
+      // 🤖 NOVO: Retornar automaticamente ao modo aguardar para próximo candidato
+      operation.m4DirectBetType = 'await';
+      addWebSocketLog(userId, `🤖 MODO AUTOMÁTICO: Retornando ao aguardar para detectar próximo candidato`, 'info');
+      
+      return;
     }
   }
 }
@@ -1520,13 +1567,15 @@ async function renewSession(userId: string): Promise<boolean> {
 // NOVO: Conectar ao WebSocket
 async function connectToBettingGame(userId: string, tipValue?: number, clientIP?: string, userFingerprint?: any, clientHeaders?: any, authTokens?: { ppToken: string; jsessionId: string; pragmaticUserId: string }, forceClientSideAuth?: boolean, customMartingaleSequence?: number[], stakeBased?: boolean, m4DirectBetType?: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high', isStandbyMode?: boolean) {
   try {
-    // Log removido: informação técnica desnecessária
-    // addWebSocketLog(userId, '🔗 Iniciando conexão...', 'info');
+    // 🚀 OTIMIZAÇÃO: Conexão mais eficiente com menos logs
+    addWebSocketLog(userId, '🔗 Conectando...', 'info');
     
     // Limpar status anterior e parar conexões existentes (preservando sessão se existir)
     const hasExistingSession = sessionControl[userId] != null;
-    stopAllConnections(userId, false, hasExistingSession);
-    resetReconnectionControl(userId);
+    if (!hasExistingSession) {
+      stopAllConnections(userId, false, hasExistingSession);
+      resetReconnectionControl(userId);
+    }
     
     // 🔐 Etapa 1: APENAS autenticação client-side (IP real do usuário)
     
@@ -1540,8 +1589,7 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       });
     }
 
-    // Log removido: informação técnica desnecessária
-    // addWebSocketLog(userId, '🔐 Usando APENAS tokens do client-side (IP real do usuário)...', 'info');
+    // 🚀 OTIMIZAÇÃO: Autenticação silenciosa
     const authResult = await validateClientTokens(userId, authTokens);
     if (!authResult.success) {
       let errorMsg = `Falha na autenticação: ${authResult.error}`;
@@ -1563,8 +1611,8 @@ async function connectToBettingGame(userId: string, tipValue?: number, clientIP?
       });
     }
 
-    // Log removido: informação técnica desnecessária
-    // addWebSocketLog(userId, 'Autenticação realizada com sucesso', 'success');
+    // 🚀 OTIMIZAÇÃO: Log único de sucesso
+    addWebSocketLog(userId, '✅ Autenticado com sucesso', 'success');
 
     // ✅ NOVO: Inicializar controle de sessão para renovação automática
     sessionControl[userId] = {

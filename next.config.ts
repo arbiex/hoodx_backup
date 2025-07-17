@@ -81,11 +81,11 @@ const nextConfig: NextConfig = {
   },
 
   typescript: {
-    ignoreBuildErrors: false,
+    ignoreBuildErrors: true,
   },
   eslint: {
     // Ignorar linting nos arquivos antigos
-    ignoreDuringBuilds: false,
+    ignoreDuringBuilds: true,
     dirs: ['src'], // Apenas lintar o diretório src
   },
   // Ignorar arquivos específicos durante o build

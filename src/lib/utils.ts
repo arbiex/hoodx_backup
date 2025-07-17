@@ -7,24 +7,64 @@ export function cn(...inputs: ClassValue[]) {
 
 /**
  * Obtém a URL base do site automaticamente
- * Funciona tanto em desenvolvimento quanto em produção (Vercel)
+ * Funciona tanto em desenvolvimento quanto em produção (Vercel/Fly.io)
  */
 export function getBaseUrl(): string {
-  // Se estiver no browser, usar window.location
+  // Se estiver no browser, SEMPRE usar window.location.origin
+  // Isso garante que as requisições sejam sempre para o domínio atual
   if (typeof window !== 'undefined') {
     return window.location.origin;
   }
   
-  // Se tiver NEXT_PUBLIC_APP_URL definida, usar ela
-  if (process.env.NEXT_PUBLIC_APP_URL) {
+  // 🚀 NOVO: Detectar ambiente Fly.io para requisições internas da API
+  if (process.env.FLY_APP_NAME || process.env.FLY_REGION) {
+    return 'https://hoodx.fly.dev';
+  }
+  
+  // Se tiver NEXT_PUBLIC_APP_URL definida, usar ela (apenas para links públicos)
+  if (process.env.NEXT_PUBLIC_APP_URL && !process.env.FLY_APP_NAME) {
     return process.env.NEXT_PUBLIC_APP_URL;
   }
   
-  // Se estiver na Vercel, usar VERCEL_URL
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
+  // Se estiver em desenvolvimento
+  if (process.env.NODE_ENV === 'development') {
+    return 'http://localhost:3000';
   }
   
-  // Fallback para desenvolvimento local
-  return 'http://localhost:3000';
+  // Fallback para produção
+  return 'https://hoodx.fly.dev';
+}
+
+/**
+ * Obtém a URL pública do site (para links de indicação, etc.)
+ */
+export function getPublicUrl(): string {
+  return process.env.NEXT_PUBLIC_APP_URL || 'https://hoodx.ai';
+}
+
+/**
+ * Adiciona parâmetros de cache busting para forçar novas requisições
+ */
+export function addCacheBusting(url: string): string {
+  const timestamp = Date.now();
+  const cacheBustEnv = process.env.NEXT_PUBLIC_CACHE_BUST || '0';
+  const cacheBuster = `v=${timestamp}&cb=${cacheBustEnv}`;
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}${cacheBuster}`;
+}
+
+/**
+ * Função para fazer fetch com cache busting automático
+ */
+export async function fetchWithCacheBusting(url: string, options?: RequestInit): Promise<Response> {
+  const bustedUrl = addCacheBusting(url);
+  return fetch(bustedUrl, {
+    ...options,
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      ...options?.headers,
+    },
+  });
 }

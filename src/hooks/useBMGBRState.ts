@@ -1,140 +1,68 @@
-import { useReducer, useEffect, useRef } from 'react';
+import { useReducer, useEffect } from 'react';
 
-// Definir tipos para o estado
-interface BMGBRState {
-  // Estados de operação
+// Tipos de estado
+export interface BMGBRState {
   isOperating: boolean;
-  operationActive: boolean;
-  operationLoading: boolean;
   operationError: string | null;
   operationSuccess: string | null;
-  
-  // Estados de conexão
-  connectionStatus: {
-    connected: boolean;
-    error?: string;
-    lastUpdate: number;
-  };
-  
-  // Estados de autenticação
-  authTokens: {
-    ppToken: string;
-    jsessionId: string;
-    pragmaticUserId?: string;
-  } | null;
-  
-  // Estados de configuração
   selectedStake: number;
   martingaleSequence: number[];
-  totalMartingaleAmount: number;
-  
-  // Estados de dados
-  websocketLogs: Array<{ 
-    timestamp: number; 
-    message: string; 
-    type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' 
+  connectionStatus: 'INATIVO' | 'CONECTANDO' | 'CONECTADO' | 'EM_OPERACAO';
+  websocketLogs: Array<{
+    timestamp: string;
+    message: string;
+    type: 'info' | 'error' | 'success';
   }>;
-  lastTenResults: Array<{ 
-    number: number; 
-    color: string;
-    gameId: string; 
-    timestamp: number 
+  lastTenResults: Array<{
+    crash_point: number;
+    timestamp: string;
+    game_id: string;
   }>;
-  
-  // Estados de configuração avançada
-  autoBotEnabled: boolean;
-  autoBotThreshold: number;
-  m4DirectBetType: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
-  
-  // Estados de UI
-  forceOperatingDisplay: boolean;
-  canSafelyStop: boolean;
 }
-
-// Definir actions
-type BMGBRAction =
-  | { type: 'SET_OPERATING'; payload: boolean }
-  | { type: 'SET_OPERATION_LOADING'; payload: boolean }
-  | { type: 'SET_OPERATION_ERROR'; payload: string | null }
-  | { type: 'SET_OPERATION_SUCCESS'; payload: string | null }
-  | { type: 'SET_CONNECTION_STATUS'; payload: BMGBRState['connectionStatus'] }
-  | { type: 'SET_AUTH_TOKENS'; payload: BMGBRState['authTokens'] }
-  | { type: 'SET_SELECTED_STAKE'; payload: number }
-  | { type: 'SET_MARTINGALE_SEQUENCE'; payload: number[] }
-  | { type: 'SET_WEBSOCKET_LOGS'; payload: BMGBRState['websocketLogs'] }
-  | { type: 'SET_LAST_TEN_RESULTS'; payload: BMGBRState['lastTenResults'] }
-  | { type: 'SET_AUTO_BOT_ENABLED'; payload: boolean }
-  | { type: 'SET_M4_DIRECT_BET_TYPE'; payload: BMGBRState['m4DirectBetType'] }
-  | { type: 'SET_FORCE_OPERATING_DISPLAY'; payload: boolean }
-  | { type: 'SET_CAN_SAFELY_STOP'; payload: boolean }
-  | { type: 'RESET_ALL' };
 
 // Estado inicial
 const initialState: BMGBRState = {
   isOperating: false,
-  operationActive: false,
-  operationLoading: false,
   operationError: null,
   operationSuccess: null,
-  
-  connectionStatus: { connected: false, lastUpdate: Date.now() },
-  authTokens: null,
-  
-  selectedStake: 0.50,
+  selectedStake: 0.5,
   martingaleSequence: [],
-  totalMartingaleAmount: 0,
-  
+  connectionStatus: 'INATIVO',
   websocketLogs: [],
-  lastTenResults: [],
-  
-  autoBotEnabled: false,
-  autoBotThreshold: 50,
-  m4DirectBetType: 'await',
-  
-  forceOperatingDisplay: false,
-  canSafelyStop: true,
+  lastTenResults: []
 };
+
+// Tipos de ação
+type BMGBRAction =
+  | { type: 'SET_OPERATING'; payload: boolean }
+  | { type: 'SET_OPERATION_ERROR'; payload: string | null }
+  | { type: 'SET_OPERATION_SUCCESS'; payload: string | null }
+  | { type: 'SET_SELECTED_STAKE'; payload: number }
+  | { type: 'SET_MARTINGALE_SEQUENCE'; payload: number[] }
+  | { type: 'SET_CONNECTION_STATUS'; payload: BMGBRState['connectionStatus'] }
+  | { type: 'SET_WEBSOCKET_LOGS'; payload: BMGBRState['websocketLogs'] }
+  | { type: 'SET_LAST_TEN_RESULTS'; payload: BMGBRState['lastTenResults'] }
+  | { type: 'RESET_ALL' };
 
 // Reducer
 function bmgbrReducer(state: BMGBRState, action: BMGBRAction): BMGBRState {
   switch (action.type) {
     case 'SET_OPERATING':
       return { ...state, isOperating: action.payload };
-    case 'SET_OPERATION_LOADING':
-      return { ...state, operationLoading: action.payload };
     case 'SET_OPERATION_ERROR':
       return { ...state, operationError: action.payload };
     case 'SET_OPERATION_SUCCESS':
       return { ...state, operationSuccess: action.payload };
+    case 'SET_SELECTED_STAKE':
+      return { ...state, selectedStake: action.payload };
+    case 'SET_MARTINGALE_SEQUENCE':
+      return { ...state, martingaleSequence: action.payload };
     case 'SET_CONNECTION_STATUS':
       return { ...state, connectionStatus: action.payload };
-    case 'SET_AUTH_TOKENS':
-      return { ...state, authTokens: action.payload };
-    case 'SET_SELECTED_STAKE':
-      return { 
-        ...state, 
-        selectedStake: action.payload,
-        martingaleSequence: calculateMartingaleSequence(action.payload),
-        totalMartingaleAmount: calculateTotalAmount(calculateMartingaleSequence(action.payload))
-      };
-    case 'SET_MARTINGALE_SEQUENCE':
-      return { 
-        ...state, 
-        martingaleSequence: action.payload,
-        totalMartingaleAmount: calculateTotalAmount(action.payload)
-      };
     case 'SET_WEBSOCKET_LOGS':
       return { ...state, websocketLogs: action.payload };
     case 'SET_LAST_TEN_RESULTS':
       return { ...state, lastTenResults: action.payload };
-    case 'SET_AUTO_BOT_ENABLED':
-      return { ...state, autoBotEnabled: action.payload };
-    case 'SET_M4_DIRECT_BET_TYPE':
-      return { ...state, m4DirectBetType: action.payload };
-    case 'SET_FORCE_OPERATING_DISPLAY':
-      return { ...state, forceOperatingDisplay: action.payload };
-    case 'SET_CAN_SAFELY_STOP':
-      return { ...state, canSafelyStop: action.payload };
     case 'RESET_ALL':
       return initialState;
     default:
@@ -142,21 +70,16 @@ function bmgbrReducer(state: BMGBRState, action: BMGBRAction): BMGBRState {
   }
 }
 
-// Funções auxiliares
-function calculateMartingaleSequence(stake: number): number[] {
-  if (stake <= 0) return [];
+// Função para calcular sequência de martingale
+function calculateMartingaleSequence(baseStake: number): number[] {
+  const sequence = [];
+  const currentStake = baseStake;
   
-  const sequence: number[] = [];
-  sequence.push(stake);      // M1 = 1x stake
-  sequence.push(stake * 4);  // M2 = 4x stake
-  sequence.push(stake * 10); // M3 = 10x stake
-  sequence.push(stake * 22); // M4 = 22x stake
+  // M1 e M2 com multiplicadores diferentes
+  sequence.push(currentStake); // M1
+  sequence.push(currentStake * 2.5); // M2
   
   return sequence;
-}
-
-function calculateTotalAmount(sequence: number[]): number {
-  return sequence.reduce((total, value) => total + value, 0);
 }
 
 // Hook principal

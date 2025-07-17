@@ -15,10 +15,22 @@ export async function getUserBlazeToken(userId: string): Promise<{ success: bool
     
     // Log removido: verbose demais no terminal
     
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
-    );
+    // ✅ VALIDAÇÃO: Verificar se as variáveis de ambiente estão configuradas
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('❌ [AUTH-CONFIG] Variáveis de ambiente do Supabase não configuradas:', {
+        hasUrl: !!supabaseUrl,
+        hasServiceKey: !!supabaseServiceKey
+      });
+      return {
+        success: false,
+        error: 'Configuração do Supabase não encontrada. Verifique as variáveis de ambiente.'
+      };
+    }
+    
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: tokenData, error: tokenError } = await supabase
       .from('user_tokens')

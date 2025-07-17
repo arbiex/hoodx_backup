@@ -423,7 +423,7 @@ export default function Dashboard() {
 
   // Função para ativar/parar o bot
   const handleNavigateToBot = () => {
-    window.open('/blaze-megaroulettebr', '_blank')
+    router.push('/bmgbr2')
   }
 
   const handleBotToggle = async () => {

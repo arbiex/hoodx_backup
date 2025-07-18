@@ -391,33 +391,172 @@ export async function GET(request: NextRequest) {
       }, { status: 400 })
     }
 
-    // Buscar transação no banco (silencioso)
+    console.log('🔍 Verificando status do pagamento XGATE:', transactionId)
+
+    // 1. Buscar transação no banco local primeiro
     const supabase = getSupabaseClient()
-    const { data: transaction, error: dbError } = await supabase
+    const { data: localTransaction, error: dbError } = await supabase
       .from('credit_transactions')
       .select('*')
       .eq('payment_reference', transactionId)
       .single()
 
     if (dbError && dbError.code !== 'PGRST116') {
-      // Verificação silenciosa - não logar erros desnecessários
+      console.error('❌ Erro ao consultar banco local:', dbError)
       return NextResponse.json({
         success: false,
-        status: 'not_found',
-        message: 'Transação não encontrada'
-      }, { status: 404 })
+        status: 'error',
+        message: 'Erro ao consultar banco de dados'
+      }, { status: 500 })
     }
 
-    // Retornar status atual da transação
-    return NextResponse.json({
-      success: true,
-      status: transaction?.status || 'unknown',
-      transaction: transaction || null,
-      message: 'Status verificado com sucesso'
-    })
+    // Se já foi processado como completed, retornar success
+    if (localTransaction?.status === 'completed') {
+      console.log('✅ Transação já processada como completed')
+      return NextResponse.json({
+        success: true,
+        status: 'completed',
+        transaction: localTransaction,
+        message: 'Pagamento confirmado e processado'
+      })
+    }
+
+    // 2. Consultar XGATE para verificar status real do depósito
+    try {
+      const token = await authenticateXGate()
+      console.log('🔍 Consultando status no XGATE para transação:', transactionId)
+
+      // Consultar detalhes do depósito no XGATE
+      const statusResponse = await fetch(`${XGATE_CONFIG.baseUrl}/deposit/${transactionId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      console.log('📊 Status da consulta XGATE:', statusResponse.status)
+
+      if (statusResponse.ok) {
+        const depositData = await statusResponse.json()
+        console.log('💳 Dados do depósito XGATE:', depositData)
+
+        // Verificar se o status é PAID (confirmado)
+        if (depositData.status === 'PAID' || depositData.status === 'COMPLETED') {
+          console.log('✅ Pagamento confirmado no XGATE! Processando...')
+
+          // Se temos a transação local mas ainda não foi processada
+          if (localTransaction && localTransaction.status !== 'completed') {
+            try {
+              // Atualizar status da transação no banco
+              const { error: updateError } = await supabase
+                .from('credit_transactions')
+                .update({ 
+                  status: 'completed',
+                  updated_at: new Date().toISOString()
+                })
+                .eq('payment_reference', transactionId)
+
+              if (updateError) {
+                console.error('❌ Erro ao atualizar status:', updateError)
+                throw new Error(`Erro ao atualizar status: ${updateError.message}`)
+              }
+
+              // ✨ ADICIONAR TOKENS FXA (R$ 0.25 = 1 TOKEN)
+              const tokensToAdd = Math.floor(localTransaction.amount / 0.25)
+              console.log(`💰 Adicionando ${tokensToAdd} tokens FXA para o usuário ${localTransaction.user_id}`)
+
+              if (tokensToAdd > 0) {
+                const { error: tokenError } = await supabase.rpc('add_fxa_tokens', {
+                  p_user_id: localTransaction.user_id,
+                  p_amount: tokensToAdd,
+                  p_description: `Pagamento PIX confirmado - R$ ${localTransaction.amount.toFixed(2)}`,
+                  p_payment_reference: transactionId,
+                  p_metadata: {
+                    payment_amount_brl: localTransaction.amount,
+                    conversion_rate: 0.25,
+                    xgate_status: depositData.status,
+                    confirmed_at: new Date().toISOString(),
+                    auto_processed: true
+                  }
+                })
+
+                if (tokenError) {
+                  console.error('❌ Erro ao adicionar tokens FXA:', tokenError)
+                  throw new Error(`Erro ao adicionar tokens FXA: ${tokenError.message}`)
+                }
+
+                console.log('✅ Tokens FXA adicionados com sucesso!')
+              }
+
+              return NextResponse.json({
+                success: true,
+                status: 'completed',
+                transaction: {
+                  ...localTransaction,
+                  status: 'completed'
+                },
+                tokensAdded: tokensToAdd,
+                message: 'Pagamento confirmado e tokens adicionados!'
+              })
+
+            } catch (processError) {
+              console.error('❌ Erro ao processar pagamento confirmado:', processError)
+              return NextResponse.json({
+                success: false,
+                status: 'processing_error',
+                message: 'Pagamento confirmado mas houve erro no processamento'
+              }, { status: 500 })
+            }
+          }
+
+          // Se não temos transação local, retornar que foi confirmado mas precisa ser processado
+          return NextResponse.json({
+            success: true,
+            status: 'confirmed_pending_processing',
+            xgateStatus: depositData.status,
+            message: 'Pagamento confirmado no XGATE, processando...'
+          })
+
+        } else {
+          // Status ainda é WAITING_PAYMENT ou outro
+          console.log('⏳ Pagamento ainda pendente no XGATE:', depositData.status)
+          
+          return NextResponse.json({
+            success: true,
+            status: 'pending',
+            xgateStatus: depositData.status,
+            transaction: localTransaction,
+            message: 'Pagamento ainda pendente'
+          })
+        }
+
+      } else {
+        console.error('❌ Erro ao consultar XGATE:', statusResponse.status)
+        
+        // Se erro na consulta XGATE, retornar status local
+        return NextResponse.json({
+          success: true,
+          status: localTransaction?.status || 'unknown',
+          transaction: localTransaction,
+          message: 'Erro ao consultar status no XGATE, retornando status local'
+        })
+      }
+
+    } catch (xgateError) {
+      console.error('❌ Erro ao consultar XGATE:', xgateError)
+      
+      // Em caso de erro na consulta XGATE, retornar status local
+      return NextResponse.json({
+        success: true,
+        status: localTransaction?.status || 'unknown',
+        transaction: localTransaction,
+        message: 'Erro ao consultar XGATE, retornando status local'
+      })
+    }
 
   } catch (error) {
-    console.error('❌ Erro ao verificar status:', error)
+    console.error('❌ Erro geral ao verificar status:', error)
     return NextResponse.json({
       error: 'Erro interno do servidor'
     }, { status: 500 })

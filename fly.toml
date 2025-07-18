@@ -21,9 +21,8 @@ primary_region = "gru"
   
   # XGATE Global Payment Gateway
   XGATE_API_BASE_URL = "https://api.xgateglobal.com"
-  XGATE_EMAIL = "SEU_EMAIL_XGATE"
-  XGATE_PASSWORD = "SUA_SENHA_XGATE"
-  XGATE_CLIENT_ID = "SEU_CLIENT_ID_XGATE"
+  XGATE_EMAIL = "xcleriston@gmail.com"
+  XGATE_PASSWORD = "skPbp0tBhkrOLlg"
   XGATE_WEBHOOK_URL = "https://hoodx.ai/api/xgate-webhook"
 
 [http_service]

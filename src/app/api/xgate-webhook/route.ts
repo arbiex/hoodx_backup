@@ -153,119 +153,82 @@ export async function GET() {
 // POST - Processar webhook do XGATE
 export async function POST(request: NextRequest) {
   try {
-    console.log('🚀 Webhook recebido do XGATE')
+    console.log('📞 Webhook XGATE recebido')
     
-    // Ler o body
-    const body = await request.text()
-    let webhookData: any
+    const webhookData = await request.json()
+    console.log('📋 Dados do webhook:', JSON.stringify(webhookData, null, 2))
 
-    try {
-      webhookData = JSON.parse(body)
-    } catch (parseError) {
-      console.error('❌ Erro ao parsear JSON:', parseError)
-      await logWebhookEvent({ raw_body: body }, 'ERROR', 'JSON inválido')
-      return NextResponse.json({ error: 'JSON inválido' }, { status: 400 })
+    // Log do evento recebido
+    await logWebhookEvent(webhookData, 'received')
+
+    // Verificar se é uma notificação de pagamento
+    if (!webhookData.transactionId && !webhookData.id) {
+      console.log('⚠️ Webhook sem transactionId ou id, ignorando')
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Webhook recebido mas sem transactionId' 
+      })
     }
 
-    console.log('📄 Dados recebidos:', webhookData)
+    // Usar o ID correto da transação
+    const transactionId = webhookData.transactionId || webhookData.id
 
-    // Verificar se é teste do XGATE
-    if (webhookData.test === true || webhookData.type === 'test') {
-      console.log('🧪 Teste XGATE detectado - retornando OK')
-      await logWebhookEvent(webhookData, 'TEST', 'Evento de teste')
-      return NextResponse.json({ status: 'ok' }, { status: 200 })
+    // Verificar se é uma confirmação de pagamento
+    const isPaymentConfirmed = 
+      webhookData.status === 'PAID' || 
+      webhookData.status === 'COMPLETED' ||
+      webhookData.status === 'SUCCESS' ||
+      webhookData.event === 'deposit.confirmed' ||
+      webhookData.type === 'payment.confirmed'
+
+    console.log(`💳 Transação ${transactionId}, Status: ${webhookData.status}, Confirmado: ${isPaymentConfirmed}`)
+
+    if (isPaymentConfirmed) {
+      console.log('✅ Processando confirmação de pagamento via webhook')
+      
+      try {
+        const result = await processPaymentConfirmation(transactionId, webhookData)
+        
+        await logWebhookEvent(webhookData, 'processed_success', undefined)
+        
+        return NextResponse.json({
+          success: true,
+          message: 'Pagamento processado com sucesso',
+          result
+        })
+        
+      } catch (error) {
+        console.error('❌ Erro ao processar confirmação:', error)
+        const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido'
+        await logWebhookEvent(webhookData, 'processed_error', errorMessage)
+        
+        return NextResponse.json({
+          success: false,
+          message: 'Erro ao processar pagamento',
+          error: errorMessage
+        }, { status: 500 })
+      }
+    } else {
+      console.log(`ℹ️ Status ${webhookData.status} não requer processamento`)
+      await logWebhookEvent(webhookData, 'ignored_status', undefined)
+      
+      return NextResponse.json({
+        success: true,
+        message: 'Webhook recebido, status não requer processamento'
+      })
     }
 
-    // Processar diferentes tipos de eventos
-    const eventType = webhookData.type || webhookData.event_type
-    const transactionId = webhookData.transaction_id || webhookData.id
-    const status = webhookData.status
-
-    if (!transactionId) {
-      await logWebhookEvent(webhookData, 'ERROR', 'transaction_id não encontrado')
-      return NextResponse.json({ error: 'transaction_id não encontrado' }, { status: 400 })
-    }
-
-    // Log do evento
-    await logWebhookEvent(webhookData, 'RECEIVED', undefined)
-
-    // Processar baseado no tipo de evento
-    switch (eventType) {
-      case 'deposit.completed':
-      case 'payment.completed':
-      case 'pix.completed':
-        if (status === 'COMPLETED' || status === 'CONFIRMED' || status === 'PAID') {
-          const result = await processPaymentConfirmation(transactionId, webhookData)
-          await logWebhookEvent(webhookData, 'PROCESSED', undefined)
-          
-          return NextResponse.json({ 
-            status: 'ok', 
-            message: 'Pagamento processado com sucesso',
-            result: result
-          }, { status: 200 })
-        }
-        break
-
-      case 'deposit.failed':
-      case 'payment.failed':
-      case 'pix.failed':
-        // Atualizar status para falha
-        {
-          const supabase = getSupabaseClient()
-          await supabase
-            .from('credit_transactions')
-            .update({
-              status: 'failed',
-              updated_at: new Date().toISOString(),
-              metadata: {
-                webhook_data: webhookData,
-                failed_at: new Date().toISOString()
-              }
-            })
-            .eq('payment_reference', transactionId)
-        }
-
-        await logWebhookEvent(webhookData, 'FAILED', 'Pagamento falhou')
-        break
-
-      case 'deposit.expired':
-      case 'payment.expired':
-      case 'pix.expired':
-        // Atualizar status para cancelado (expirado)
-        {
-          const supabase = getSupabaseClient()
-          await supabase
-            .from('credit_transactions')
-            .update({
-              status: 'cancelled',
-              updated_at: new Date().toISOString(),
-              metadata: {
-                webhook_data: webhookData,
-                expired_at: new Date().toISOString()
-              }
-            })
-            .eq('payment_reference', transactionId)
-        }
-
-        await logWebhookEvent(webhookData, 'EXPIRED', 'Pagamento expirado')
-        break
-
-      default:
-        console.log('⚠️ Tipo de evento não reconhecido:', eventType)
-        await logWebhookEvent(webhookData, 'UNKNOWN', `Evento não reconhecido: ${eventType}`)
-    }
-    
-    // Sempre retornar 200 para XGATE
-    return NextResponse.json({ status: 'ok' }, { status: 200 })
-    
   } catch (error) {
-    console.error('❌ Erro no webhook:', error)
+    console.error('❌ Erro geral no webhook XGATE:', error)
     
-    // Log do erro
-    await logWebhookEvent({ error: error instanceof Error ? error.message : 'Erro desconhecido' }, 'ERROR', error instanceof Error ? error.message : 'Erro desconhecido')
+    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido'
+    await logWebhookEvent({ error: errorMessage }, 'error', errorMessage)
     
-    // Sempre retornar 200 para evitar reenvio
-    return NextResponse.json({ status: 'ok' }, { status: 200 })
+    return NextResponse.json({
+      success: false,
+      message: 'Erro interno no webhook',
+      error: errorMessage
+    }, { status: 500 })
   }
 }
 

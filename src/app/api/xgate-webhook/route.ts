@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-// Configuração do Supabase
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
+// Função para obter cliente Supabase de forma segura
+function getSupabaseClient() {
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-// Cliente Supabase para operações no banco
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    throw new Error('Variáveis de ambiente do Supabase não configuradas')
+  }
+
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+}
 
 // Log de webhook para debugging
 async function logWebhookEvent(event: any, status: string, error?: string) {
   try {
+    const supabase = getSupabaseClient()
     await supabase
       .from('webhook_logs')
       .insert({
@@ -31,6 +36,8 @@ async function logWebhookEvent(event: any, status: string, error?: string) {
 async function processPaymentConfirmation(transactionId: string, webhookData: any) {
   try {
     console.log('🔄 Processando confirmação de pagamento:', transactionId)
+    
+    const supabase = getSupabaseClient()
 
     // Buscar transação no banco
     const { data: transaction, error: findError } = await supabase
@@ -168,14 +175,17 @@ export async function POST(request: NextRequest) {
       case 'payment.failed':
       case 'pix.failed':
         // Atualizar status para falha
-        await supabase
-          .from('pix_transactions')
-          .update({
-            status: 'FAILED',
-            xgate_webhook_data: webhookData,
-            updated_at: new Date().toISOString()
-          })
-          .eq('transaction_id', transactionId)
+        {
+          const supabase = getSupabaseClient()
+          await supabase
+            .from('pix_transactions')
+            .update({
+              status: 'FAILED',
+              xgate_webhook_data: webhookData,
+              updated_at: new Date().toISOString()
+            })
+            .eq('transaction_id', transactionId)
+        }
 
         await logWebhookEvent(webhookData, 'FAILED', 'Pagamento falhou')
         break
@@ -184,14 +194,17 @@ export async function POST(request: NextRequest) {
       case 'payment.expired':
       case 'pix.expired':
         // Atualizar status para expirado
-        await supabase
-          .from('pix_transactions')
-          .update({
-            status: 'EXPIRED',
-            xgate_webhook_data: webhookData,
-            updated_at: new Date().toISOString()
-          })
-          .eq('transaction_id', transactionId)
+        {
+          const supabase = getSupabaseClient()
+          await supabase
+            .from('pix_transactions')
+            .update({
+              status: 'EXPIRED',
+              xgate_webhook_data: webhookData,
+              updated_at: new Date().toISOString()
+            })
+            .eq('transaction_id', transactionId)
+        }
 
         await logWebhookEvent(webhookData, 'EXPIRED', 'Pagamento expirado')
         break

@@ -247,11 +247,12 @@ export default function XGatePaymentModal({
     // successModal.openModal() // DESABILITADO
     // setShowHardcodedSuccessModal(true) // DESABILITADO - usando DOM direto
     
-    // Chamar callback de sucesso
-    if (onSuccess) {
-      console.log('🎉 [DEBUG] Chamando callback onSuccess')
-      onSuccess(amount, transactionId)
-    }
+    // 🚫 TEMPORARIAMENTE DESABILITADO - Pode estar causando reload
+    // if (onSuccess) {
+    //   console.log('🎉 [DEBUG] Chamando callback onSuccess')
+    //   onSuccess(amount, transactionId)
+    // }
+    console.log('🚫 [DEBUG] onSuccess callback DESABILITADO para evitar reload')
     
     // Toast de sucesso
     const tokensText = tokensAdded || calculateFixas(amount)

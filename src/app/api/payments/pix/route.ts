@@ -10,10 +10,17 @@ const XGATE_CONFIG = {
   webhookUrl: process.env.XGATE_WEBHOOK_URL || `${process.env.NEXT_FLY_APP_URL}/api/xgate-webhook`
 }
 
-// Cliente Supabase para operações no banco
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-const supabase = createClient(supabaseUrl, supabaseKey)
+// Função para obter cliente Supabase de forma segura
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error('Variáveis de ambiente do Supabase não configuradas')
+  }
+
+  return createClient(supabaseUrl, supabaseKey)
+}
 
 // Cache para token JWT (em produção, usar Redis ou similar)
 let tokenCache: { token: string; expiresAt: number } | null = null
@@ -203,6 +210,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Salvar transação no banco
+    const supabase = getSupabaseClient()
     const { data: transaction, error: dbError } = await supabase
       .from('pix_transactions')
       .insert({
@@ -271,6 +279,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Atualizar status no banco
+    const supabase = getSupabaseClient()
     const { data: transaction, error: updateError } = await supabase
       .from('pix_transactions')
       .update({

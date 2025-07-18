@@ -41,15 +41,16 @@ export default function XGatePaymentModal({
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
   const [isMonitoring, setIsMonitoring] = useState(false)
   const [autoCheck, setAutoCheck] = useState<NodeJS.Timeout | null>(null)
+  const [paymentProcessed, setPaymentProcessed] = useState(false) // Nova flag para evitar processamento múltiplo
   const successModal = useModal()
 
   // Conversão: R$ 0.25 = 1 FIXA (Valor mínimo: R$ 5.00 = 20 FIXAS)
   const FIXA_RATE = 0.25
 
-  // Calcular FIXAS que receberá
-  const calculateFixas = (realAmount: number) => {
-    return Math.floor(realAmount / FIXA_RATE)
-  }
+  // Calcular FIXAs baseado no valor
+  const calculateFixas = useCallback((value: number): number => {
+    return Math.floor(value / FIXA_RATE)
+  }, [])
 
   // Função para copiar para a área de transferência
   const copyToClipboard = useCallback(async (text: string) => {
@@ -67,12 +68,29 @@ export default function XGatePaymentModal({
     }
   }, [])
 
-  // Verificação automática de status
+  // Iniciar verificação automática
   const startAutoStatusCheck = useCallback((transactionId: string) => {
-    console.log('🤖 Iniciando verificação automática a cada 1 segundo')
+    console.log('🚀 Iniciando verificação automática para:', transactionId)
     
+    // Limpar qualquer verificação anterior
+    if (autoCheck) {
+      console.log('🛑 Limpando verificação anterior')
+      clearInterval(autoCheck)
+      setAutoCheck(null)
+    }
+
+    // Reset da flag de processamento
+    setPaymentProcessed(false)
+
     const checkStatus = async () => {
+      // Evitar verificação se já foi processado
+      if (paymentProcessed) {
+        console.log('⏭️ Pagamento já processado, pulando verificação')
+        return
+      }
+
       try {
+        console.log('🔍 Auto-check para:', transactionId)
         const statusData = await checkPaymentStatus(transactionId)
         
         if (statusData) {
@@ -81,20 +99,27 @@ export default function XGatePaymentModal({
           if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
             console.log('🎉 Pagamento confirmado automaticamente!')
             
+            // Marcar como processado IMEDIATAMENTE
+            setPaymentProcessed(true)
+            
             // Parar verificação automática
             if (autoCheck) {
               clearInterval(autoCheck)
               setAutoCheck(null)
             }
             
-            // Mostrar modal de sucesso
+            // Parar monitoramento
             setIsMonitoring(false)
+            
+            // Mostrar modal de sucesso
             successModal.openModal()
             
+            // Chamar callback de sucesso
             if (onSuccess) {
               onSuccess(amount, transactionId)
             }
             
+            // Toast de sucesso
             toast.success('PAGAMENTO_CONFIRMADO!', {
               description: `+${calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
             })
@@ -113,7 +138,7 @@ export default function XGatePaymentModal({
     setAutoCheck(interval)
     
     return interval
-  }, [checkPaymentStatus, autoCheck, successModal, onSuccess, amount])
+  }, [checkPaymentStatus, autoCheck, successModal, onSuccess, amount, calculateFixas, paymentProcessed])
 
   // Criar transação ao abrir o modal
   useEffect(() => {
@@ -142,10 +167,15 @@ export default function XGatePaymentModal({
 
   // Limpar verificação automática ao fechar
   useEffect(() => {
-    if (!isOpen && autoCheck) {
-      console.log('🛑 Parando verificação automática')
-      clearInterval(autoCheck)
-      setAutoCheck(null)
+    if (!isOpen) {
+      if (autoCheck) {
+        console.log('🛑 Parando verificação automática ao fechar modal')
+        clearInterval(autoCheck)
+        setAutoCheck(null)
+      }
+      // Reset flags quando fechar
+      setPaymentProcessed(false)
+      setIsMonitoring(false)
     }
   }, [isOpen, autoCheck])
 
@@ -164,7 +194,7 @@ export default function XGatePaymentModal({
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [timeLeft])
+      }, [timeLeft])
 
   // Formatar tempo restante
   const formatTimeLeft = (seconds: number): string => {
@@ -175,7 +205,7 @@ export default function XGatePaymentModal({
 
   // Verificar status manualmente
   const handleCheckStatus = useCallback(async () => {
-    if (!currentTransaction) return
+    if (!currentTransaction || paymentProcessed) return
 
     try {
       setIsMonitoring(true)
@@ -186,6 +216,9 @@ export default function XGatePaymentModal({
         
         if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
           console.log('🎉 Pagamento confirmado na verificação manual!')
+          
+          // Marcar como processado para evitar duplo processamento
+          setPaymentProcessed(true)
           
           // Parar verificação automática
           if (autoCheck) {
@@ -216,7 +249,7 @@ export default function XGatePaymentModal({
     } finally {
       setIsMonitoring(false)
     }
-  }, [currentTransaction, checkPaymentStatus, onSuccess, amount, successModal, autoCheck, calculateFixas])
+  }, [currentTransaction, checkPaymentStatus, onSuccess, amount, successModal, autoCheck, calculateFixas, paymentProcessed])
 
   // Fechar modal
   const handleClose = useCallback(() => {

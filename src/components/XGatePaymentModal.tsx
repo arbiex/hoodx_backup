@@ -34,7 +34,8 @@ export default function XGatePaymentModal({
     createPixDeposit,
     checkPaymentStatus,
     monitorPaymentStatus,
-    clearCurrentTransaction
+    clearCurrentTransaction,
+    isTransactionCached
   } = useXGatePayment()
 
   const [copied, setCopied] = useState(false)
@@ -57,13 +58,13 @@ export default function XGatePaymentModal({
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
-      toast.success('COPIADO_PARA_ÁREA_TRANSFERÊNCIA', { 
-        description: 'Código PIX copiado com sucesso' 
+      toast.success('Copiado!', {
+        description: 'Código PIX copiado para área de transferência'
       })
       setTimeout(() => setCopied(false), 2000)
     } catch (error) {
-      toast.error('FALHA_CÓPIA', { 
-        description: 'Não foi possível copiar para área de transferência' 
+      toast.error('Erro ao copiar', {
+        description: 'Não foi possível copiar o código'
       })
     }
   }, [])
@@ -71,6 +72,13 @@ export default function XGatePaymentModal({
   // Iniciar verificação automática
   const startAutoStatusCheck = useCallback((transactionId: string) => {
     console.log('🚀 Iniciando verificação automática para:', transactionId)
+    
+    // ✅ VERIFICAÇÃO CACHE - Se já foi processada, não iniciar verificação
+    if (isTransactionCached(transactionId)) {
+      console.log('🚫 Transação já no cache, não iniciando verificação:', transactionId)
+      setPaymentProcessed(true)
+      return
+    }
     
     // Limpar qualquer verificação anterior
     if (autoCheck) {
@@ -83,9 +91,13 @@ export default function XGatePaymentModal({
     setPaymentProcessed(false)
 
     const checkStatus = async () => {
-      // Evitar verificação se já foi processado
-      if (paymentProcessed) {
-        console.log('⏭️ Pagamento já processado, pulando verificação')
+      // ✅ VERIFICAÇÃO DUPLA - Evitar verificação se já foi processado OU está no cache
+      if (paymentProcessed || isTransactionCached(transactionId)) {
+        console.log('⏭️ Pagamento já processado ou em cache, pulando verificação')
+        if (autoCheck) {
+          clearInterval(autoCheck)
+          setAutoCheck(null)
+        }
         return
       }
 
@@ -176,7 +188,7 @@ export default function XGatePaymentModal({
     setAutoCheck(interval)
     
     return interval
-  }, [checkPaymentStatus, autoCheck, successModal, onSuccess, amount, calculateFixas, paymentProcessed])
+  }, [checkPaymentStatus, autoCheck, successModal, onSuccess, amount, calculateFixas, paymentProcessed, isTransactionCached])
 
   // Criar transação ao abrir o modal
   useEffect(() => {
@@ -244,6 +256,16 @@ export default function XGatePaymentModal({
   // Verificar status manualmente
   const handleCheckStatus = useCallback(async () => {
     if (!currentTransaction || paymentProcessed) return
+
+    // ✅ VERIFICAÇÃO CACHE - Se já foi processada, não verificar
+    if (isTransactionCached(currentTransaction.transactionId)) {
+      console.log('🚫 Transação já no cache, não verificando manualmente:', currentTransaction.transactionId)
+      setPaymentProcessed(true)
+      toast.info('TRANSAÇÃO_FINALIZADA', {
+        description: 'Esta transação já foi processada'
+      })
+      return
+    }
 
     try {
       setIsMonitoring(true)
@@ -318,7 +340,7 @@ export default function XGatePaymentModal({
     } finally {
       setIsMonitoring(false)
     }
-  }, [currentTransaction, checkPaymentStatus, onSuccess, amount, successModal, autoCheck, calculateFixas, paymentProcessed])
+  }, [currentTransaction, checkPaymentStatus, onSuccess, amount, successModal, autoCheck, calculateFixas, paymentProcessed, isTransactionCached])
 
   // Fechar modal
   const handleClose = useCallback(() => {

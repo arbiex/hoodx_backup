@@ -2,6 +2,9 @@ import { useState, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { toast } from 'sonner'
 
+// Cache local para transações que já foram finalizadas (evita verificações desnecessárias)
+const processedTransactionsCache = new Set<string>()
+
 // Configuração do Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -111,6 +114,20 @@ export function useXGatePayment() {
   // Verificar status de pagamento
   const checkPaymentStatus = useCallback(async (transactionId: string) => {
     try {
+      // ✅ VERIFICAÇÃO CACHE LOCAL - Se já foi processada, não verificar novamente
+      if (processedTransactionsCache.has(transactionId)) {
+        console.log('🚫 Transação já finalizada no cache local, pulando verificação:', transactionId)
+        return {
+          status: 'completed',
+          transactionId,
+          message: 'Transação já processada (cache local)',
+          amount: 0,
+          confirmedAt: null,
+          expiresAt: null,
+          shouldStopChecking: true
+        }
+      }
+
       console.log('🔍 Verificando status do pagamento:', transactionId)
       
       const response = await fetch(`/api/payments/pix?transactionId=${transactionId}`)
@@ -127,6 +144,12 @@ export function useXGatePayment() {
       }
 
       console.log('📊 Status recebido:', data.status)
+
+      // ✅ Se deve parar verificações OU status é completed, adicionar ao cache
+      if (data.shouldStopChecking || data.status === 'completed' || data.status === 'COMPLETED') {
+        console.log('🔒 Adicionando transação ao cache de finalizadas:', transactionId)
+        processedTransactionsCache.add(transactionId)
+      }
 
       // Atualizar transação atual se for a mesma
       if (currentTransaction?.transactionId === transactionId) {
@@ -250,6 +273,17 @@ export function useXGatePayment() {
     setCurrentTransaction(null)
   }, [])
 
+  // Limpar cache de transação específica (para casos especiais)
+  const clearTransactionCache = useCallback((transactionId: string) => {
+    console.log('🗑️ Removendo transação do cache:', transactionId)
+    processedTransactionsCache.delete(transactionId)
+  }, [])
+
+  // Verificar se transação está no cache
+  const isTransactionCached = useCallback((transactionId: string) => {
+    return processedTransactionsCache.has(transactionId)
+  }, [])
+
   return {
     // Estado
     isLoading,
@@ -261,6 +295,8 @@ export function useXGatePayment() {
     checkPaymentStatus,
     fetchUserTransactions,
     monitorPaymentStatus,
-    clearCurrentTransaction
+    clearCurrentTransaction,
+    clearTransactionCache,
+    isTransactionCached
   }
 } 

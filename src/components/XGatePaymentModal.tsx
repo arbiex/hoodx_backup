@@ -40,6 +40,7 @@ export default function XGatePaymentModal({
   const [copied, setCopied] = useState(false)
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
   const [isMonitoring, setIsMonitoring] = useState(false)
+  const [autoCheck, setAutoCheck] = useState<NodeJS.Timeout | null>(null)
   const successModal = useModal()
 
   // Conversão: R$ 0.25 = 1 FIXA (Valor mínimo: R$ 5.00 = 20 FIXAS)
@@ -66,6 +67,54 @@ export default function XGatePaymentModal({
     }
   }, [])
 
+  // Verificação automática de status
+  const startAutoStatusCheck = useCallback((transactionId: string) => {
+    console.log('🤖 Iniciando verificação automática a cada 1 segundo')
+    
+    const checkStatus = async () => {
+      try {
+        const statusData = await checkPaymentStatus(transactionId)
+        
+        if (statusData) {
+          console.log('🔍 Auto-check status:', statusData.status)
+          
+          if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
+            console.log('🎉 Pagamento confirmado automaticamente!')
+            
+            // Parar verificação automática
+            if (autoCheck) {
+              clearInterval(autoCheck)
+              setAutoCheck(null)
+            }
+            
+            // Mostrar modal de sucesso
+            setIsMonitoring(false)
+            successModal.openModal()
+            
+            if (onSuccess) {
+              onSuccess(amount, transactionId)
+            }
+            
+            toast.success('PAGAMENTO_CONFIRMADO!', {
+              description: `+${calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
+            })
+            
+            return
+          }
+        }
+      } catch (error) {
+        console.error('❌ Erro na verificação automática:', error)
+      }
+    }
+
+    // Verificar imediatamente e depois a cada 1 segundo
+    checkStatus()
+    const interval = setInterval(checkStatus, 1000)
+    setAutoCheck(interval)
+    
+    return interval
+  }, [checkPaymentStatus, autoCheck, successModal, onSuccess, amount])
+
   // Criar transação ao abrir o modal
   useEffect(() => {
     if (isOpen && !currentTransaction && !isLoading) {
@@ -76,16 +125,8 @@ export default function XGatePaymentModal({
             setTimeLeft(15 * 60) // 15 minutos
             setIsMonitoring(true)
             
-            // Iniciar monitoramento
-            const completed = await monitorPaymentStatus(transaction.transactionId, 5000, 60)
-            setIsMonitoring(false)
-            
-            if (completed) {
-              successModal.openModal()
-              if (onSuccess) {
-                onSuccess(amount, transaction.transactionId)
-              }
-            }
+            // Iniciar verificação automática a cada 1 segundo
+            startAutoStatusCheck(transaction.transactionId)
           }
         } catch (error) {
           console.error('Erro ao criar transação:', error)
@@ -97,7 +138,16 @@ export default function XGatePaymentModal({
 
       createTransaction()
     }
-  }, [isOpen, currentTransaction, isLoading, amount, userId, createPixDeposit, monitorPaymentStatus, onSuccess, successModal])
+  }, [isOpen, currentTransaction, isLoading, amount, userId, createPixDeposit, startAutoStatusCheck])
+
+  // Limpar verificação automática ao fechar
+  useEffect(() => {
+    if (!isOpen && autoCheck) {
+      console.log('🛑 Parando verificação automática')
+      clearInterval(autoCheck)
+      setAutoCheck(null)
+    }
+  }, [isOpen, autoCheck])
 
   // Countdown timer
   useEffect(() => {
@@ -131,16 +181,33 @@ export default function XGatePaymentModal({
       setIsMonitoring(true)
       const statusData = await checkPaymentStatus(currentTransaction.transactionId)
       
-      if (statusData?.status === 'COMPLETED') {
-        successModal.openModal()
-        if (onSuccess) {
-          onSuccess(amount, currentTransaction.transactionId)
+      if (statusData) {
+        console.log('🔍 Verificação manual - Status:', statusData.status)
+        
+        if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
+          console.log('🎉 Pagamento confirmado na verificação manual!')
+          
+          // Parar verificação automática
+          if (autoCheck) {
+            clearInterval(autoCheck)
+            setAutoCheck(null)
+          }
+          
+          // Mostrar modal de sucesso
+          successModal.openModal()
+          if (onSuccess) {
+            onSuccess(amount, currentTransaction.transactionId)
+          }
+          
+          toast.success('PAGAMENTO_CONFIRMADO!', {
+            description: `+${calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
+          })
+        } else {
+          const statusText = statusData.status === 'pending' ? 'Aguardando pagamento' : statusData.status || 'Desconhecido'
+          toast.info('STATUS_ATUALIZADO', {
+            description: `Status atual: ${statusText}`
+          })
         }
-      } else {
-        const statusText = statusData?.status === 'PENDING' ? 'Aguardando pagamento' : statusData?.status || 'Desconhecido'
-        toast.info('STATUS_ATUALIZADO', {
-          description: `Status atual: ${statusText}`
-        })
       }
     } catch (error) {
       toast.error('ERRO_VERIFICAÇÃO', {
@@ -149,16 +216,22 @@ export default function XGatePaymentModal({
     } finally {
       setIsMonitoring(false)
     }
-  }, [currentTransaction, checkPaymentStatus, onSuccess, amount, successModal])
+  }, [currentTransaction, checkPaymentStatus, onSuccess, amount, successModal, autoCheck, calculateFixas])
 
   // Fechar modal
   const handleClose = useCallback(() => {
+    // Parar verificação automática
+    if (autoCheck) {
+      clearInterval(autoCheck)
+      setAutoCheck(null)
+    }
+    
     setIsMonitoring(false)
     clearCurrentTransaction()
     setTimeLeft(null)
     setCopied(false)
     onClose()
-  }, [clearCurrentTransaction, onClose])
+  }, [clearCurrentTransaction, onClose, autoCheck])
 
   // Fechar modal de sucesso
   const handleSuccessClose = useCallback(() => {
@@ -173,12 +246,16 @@ export default function XGatePaymentModal({
     }
 
     switch (currentTransaction.status) {
+      case 'pending':
       case 'PENDING':
         return { icon: Clock, color: 'text-yellow-400', text: 'Aguardando pagamento' }
+      case 'completed':
       case 'COMPLETED':
         return { icon: CheckCircle, color: 'text-green-400', text: 'Pagamento confirmado' }
+      case 'failed':
       case 'FAILED':
         return { icon: AlertCircle, color: 'text-red-400', text: 'Pagamento falhou' }
+      case 'expired':
       case 'EXPIRED':
         return { icon: AlertCircle, color: 'text-red-400', text: 'Pagamento expirado' }
       default:

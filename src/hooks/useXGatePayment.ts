@@ -126,6 +126,8 @@ export function useXGatePayment() {
         throw new Error(data.error || 'Falha ao verificar status')
       }
 
+      console.log('📊 Status recebido:', data.status)
+
       // Atualizar transação atual se for a mesma
       if (currentTransaction?.transactionId === transactionId) {
         setCurrentTransaction(prev => prev ? {
@@ -143,8 +145,11 @@ export function useXGatePayment() {
 
       return {
         status: data.status,
-        amount: data.amount,
-        confirmedAt: data.confirmedAt,
+        transaction: data.transaction,
+        tokensAdded: data.tokensAdded,
+        message: data.message,
+        amount: data.transaction?.amount || 0,
+        confirmedAt: data.transaction?.updated_at,
         expiresAt: data.expiresAt
       }
 
@@ -194,8 +199,8 @@ export function useXGatePayment() {
   // Monitorar status de pagamento (polling)
   const monitorPaymentStatus = useCallback(async (
     transactionId: string,
-    intervalMs: number = 5000,
-    maxAttempts: number = 60
+    intervalMs: number = 1000,  // Mudando para 1 segundo
+    maxAttempts: number = 300   // 5 minutos = 300 tentativas
   ) => {
     let attempts = 0
     
@@ -210,16 +215,28 @@ export function useXGatePayment() {
       const status = await checkPaymentStatus(transactionId)
       
       if (!status) {
+        console.log('❌ Falha ao verificar status, tentando novamente...')
+        setTimeout(() => checkStatus(), intervalMs)
         return false
       }
 
-      // Se foi completado ou falhou, parar o monitoramento
-      if (status.status === 'COMPLETED' || status.status === 'FAILED' || status.status === 'EXPIRED') {
-        console.log('✅ Status final alcançado:', status.status)
+      console.log(`🔄 Tentativa ${attempts}: Status = ${status.status}`)
+
+      // Se foi completado, processar sucesso
+      if (status.status === 'completed' || status.status === 'COMPLETED') {
+        console.log('✅ Pagamento confirmado! Parando monitoramento.')
         return true
       }
 
-      // Continuar monitorando
+      // Se falhou ou expirou, parar o monitoramento
+      if (status.status === 'failed' || status.status === 'FAILED' || 
+          status.status === 'expired' || status.status === 'EXPIRED' ||
+          status.status === 'cancelled' || status.status === 'CANCELLED') {
+        console.log('❌ Status final negativo alcançado:', status.status)
+        return false
+      }
+
+      // Status ainda pendente, continuar monitorando
       setTimeout(() => checkStatus(), intervalMs)
       return false
     }

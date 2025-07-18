@@ -291,9 +291,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Validar valores
-    if (amount < 5 || amount > 1000) {
+    if (amount < 5) {
       return NextResponse.json({ 
-        error: 'Valor deve estar entre R$ 5,00 e R$ 1.000,00' 
+        error: 'Valor mínimo é R$ 5,00' 
       }, { status: 400 })
     }
 

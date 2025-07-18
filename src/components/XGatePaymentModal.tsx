@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { X, QrCode, Copy, Clock, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react'
+import { X, QrCode, Copy, Clock, CheckCircle, AlertCircle, RefreshCw, Banknote, Coins } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import Modal, { useModal } from '@/components/ui/modal'
+import CollapsibleSection from '@/components/ui/collapsible-section'
 import { toast } from 'sonner'
 import { useXGatePayment } from '@/hooks/useXGatePayment'
+import QRCodeSVG from 'react-qr-code'
 
 interface XGatePaymentModalProps {
   isOpen: boolean
@@ -21,8 +23,8 @@ export default function XGatePaymentModal({
   isOpen,
   onClose,
   onSuccess,
-  title = 'Pagamento PIX',
-  description = 'Complete sua compra via PIX',
+  title = 'PAGAMENTO_PIX',
+  description = 'Complete sua compra via transferência PIX',
   amount,
   userId
 }: XGatePaymentModalProps) {
@@ -38,113 +40,143 @@ export default function XGatePaymentModal({
   const [copied, setCopied] = useState(false)
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
   const [isMonitoring, setIsMonitoring] = useState(false)
+  const successModal = useModal()
+
+  // Conversão: R$ 0.25 = 1 FIXA (Valor mínimo: R$ 5.00 = 20 FIXAS)
+  const FIXA_RATE = 0.25
+
+  // Calcular FIXAS que receberá
+  const calculateFixas = (realAmount: number) => {
+    return Math.floor(realAmount / FIXA_RATE)
+  }
 
   // Função para copiar para a área de transferência
   const copyToClipboard = useCallback(async (text: string) => {
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
-      toast.success('Código copiado para a área de transferência!')
+      toast.success('COPIADO_PARA_ÁREA_TRANSFERÊNCIA', { 
+        description: 'Código PIX copiado com sucesso' 
+      })
       setTimeout(() => setCopied(false), 2000)
     } catch (error) {
-      console.error('Erro ao copiar:', error)
-      toast.error('Erro ao copiar código')
+      toast.error('FALHA_CÓPIA', { 
+        description: 'Não foi possível copiar para área de transferência' 
+      })
     }
   }, [])
 
-  // Função para criar depósito quando modal abre
-  const handleCreateDeposit = useCallback(async () => {
-    if (!amount || !userId) return
-
-    const result = await createPixDeposit(
-      amount,
-      userId,
-      `Compra de créditos - R$ ${amount.toFixed(2)}`
-    )
-
-    if (result && result.transactionId) {
-      // Iniciar monitoramento automático
-      setIsMonitoring(true)
-      monitorPaymentStatus(result.transactionId)
-        .then((completed) => {
-          if (completed) {
-            toast.success('Pagamento confirmado!')
-            onSuccess?.(amount, result.transactionId)
-            handleClose()
-          }
-        })
-        .finally(() => {
-          setIsMonitoring(false)
-        })
-    }
-  }, [amount, userId, createPixDeposit, monitorPaymentStatus, onSuccess])
-
-  // Calcular tempo restante
-  useEffect(() => {
-    if (!currentTransaction?.expiresAt) return
-
-    const updateTimeLeft = () => {
-      const now = new Date().getTime()
-      const expires = new Date(currentTransaction.expiresAt!).getTime()
-      const diff = expires - now
-
-      if (diff > 0) {
-        setTimeLeft(Math.floor(diff / 1000))
-      } else {
-        setTimeLeft(0)
-      }
-    }
-
-    updateTimeLeft()
-    const interval = setInterval(updateTimeLeft, 1000)
-
-    return () => clearInterval(interval)
-  }, [currentTransaction])
-
-  // Criar depósito quando modal abre
+  // Criar transação ao abrir o modal
   useEffect(() => {
     if (isOpen && !currentTransaction && !isLoading) {
-      handleCreateDeposit()
+      const createTransaction = async () => {
+        try {
+          const transaction = await createPixDeposit(amount, userId)
+          if (transaction) {
+            setTimeLeft(15 * 60) // 15 minutos
+            setIsMonitoring(true)
+            
+            // Iniciar monitoramento
+            const completed = await monitorPaymentStatus(transaction.transactionId, 5000, 60)
+            setIsMonitoring(false)
+            
+            if (completed) {
+              successModal.openModal()
+              if (onSuccess) {
+                onSuccess(amount, transaction.transactionId)
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Erro ao criar transação:', error)
+          toast.error('ERRO_TRANSAÇÃO', {
+            description: 'Falha ao gerar código PIX'
+          })
+        }
+      }
+
+      createTransaction()
     }
-  }, [isOpen, currentTransaction, isLoading, handleCreateDeposit])
+  }, [isOpen, currentTransaction, isLoading, amount, userId, createPixDeposit, monitorPaymentStatus, onSuccess, successModal])
 
-  // Função para fechar modal
-  const handleClose = useCallback(() => {
-    clearCurrentTransaction()
-    setTimeLeft(null)
-    setIsMonitoring(false)
-    setCopied(false)
-    onClose()
-  }, [clearCurrentTransaction, onClose])
+  // Countdown timer
+  useEffect(() => {
+    if (timeLeft === null || timeLeft <= 0) return
 
-  // Função para verificar status manualmente
-  const handleCheckStatus = useCallback(async () => {
-    if (!currentTransaction?.transactionId) return
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev === null || prev <= 1) {
+          setIsMonitoring(false)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
 
-    const status = await checkPaymentStatus(currentTransaction.transactionId)
-    if (status && status.status === 'COMPLETED') {
-      toast.success('Pagamento confirmado!')
-      onSuccess?.(amount, currentTransaction.transactionId)
-      handleClose()
-    }
-  }, [currentTransaction, checkPaymentStatus, amount, onSuccess, handleClose])
+    return () => clearInterval(timer)
+  }, [timeLeft])
 
   // Formatar tempo restante
-  const formatTimeLeft = (seconds: number) => {
+  const formatTimeLeft = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60)
     const remainingSeconds = seconds % 60
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
   }
 
-  // Função para obter status visual
+  // Verificar status manualmente
+  const handleCheckStatus = useCallback(async () => {
+    if (!currentTransaction) return
+
+    try {
+      setIsMonitoring(true)
+      const statusData = await checkPaymentStatus(currentTransaction.transactionId)
+      
+      if (statusData?.status === 'COMPLETED') {
+        successModal.openModal()
+        if (onSuccess) {
+          onSuccess(amount, currentTransaction.transactionId)
+        }
+      } else {
+        const statusText = statusData?.status === 'PENDING' ? 'Aguardando pagamento' : statusData?.status || 'Desconhecido'
+        toast.info('STATUS_ATUALIZADO', {
+          description: `Status atual: ${statusText}`
+        })
+      }
+    } catch (error) {
+      toast.error('ERRO_VERIFICAÇÃO', {
+        description: 'Falha ao verificar status do pagamento'
+      })
+    } finally {
+      setIsMonitoring(false)
+    }
+  }, [currentTransaction, checkPaymentStatus, onSuccess, amount, successModal])
+
+  // Fechar modal
+  const handleClose = useCallback(() => {
+    setIsMonitoring(false)
+    clearCurrentTransaction()
+    setTimeLeft(null)
+    setCopied(false)
+    onClose()
+  }, [clearCurrentTransaction, onClose])
+
+  // Fechar modal de sucesso
+  const handleSuccessClose = useCallback(() => {
+    successModal.closeModal()
+    handleClose()
+  }, [successModal, handleClose])
+
+  // Status info para exibição
   const getStatusInfo = () => {
-    if (!currentTransaction) return { icon: Clock, color: 'text-gray-400', text: 'Preparando...' }
-    
+    if (!currentTransaction) {
+      return { icon: Clock, color: 'text-gray-400', text: 'Preparando...' }
+    }
+
     switch (currentTransaction.status) {
       case 'PENDING':
         return { icon: Clock, color: 'text-yellow-400', text: 'Aguardando pagamento' }
       case 'COMPLETED':
-        return { icon: CheckCircle, color: 'text-green-400', text: 'Pagamento confirmado!' }
+        return { icon: CheckCircle, color: 'text-green-400', text: 'Pagamento confirmado' }
       case 'FAILED':
         return { icon: AlertCircle, color: 'text-red-400', text: 'Pagamento falhou' }
       case 'EXPIRED':
@@ -154,153 +186,242 @@ export default function XGatePaymentModal({
     }
   }
 
-  if (!isOpen) return null
-
   const statusInfo = getStatusInfo()
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <Card className="w-full max-w-md max-h-[90vh] overflow-y-auto border-gray-800 bg-gray-900 text-white">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-          <div>
-            <CardTitle className="text-lg font-mono text-green-400">{title}</CardTitle>
-            <CardDescription className="text-gray-400 font-mono text-sm">
-              {description}
-            </CardDescription>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleClose}
-            className="h-8 w-8 p-0 hover:bg-gray-800"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </CardHeader>
-
-        <CardContent className="space-y-6">
-          {/* Valor e Status */}
-          <div className="text-center space-y-2">
-            <div className="text-2xl font-mono text-green-400">
-              R$ {amount.toFixed(2)}
-            </div>
-            <div className="flex items-center justify-center gap-2">
-              <statusInfo.icon className={`h-4 w-4 ${statusInfo.color}`} />
-              <span className={`text-sm font-mono ${statusInfo.color}`}>
-                {statusInfo.text}
-              </span>
-            </div>
-            {timeLeft !== null && timeLeft > 0 && (
-              <div className="text-xs text-gray-400 font-mono">
-                Expira em: {formatTimeLeft(timeLeft)}
+    <>
+      {/* Modal Principal de Pagamento */}
+      <Modal
+        isOpen={isOpen}
+        onClose={handleClose}
+        title={title}
+        description={description}
+        type="info"
+      >
+        <div className="space-y-6">
+          {/* Header com valor e status */}
+          <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Banknote className="h-6 w-6 text-green-400" />
+                <h3 className="text-lg font-bold text-green-400 font-mono">COMPRA_CRÉDITOS</h3>
               </div>
-            )}
+              <div className="text-xl font-bold text-green-400 font-mono">
+                R$ {amount.toFixed(2)}
+              </div>
+            </div>
+            
+            {/* Detalhes do que receberá */}
+            <div className="mt-3 pt-3 border-t border-green-500/20">
+              <div className="flex items-center justify-between text-sm font-mono">
+                <span className="text-gray-400">TOKENS:</span>
+                <div className="flex items-center gap-1">
+                  <Coins className="h-4 w-4 text-purple-400" />
+                  <span className="text-purple-400 font-bold">{calculateFixas(amount)} FXA</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-green-500/20">
+              <div className="flex items-center gap-2">
+                <statusInfo.icon className={`h-4 w-4 ${statusInfo.color}`} />
+                <span className={`text-sm font-mono ${statusInfo.color}`}>
+                  {statusInfo.text}
+                </span>
+              </div>
+              {timeLeft !== null && timeLeft > 0 && (
+                <div className="text-sm text-yellow-400 font-mono">
+                  ⏱️ {formatTimeLeft(timeLeft)}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Loading State */}
           {isLoading && (
             <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-400 mx-auto mb-4"></div>
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-400 mx-auto mb-4"></div>
               <p className="text-gray-400 font-mono text-sm">Gerando código PIX...</p>
+              <p className="text-gray-500 font-mono text-xs mt-2">Aguarde alguns segundos</p>
             </div>
           )}
 
-          {/* QR Code */}
-          {currentTransaction?.pixQrCode && (
-            <div className="space-y-4">
-              <div className="text-center">
-                <QrCode className="h-5 w-5 mx-auto mb-2 text-green-400" />
-                <p className="text-sm font-mono text-gray-300">QR Code PIX</p>
+          {/* QR Code e PIX Copia e Cola - Grid Layout */}
+          {currentTransaction?.pixQrCode && currentTransaction?.pixCopyPaste && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* QR Code */}
+              <div className="bg-gray-800/50 border border-gray-600 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <QrCode className="h-5 w-5 text-blue-400" />
+                  <span className="font-semibold text-blue-400 font-mono text-sm">CÓDIGO_QR</span>
+                </div>
+                <div className="flex justify-center">
+                  <div className="bg-white p-3 rounded-lg">
+                    <QRCodeSVG
+                      value={currentTransaction.pixQrCode}
+                      size={160}
+                      level="M"
+                      className="w-40 h-40"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400 font-mono text-center mt-2">
+                  Escaneie com o app do seu banco
+                </p>
               </div>
-              
-              <div className="bg-white p-4 rounded-lg">
-                <img
-                  src={currentTransaction.pixQrCode}
-                  alt="QR Code PIX"
-                  className="w-full h-auto max-w-[200px] mx-auto"
-                />
-              </div>
-              
-              <p className="text-xs text-center text-gray-400 font-mono">
-                Escaneie com o app do seu banco
-              </p>
-            </div>
-          )}
 
-          {/* PIX Copia e Cola */}
-          {currentTransaction?.pixCopyPaste && (
-            <div className="space-y-4">
-              <div className="text-center">
-                <Copy className="h-5 w-5 mx-auto mb-2 text-green-400" />
-                <p className="text-sm font-mono text-gray-300">PIX Copia e Cola</p>
-              </div>
-              
-              <div className="bg-gray-800 p-3 rounded-lg">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs text-gray-400 font-mono">Código:</span>
+              {/* PIX Copia e Cola */}
+              <div className="bg-gray-800/50 border border-gray-600 rounded-lg p-4 flex flex-col">
+                <div className="flex items-center gap-2 mb-3">
+                  <Copy className="h-5 w-5 text-green-400" />
+                  <span className="font-semibold text-green-400 font-mono text-sm">PIX_COPIA_E_COLA</span>
+                </div>
+                <div className="flex flex-col flex-1 space-y-2">
+                  <textarea 
+                    value={currentTransaction.pixCopyPaste}
+                    readOnly
+                    className="w-full flex-1 min-h-[120px] p-2 bg-gray-900/50 border border-gray-600 rounded text-xs font-mono text-green-400 resize-none"
+                    placeholder="Código PIX aparecerá aqui..."
+                  />
                   <Button
-                    variant="ghost"
-                    size="sm"
                     onClick={() => copyToClipboard(currentTransaction.pixCopyPaste!)}
-                    className="h-6 px-2 text-xs hover:bg-gray-700"
+                    className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono text-xs"
+                    variant="outline"
+                    size="sm"
                   >
-                    {copied ? 'Copiado!' : 'Copiar'}
+                    <Copy className="h-4 w-4 mr-2" />
+                    {copied ? 'COPIADO!' : 'COPIAR_CÓDIGO_PIX'}
                   </Button>
                 </div>
-                
-                <textarea
-                  value={currentTransaction.pixCopyPaste}
-                  readOnly
-                  className="w-full h-20 bg-gray-700 text-white text-xs font-mono p-2 rounded border-gray-600 resize-none"
-                  placeholder="Código PIX aparecerá aqui..."
-                />
               </div>
             </div>
           )}
 
-          {/* Instruções */}
-          <div className="bg-gray-800 p-4 rounded-lg">
-            <h4 className="font-mono text-sm text-green-400 mb-2">Como pagar:</h4>
-            <ul className="text-xs text-gray-300 space-y-1 font-mono">
-              <li>• Abra o app do seu banco</li>
-              <li>• Selecione a opção PIX</li>
-              <li>• Escaneie o QR Code ou copie o código</li>
-              <li>• Confirme o pagamento</li>
-              <li>• Aguarde a confirmação automática</li>
-            </ul>
-          </div>
+          {/* Instruções de Pagamento */}
+          <CollapsibleSection
+            title="INSTRUÇÕES_PAGAMENTO"
+            icon={<Banknote />}
+          >
+            <p>1. Abra o app do seu banco ou carteira digital</p>
+            <p>2. Escolha um dos métodos de pagamento:</p>
+            <p className="pl-4">• Escaneie o QR Code acima, OU</p>
+            <p className="pl-4">• Copie o código PIX copia e cola</p>
+            <p>3. Envie exatamente o valor mostrado: R$ {amount.toFixed(2)}</p>
+            <p>4. O pagamento será confirmado automaticamente</p>
+            <p>5. Seus créditos serão adicionados em instantes</p>
+          </CollapsibleSection>
 
-          {/* Botões */}
+          {/* Botões de Ação */}
           <div className="flex gap-3">
             <Button
               onClick={handleCheckStatus}
               disabled={isLoading || isMonitoring}
               variant="outline"
-              className="flex-1 border-gray-600 hover:bg-gray-800"
+              className="flex-1 border-gray-600 text-gray-400 hover:text-white hover:bg-gray-800"
             >
               {isMonitoring ? (
                 <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
               ) : (
                 <RefreshCw className="h-4 w-4 mr-2" />
               )}
-              {isMonitoring ? 'Verificando...' : 'Verificar Status'}
+              {isMonitoring ? 'VERIFICANDO...' : 'VERIFICAR_STATUS'}
             </Button>
             
             <Button
               onClick={handleClose}
-              variant="ghost"
-              className="flex-1 hover:bg-gray-800"
+              variant="outline"
+              className="flex-1 border-gray-600 text-gray-400 hover:text-white"
             >
-              Fechar
+              CANCELAR
             </Button>
           </div>
 
-          {/* Powered by XGATE */}
-          <div className="text-center text-xs text-gray-500 font-mono">
-            Powered by XGATE Global
+
+        </div>
+      </Modal>
+
+      {/* Modal de Sucesso */}
+      <Modal
+        isOpen={successModal.isOpen}
+        onClose={handleSuccessClose}
+        title=""
+        description=""
+        type="success"
+      >
+        <div className="text-center space-y-6">
+          {/* Success Animation Header */}
+          <div className="relative">
+            <div className="mx-auto w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mb-4">
+              <CheckCircle className="h-10 w-10 text-green-400" />
+            </div>
           </div>
-        </CardContent>
-      </Card>
-    </div>
+
+          {/* Success Message */}
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-green-400 font-mono">
+              PAGAMENTO_CONFIRMADO!
+            </h2>
+            <p className="text-gray-300 font-mono text-sm">
+              Seus tokens foram adicionados à sua conta
+            </p>
+          </div>
+
+          {/* Transaction Details */}
+          <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Banknote className="h-6 w-6 text-green-400" />
+                <span className="font-semibold text-green-400 font-mono">COMPRA_REALIZADA</span>
+              </div>
+              <span className="text-green-400 font-bold font-mono">
+                R$ {amount.toFixed(2)}
+              </span>
+            </div>
+            
+            <div className="border-t border-green-500/20 pt-3">
+              <div className="flex items-center justify-between text-sm font-mono">
+                <span className="text-gray-400">TOKENS_RECEBIDOS:</span>
+                <div className="flex items-center gap-1">
+                  <Coins className="h-4 w-4 text-purple-400" />
+                  <span className="text-purple-400 font-bold">+{calculateFixas(amount)} FXA</span>
+                </div>
+              </div>
+              
+              <div className="border-t border-green-500/20 pt-2 mt-3">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-gray-400">MÉTODO_PAGAMENTO:</span>
+                  <span className="text-blue-400">PIX</span>
+                </div>
+
+                {currentTransaction && (
+                  <div className="flex items-center justify-between text-xs font-mono mt-1">
+                    <span className="text-gray-400">ID_TRANSAÇÃO:</span>
+                    <span className="text-gray-300 text-xs">
+                      #{currentTransaction.transactionId.slice(-8).toUpperCase()}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Success Actions */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 justify-center text-sm text-gray-400 font-mono">
+              <CheckCircle className="h-4 w-4 text-green-400" />
+              <span>Transação processada com sucesso</span>
+            </div>
+            
+            <Button
+              onClick={handleSuccessClose}
+              className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono"
+              variant="outline"
+            >
+              CONTINUAR
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </>
   )
 } 

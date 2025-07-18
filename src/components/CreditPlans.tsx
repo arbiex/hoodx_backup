@@ -527,8 +527,8 @@ export default function CreditPlans({ showTitle = true, compact = false, maxPlan
           isOpen={xgateModalOpen}
           onClose={() => setXgateModalOpen(false)}
           onSuccess={handleXGatePaymentSuccess}
-          title="PAGAMENTO_PIX_XGATE"
-          description="Complete sua compra via PIX - Sistema XGATE Global"
+          title="PAGAMENTO_PIX"
+          description="Complete sua compra via PIX"
           amount={paymentAmount}
           userId={user.id}
         />

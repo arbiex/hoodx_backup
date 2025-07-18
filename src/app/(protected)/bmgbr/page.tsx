@@ -3099,12 +3099,12 @@ export default function BMGBR() {
                               type="number"
                               value={progressionIncrement}
                               onChange={(e) => {
-                                const value = Math.max(0.25, Math.min(5.00, parseFloat(e.target.value) || 0.25));
+                                const value = Math.max(5.00, Math.min(50.00, parseFloat(e.target.value) || 5.00));
                                 setProgressionIncrement(value);
                               }}
                               className="w-full mt-1 h-8 bg-gray-800/50 border border-gray-600/50 rounded text-center text-white font-mono text-xs focus:outline-none focus:border-blue-500"
-                              min="0.25"
-                              max="5.00"
+                              min="5.00"
+                              max="50.00"
                               step="0.25"
                             />
                           </div>

@@ -13,37 +13,29 @@ function getSupabaseClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 }
 
-// Log de webhook para debugging
+// Log de webhook simplificado (apenas console)
 async function logWebhookEvent(event: any, status: string, error?: string) {
-  try {
-    const supabase = getSupabaseClient()
-    await supabase
-      .from('webhook_logs')
-      .insert({
-        provider: 'XGATE',
-        event_type: event.type || 'unknown',
-        event_data: event,
-        status: status,
-        error_message: error,
-        created_at: new Date().toISOString()
-      })
-  } catch (logError) {
-    console.error('❌ Erro ao salvar log do webhook:', logError)
-  }
+  // Log silencioso apenas no console
+  console.log(`📋 Webhook XGATE: ${status}`, {
+    type: event.type || 'unknown',
+    status,
+    error: error || null,
+    timestamp: new Date().toISOString()
+  })
 }
 
 // Função para processar confirmação de pagamento
 async function processPaymentConfirmation(transactionId: string, webhookData: any) {
   try {
-    console.log('🔄 Processando confirmação de pagamento:', transactionId)
+    console.log('💳 Processando confirmação de pagamento:', transactionId)
     
     const supabase = getSupabaseClient()
 
-    // Buscar transação no banco
+    // Buscar transação no banco usando payment_reference
     const { data: transaction, error: findError } = await supabase
-      .from('pix_transactions')
+      .from('credit_transactions')
       .select('*')
-      .eq('transaction_id', transactionId)
+      .eq('payment_reference', transactionId)
       .single()
 
     if (findError || !transaction) {
@@ -51,51 +43,94 @@ async function processPaymentConfirmation(transactionId: string, webhookData: an
     }
 
     // Verificar se já foi processada
-    if (transaction.status === 'COMPLETED') {
+    if (transaction.status === 'completed') {
       console.log('⚠️ Transação já foi processada:', transactionId)
       return { success: true, message: 'Transação já processada' }
     }
 
-    // Atualizar status da transação
+    // Buscar saldo atual do usuário
+    const { data: userCredit } = await supabase
+      .from('user_credits')
+      .select('available_balance, total_earned')
+      .eq('user_id', transaction.user_id)
+      .single()
+
+    const currentBalance = userCredit?.available_balance || 0
+    const newBalance = currentBalance + transaction.amount
+
+    // Atualizar transação como completed
     const { error: updateError } = await supabase
-      .from('pix_transactions')
+      .from('credit_transactions')
       .update({
-        status: 'COMPLETED',
-        confirmed_at: new Date().toISOString(),
-        xgate_webhook_data: webhookData,
-        updated_at: new Date().toISOString()
+        status: 'completed',
+        balance_after: newBalance,
+        updated_at: new Date().toISOString(),
+        metadata: {
+          ...transaction.metadata,
+          webhook_data: webhookData,
+          processed_at: new Date().toISOString()
+        }
       })
-      .eq('transaction_id', transactionId)
+      .eq('payment_reference', transactionId)
 
     if (updateError) {
       throw new Error(`Erro ao atualizar transação: ${updateError.message}`)
     }
 
-    // Adicionar créditos ao usuário
-    const { data: creditResult, error: creditError } = await supabase
-      .rpc('add_credits_to_user', {
-        p_user_id: transaction.user_id,
-        p_amount: transaction.amount,
-        p_transaction_type: 'purchase',
-        p_transaction_id: transactionId,
-        p_description: `Compra via PIX XGATE - R$ ${transaction.amount}`
+    // Atualizar saldo do usuário
+    const { error: creditError } = await supabase
+      .from('user_credits')
+      .upsert({
+        user_id: transaction.user_id,
+        available_balance: newBalance,
+        total_earned: (userCredit?.total_earned || 0) + transaction.amount,
+        last_transaction_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       })
 
     if (creditError) {
       throw new Error(`Erro ao adicionar créditos: ${creditError.message}`)
     }
 
+    // ✨ ADICIONAR TOKENS FXA (R$ 0.25 = 1 TOKEN)
+    const tokensToAdd = Math.floor(transaction.amount / 0.25)
+    if (tokensToAdd > 0) {
+      const { error: tokenError } = await supabase.rpc('add_fxa_tokens', {
+        p_user_id: transaction.user_id,
+        p_amount: tokensToAdd,
+        p_description: `Compra via PIX - R$ ${transaction.amount.toFixed(2)}`,
+        p_payment_reference: transactionId,
+        p_metadata: {
+          payment_amount_brl: transaction.amount,
+          conversion_rate: 0.25,
+          purchase_date: new Date().toISOString(),
+          webhook_processed: true
+        }
+      })
+
+      if (tokenError) {
+        console.error('❌ Erro ao adicionar tokens FXA:', tokenError)
+        // Não falhar o pagamento por causa dos tokens - apenas log
+      } else {
+        console.log(`✅ ${tokensToAdd} tokens FXA adicionados para usuário ${transaction.user_id}`)
+      }
+    }
+
     console.log('✅ Pagamento processado com sucesso:', {
       transactionId,
       userId: transaction.user_id,
       amount: transaction.amount,
-      credits: creditResult
+      oldBalance: currentBalance,
+      newBalance: newBalance,
+      tokensAdded: tokensToAdd
     })
 
     return { 
       success: true, 
       message: 'Pagamento processado com sucesso',
-      creditsAdded: creditResult
+      creditsAdded: transaction.amount,
+      newBalance: newBalance,
+      tokensAdded: tokensToAdd || 0
     }
 
   } catch (error) {
@@ -178,13 +213,16 @@ export async function POST(request: NextRequest) {
         {
           const supabase = getSupabaseClient()
           await supabase
-            .from('pix_transactions')
+            .from('credit_transactions')
             .update({
-              status: 'FAILED',
-              xgate_webhook_data: webhookData,
-              updated_at: new Date().toISOString()
+              status: 'failed',
+              updated_at: new Date().toISOString(),
+              metadata: {
+                webhook_data: webhookData,
+                failed_at: new Date().toISOString()
+              }
             })
-            .eq('transaction_id', transactionId)
+            .eq('payment_reference', transactionId)
         }
 
         await logWebhookEvent(webhookData, 'FAILED', 'Pagamento falhou')
@@ -193,17 +231,20 @@ export async function POST(request: NextRequest) {
       case 'deposit.expired':
       case 'payment.expired':
       case 'pix.expired':
-        // Atualizar status para expirado
+        // Atualizar status para cancelado (expirado)
         {
           const supabase = getSupabaseClient()
           await supabase
-            .from('pix_transactions')
+            .from('credit_transactions')
             .update({
-              status: 'EXPIRED',
-              xgate_webhook_data: webhookData,
-              updated_at: new Date().toISOString()
+              status: 'cancelled',
+              updated_at: new Date().toISOString(),
+              metadata: {
+                webhook_data: webhookData,
+                expired_at: new Date().toISOString()
+              }
             })
-            .eq('transaction_id', transactionId)
+            .eq('payment_reference', transactionId)
         }
 
         await logWebhookEvent(webhookData, 'EXPIRED', 'Pagamento expirado')

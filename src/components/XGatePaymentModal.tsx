@@ -235,9 +235,9 @@ export default function XGatePaymentModal({
     setIsMonitoring(false)
     console.log('🎉 [DEBUG] Monitoramento parado')
     
-    // Atualizar saldo de tokens FXA
-    triggerBalanceRefresh()
-    console.log('🎉 [DEBUG] Balance refresh acionado')
+    // 🚫 TEMPORARIAMENTE DESABILITADO - Pode estar causando reload
+    // triggerBalanceRefresh()
+    console.log('🚫 [DEBUG] triggerBalanceRefresh DESABILITADO para evitar reload')
     
     // 🔥 CRIAR MODAL HARDCODED DIRETAMENTE NO DOM (INDESTRUTÍVEL)
     console.log('🔥 ATIVANDO MODAL HARDCODED VIA DOM!')
@@ -254,12 +254,12 @@ export default function XGatePaymentModal({
     // }
     console.log('🚫 [DEBUG] onSuccess callback DESABILITADO para evitar reload')
     
-    // Toast de sucesso
+    // 🚫 TEMPORARIAMENTE DESABILITADO - Pode estar causando reload
     const tokensText = tokensAdded || calculateFixas(amount)
-    console.log('🎉 [DEBUG] Exibindo toast com tokens:', tokensText)
-    toast.success('PAGAMENTO_CONFIRMADO!', {
-      description: `+${tokensText} TOKENS FXA adicionados à sua conta`
-    })
+    console.log('🚫 [DEBUG] Toast DESABILITADO para evitar reload - tokens:', tokensText)
+    // toast.success('PAGAMENTO_CONFIRMADO!', {
+    //   description: `+${tokensText} TOKENS FXA adicionados à sua conta`
+    // })
     
     console.log('🎉 [DEBUG] handlePaymentSuccess concluído com sucesso!')
   }, [autoCheck, triggerBalanceRefresh, successModal, onSuccess, amount, calculateFixas, stopAllChecksForTransaction, createHardcodedSuccessModal])

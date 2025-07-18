@@ -63,24 +63,24 @@ export default function XGatePaymentModal({
   const hasCreatedTransaction = useRef(false)
   const creationKey = useRef<string | null>(null)
 
-  // Conversão: R$ 1.00 = 25 FXA (Valor mínimo: R$ 5.00 = 125 FXA)
-  const FIXA_RATE = 25
+  // Conversão: 1 token = R$ 0,25 (R$ 5,00 = 20 tokens, valor mínimo)
+  const FIXA_RATE = 0.25
 
   // Calcular FIXAs baseado no valor
   const calculateFixas = useCallback((value: number): number => {
-    return Math.floor(value * FIXA_RATE)
+    return Math.floor(value / FIXA_RATE)
   }, [])
 
   // Funções de conversão
   const convertRealToFixa = useCallback((realValue: string) => {
     const real = parseFloat(realValue) || 0
-    const fixa = real * FIXA_RATE
+    const fixa = real / FIXA_RATE
     return fixa.toFixed(0)
   }, [])
 
   const convertFixaToReal = useCallback((fixaValue: string) => {
     const fixa = parseFloat(fixaValue) || 0
-    const real = fixa / FIXA_RATE
+    const real = fixa * FIXA_RATE
     return real.toFixed(2)
   }, [])
 
@@ -530,8 +530,8 @@ export default function XGatePaymentModal({
                     id="real-amount"
                     type="number"
                     min="5.00"
-                    step="0.01"
-                    placeholder="0.00"
+                    step="0.25"
+                    placeholder="5.00"
                     value={paymentAmount}
                     onChange={(e) => handleRealChange(e.target.value)}
                     className="bg-gray-900/50 border border-green-500/30 text-green-400 font-mono text-lg pl-12 pr-16 h-12 text-center focus:border-green-400"

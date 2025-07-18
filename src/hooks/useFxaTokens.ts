@@ -16,6 +16,8 @@ interface FxaTransaction {
   balance_after: number
   description?: string
   payment_reference?: string
+  payment_method?: string
+  status?: 'pending' | 'completed' | 'failed' | 'cancelled'
   metadata?: any
   created_at: string
   updated_at: string

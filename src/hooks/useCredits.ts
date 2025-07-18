@@ -12,17 +12,7 @@ export interface UserCredits {
   last_transaction_at: string | null
 }
 
-export interface CreditPackage {
-  id: string
-  name: string
-  description: string
-  base_value: number
-  price_brl: number
-  is_popular: boolean
-  icon_name: string
-  color_theme: string
-  sort_order: number
-}
+// Removido CreditPackage interface - não usamos mais pacotes
 
 export interface CreditTransaction {
   id: string
@@ -72,7 +62,7 @@ export interface OperationStats {
 
 export function useCredits() {
   const [credits, setCredits] = useState<UserCredits | null>(null)
-  const [packages, setPackages] = useState<CreditPackage[]>([])
+  // Removido packages state - não usamos mais pacotes
   const [transactions, setTransactions] = useState<CreditTransaction[]>([])
   const [operations, setOperations] = useState<OperationRecord[]>([])
   const [operationStats, setOperationStats] = useState<OperationStats | null>(null)
@@ -140,48 +130,14 @@ export function useCredits() {
     }
   }
 
-  // Load available packages
-  const loadPackages = async () => {
-    try {
-      const { supabase } = await import('@/lib/supabase')
-      const { data, error } = await supabase.rpc('get_available_packages')
-      
-      if (error) {
-        console.error('Error loading packages:', error)
-        return
-      }
+  // Removido loadPackages() - não usamos mais pacotes
 
-      setPackages(data || [])
-    } catch (err) {
-      console.error('Error loading packages:', err)
-    }
-  }
-
-  // Load transaction history
+  // Load transaction history - DESABILITADO (sistema de créditos removido)
   const loadTransactions = async (limit = 20, offset = 0) => {
-    try {
-      const { supabase } = await import('@/lib/supabase')
-      // Check if user is authenticated first
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        setTransactions([])
-        return
-      }
-      
-      const { data, error } = await supabase.rpc('get_user_credit_history', {
-        p_limit: limit,
-        p_offset: offset
-      })
-      
-      if (error) {
-        console.error('Error loading transactions:', error)
-        return
-      }
-
-      setTransactions(data || [])
-    } catch (err) {
-      console.error('Error loading transactions:', err)
-    }
+    // Sistema de créditos antigo foi removido
+    // Agora usamos apenas fxa_token_transactions via useFxaTokens()
+    setTransactions([])
+    return
   }
 
   // Load operations history - DESABILITADO (tabelas removidas)
@@ -253,48 +209,48 @@ export function useCredits() {
     }
   }
 
-  // Purchase credits via PIX
+  // Purchase credits via PIX - atualizado para usar valor direto
   const purchaseCredits = async (
-    packageId: string,
-    pixKey: string = ''
+    amount: number,
+    description: string = 'Compra de créditos'
   ) => {
     try {
       setLoading(true)
       setError(null)
 
-      const paymentReference = `PIX_${pixKey || 'GENERATED'}_${Date.now()}`
-      
-      // Use the new function with commission processing
-      const { supabase } = await import('@/lib/supabase')
-      const { data, error } = await supabase.rpc('purchase_credits_with_commission', {
-        p_user_id: (await supabase.auth.getUser()).data.user?.id,
-        p_package_id: packageId,
-        p_payment_method: 'pix',
-        p_payment_reference: paymentReference
+      // Usar a API do XGATE diretamente
+      const response = await fetch('/api/payments/pix', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount,
+          description,
+          userId: (await (await import('@/lib/supabase')).supabase.auth.getUser()).data.user?.id
+        })
       })
 
-      if (error) {
-        console.error('Error purchasing credits:', error)
-        setError('Failed to purchase credits')
-        return { success: false, error: error.message }
+      const data = await response.json()
+
+      if (!response.ok) {
+        setError(data.error || 'Failed to create payment')
+        return { success: false, error: data.error }
       }
 
-      if (data?.success) {
-        // Reload credits after successful purchase
+      if (data.success) {
+        // Recarregar dados após sucesso
         await loadCredits()
-        await loadTransactions()
-        
-        // Dispatch commission update event for network hook
-        window.dispatchEvent(new CustomEvent('commission-updated'))
+        // loadTransactions removido - sistema de créditos antigo
         
         return { success: true, data }
       } else {
-        setError(data?.message || 'Purchase failed')
-        return { success: false, error: data?.message }
+        setError(data.error || 'Payment creation failed')
+        return { success: false, error: data.error }
       }
     } catch (err) {
-      console.error('Error purchasing credits:', err)
-      setError('Failed to purchase credits')
+      console.error('Error creating payment:', err)
+      setError('Failed to create payment')
       return { success: false, error: 'Internal error' }
     } finally {
       setLoading(false)
@@ -466,15 +422,15 @@ export function useCredits() {
   // Initialize data on mount
   useEffect(() => {
     loadCredits()
-    loadPackages()
-    loadTransactions()
+    // Removido loadPackages() - não usamos mais pacotes
+    // loadTransactions() // DESABILITADO - sistema de créditos removido
     // loadOperations() // DESABILITADO - tabelas removidas
     // loadOperationStats() // DESABILITADO - tabelas removidas
 
     // Listen for credit updates from other components
     const handleCreditsUpdate = () => {
       loadCredits()
-      loadTransactions()
+      // loadTransactions() // DESABILITADO - sistema de créditos removido
       // loadOperationStats() // DESABILITADO - tabelas removidas
     }
 
@@ -488,7 +444,7 @@ export function useCredits() {
   return {
     // State
     credits,
-    packages,
+    // Removido packages - não usamos mais pacotes
     transactions,
     operations,
     operationStats,
@@ -497,7 +453,7 @@ export function useCredits() {
 
     // Actions
     loadCredits,
-    loadPackages,
+    // Removido loadPackages - não usamos mais pacotes
     loadTransactions,
     loadOperations,
     loadOperationStats,
@@ -510,7 +466,7 @@ export function useCredits() {
     // Helpers
     refresh: () => {
       loadCredits()
-      loadTransactions()
+      // loadTransactions() // DESABILITADO - sistema de créditos removido
       // loadOperations() // DESABILITADO - tabelas removidas
       // loadOperationStats() // DESABILITADO - tabelas removidas
     }

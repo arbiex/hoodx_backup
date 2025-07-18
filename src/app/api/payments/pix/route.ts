@@ -303,7 +303,7 @@ export async function POST(request: NextRequest) {
     
     console.log('🔍 Verificando transações pendentes recentes...')
     const { data: recentTransactions, error: checkError } = await supabase
-      .from('credit_transactions')
+      .from('fxa_token_transactions')
       .select('id, payment_reference, amount, status, created_at')
       .eq('user_id', userId)
       .eq('status', 'pending')
@@ -376,50 +376,36 @@ export async function POST(request: NextRequest) {
       }, { status: 500 })
     }
 
-    // Salvar transação no banco
-    // Buscar saldo atual do usuário para balance_before/after
-    const { data: userCredit } = await supabase
-      .from('user_credits')
-      .select('available_balance')
-      .eq('user_id', userId)
-      .single()
-    
-    const currentBalance = userCredit?.available_balance || 0
-    const balanceAfter = currentBalance // Não alteramos ainda, só quando confirmar pagamento
+    // Salvar intent de pagamento (pending) para rastreamento
+    const tokensEquivalent = Math.floor(amount / 0.25) // Converter BRL para tokens
     
     const { data: transaction, error: dbError } = await supabase
-      .from('credit_transactions')
+      .from('fxa_token_transactions')
       .insert({
         user_id: userId,
-        transaction_type: 'credit', // Para compra de créditos é 'credit'
-        amount: amount,
-        balance_before: currentBalance,
-        balance_after: balanceAfter, // Será atualizado quando o pagamento for confirmado
+        transaction_type: 'credit',
+        amount: tokensEquivalent, // Tokens que serão adicionados
+        amount_brl: amount, // Valor pago em BRL  
         payment_reference: xgateResult.transactionId,
         payment_method: 'PIX',
         status: 'pending',
         description: finalDescription,
         metadata: {
           xgate_transaction_id: xgateResult.transactionId,
-          xgate_customer_id: xgateResult.customerId,
-          xgate_response: xgateResult.data,
-          endpoint_used: '/deposit',
-          webhook_url: XGATE_CONFIG.webhookUrl,
-          anti_duplication_check: true,
-          creation_timestamp: new Date().toISOString()
+          created_via: 'api_payment_pix'
         }
       })
       .select()
       .single()
 
     if (dbError) {
-      console.error('❌ Erro ao salvar no banco:', dbError)
-      throw new Error('Falha ao salvar transação no banco de dados')
+      console.error('❌ Erro ao salvar transação no banco:', dbError)
+      // Continuar mesmo com erro no banco, pois cobrança foi criada
     }
 
     console.log('✅ Cobrança PIX criada com sucesso')
     console.log('🔗 Endpoint usado: /deposit')
-
+    
     return NextResponse.json({
       success: true,
       transactionId: xgateResult.transactionId,
@@ -428,7 +414,7 @@ export async function POST(request: NextRequest) {
       expiresAt: xgateResult.expiresAt,
       amount: amount,
       description: finalDescription,
-      dbTransactionId: transaction.id,
+      dbTransactionId: transaction?.id,
       provider: 'XGATE',
       status: 'pending',
       externalId: xgateResult.transactionId,
@@ -457,10 +443,10 @@ export async function GET(request: NextRequest) {
 
     console.log('🔍 Verificando status do pagamento XGATE:', transactionId)
 
-    // 1. Buscar transação no banco local primeiro
+    // 1. Verificar se já foi processado (buscar por payment_reference)
     const supabase = getSupabaseClient()
-    const { data: localTransaction, error: dbError } = await supabase
-      .from('credit_transactions')
+    const { data: existingTransaction, error: dbError } = await supabase
+      .from('fxa_token_transactions')
       .select('*')
       .eq('payment_reference', transactionId)
       .single()
@@ -475,13 +461,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Se já foi processado como completed, retornar success e parar verificações
-    if (localTransaction?.status === 'completed') {
+    if (existingTransaction?.status === 'completed') {
       console.log('✅ Transação já processada como completed - Parando verificações')
       return NextResponse.json({
         success: true,
         status: 'completed',
         shouldStopChecking: true, // 🛑 Sinal para parar verificações
-        transaction: localTransaction,
+        transaction: existingTransaction,
         message: 'Pagamento confirmado e processado'
       })
     }
@@ -506,16 +492,17 @@ export async function GET(request: NextRequest) {
         const depositData = await statusResponse.json()
         console.log('💳 Dados do depósito XGATE:', depositData)
 
-        // Verificar se o status é PAID (confirmado)
-        if (depositData.status === 'PAID' || depositData.status === 'COMPLETED') {
-          console.log('✅ Pagamento confirmado no XGATE! Processando...')
+        // Verificar se o status é PAID (confirmado) - pode estar em currency.status
+        const paymentStatus = depositData.status || depositData.currency?.status
+        if (paymentStatus === 'PAID' || paymentStatus === 'COMPLETED') {
+          console.log('✅ Pagamento confirmado no XGATE! Processando...', { status: paymentStatus })
 
-          // Se temos a transação local mas ainda não foi processada
-          if (localTransaction && localTransaction.status !== 'completed') {
+          // Se temos a transação local pendente, processá-la
+          if (existingTransaction && existingTransaction.status !== 'completed') {
             try {
-              // Atualizar status da transação no banco
+              // Atualizar apenas o status para completed
               const { error: updateError } = await supabase
-                .from('credit_transactions')
+                .from('fxa_token_transactions')
                 .update({ 
                   status: 'completed',
                   updated_at: new Date().toISOString()
@@ -523,46 +510,23 @@ export async function GET(request: NextRequest) {
                 .eq('payment_reference', transactionId)
 
               if (updateError) {
-                console.error('❌ Erro ao atualizar status:', updateError)
-                throw new Error(`Erro ao atualizar status: ${updateError.message}`)
+                console.error('❌ Erro ao atualizar transação:', updateError)
+                throw new Error(`Erro ao atualizar transação: ${updateError.message}`)
               }
 
-              // ✨ ADICIONAR TOKENS FXA (R$ 0.25 = 1 TOKEN)
-              const tokensToAdd = Math.floor(localTransaction.amount / 0.25)
-              console.log(`💰 Adicionando ${tokensToAdd} tokens FXA para o usuário ${localTransaction.user_id}`)
-
-              if (tokensToAdd > 0) {
-                const { error: tokenError } = await supabase.rpc('add_fxa_tokens', {
-                  p_user_id: localTransaction.user_id,
-                  p_amount: tokensToAdd,
-                  p_description: `Pagamento PIX confirmado - R$ ${localTransaction.amount.toFixed(2)}`,
-                  p_payment_reference: transactionId,
-                  p_metadata: {
-                    payment_amount_brl: localTransaction.amount,
-                    conversion_rate: 0.25,
-                    xgate_status: depositData.status,
-                    confirmed_at: new Date().toISOString(),
-                    auto_processed: true
-                  }
-                })
-
-                if (tokenError) {
-                  console.error('❌ Erro ao adicionar tokens FXA:', tokenError)
-                  throw new Error(`Erro ao adicionar tokens FXA: ${tokenError.message}`)
-                }
-
-                console.log('✅ Tokens FXA adicionados com sucesso!')
-              }
+              console.log(`✅ Transação processada: ${existingTransaction.amount} tokens FXA para usuário ${existingTransaction.user_id}`)
 
               return NextResponse.json({
                 success: true,
                 status: 'completed',
                 shouldStopChecking: true, // 🛑 Parar verificações após processamento
                 transaction: {
-                  ...localTransaction,
+                  ...existingTransaction,
                   status: 'completed'
                 },
-                tokensAdded: tokensToAdd,
+                tokensAdded: existingTransaction.amount,
+                amountBrl: existingTransaction.amount_brl,
+                xgateStatus: paymentStatus,
                 message: 'Pagamento confirmado e tokens adicionados!'
               })
 
@@ -580,19 +544,20 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({
             success: true,
             status: 'confirmed_pending_processing',
-            xgateStatus: depositData.status,
+            xgateStatus: paymentStatus,
             message: 'Pagamento confirmado no XGATE, processando...'
           })
 
         } else {
           // Status ainda é WAITING_PAYMENT ou outro
-          console.log('⏳ Pagamento ainda pendente no XGATE:', depositData.status)
+          const paymentStatus = depositData.status || depositData.currency?.status
+          console.log('⏳ Pagamento ainda pendente no XGATE:', paymentStatus)
           
           return NextResponse.json({
             success: true,
             status: 'pending',
-            xgateStatus: depositData.status,
-            transaction: localTransaction,
+            xgateStatus: paymentStatus,
+            transaction: existingTransaction,
             message: 'Pagamento ainda pendente'
           })
         }
@@ -603,8 +568,8 @@ export async function GET(request: NextRequest) {
         // Se erro na consulta XGATE, retornar status local
         return NextResponse.json({
           success: true,
-          status: localTransaction?.status || 'unknown',
-          transaction: localTransaction,
+          status: existingTransaction?.status || 'unknown',
+          transaction: existingTransaction,
           message: 'Erro ao consultar status no XGATE, retornando status local'
         })
       }
@@ -615,8 +580,8 @@ export async function GET(request: NextRequest) {
       // Em caso de erro na consulta XGATE, retornar status local
       return NextResponse.json({
         success: true,
-        status: localTransaction?.status || 'unknown',
-        transaction: localTransaction,
+        status: existingTransaction?.status || 'unknown',
+        transaction: existingTransaction,
         message: 'Erro ao consultar XGATE, retornando status local'
       })
     }

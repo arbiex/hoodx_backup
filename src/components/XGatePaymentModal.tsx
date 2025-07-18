@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { X, QrCode, Copy, Clock, CheckCircle, AlertCircle, RefreshCw, Banknote, Coins } from 'lucide-react'
+import { X, QrCode, Copy, Clock, CheckCircle, AlertCircle, RefreshCw, Banknote, Coins, DollarSign, CreditCard, ArrowUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import Modal, { useModal } from '@/components/ui/modal'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import Modal from '@/components/ui/modal'
 import CollapsibleSection from '@/components/ui/collapsible-section'
 import { toast } from 'sonner'
 import { useXGatePayment } from '@/hooks/useXGatePayment'
@@ -15,8 +17,9 @@ interface XGatePaymentModalProps {
   onSuccess?: (amount: number, transactionId: string) => void
   title?: string
   description?: string
-  amount: number
+  amount?: number  // Opcional agora
   userId: string
+  showAmountInput?: boolean  // Nova prop para controlar se mostra primeiro o input de valor
 }
 
 export default function XGatePaymentModal({
@@ -26,7 +29,8 @@ export default function XGatePaymentModal({
   title = 'PAGAMENTO_PIX',
   description = 'Complete sua compra via transferência PIX',
   amount,
-  userId
+  userId,
+  showAmountInput = false
 }: XGatePaymentModalProps) {
   const {
     isLoading,
@@ -47,9 +51,13 @@ export default function XGatePaymentModal({
   const [autoCheck, setAutoCheck] = useState<NodeJS.Timeout | null>(null)
   const [paymentProcessed, setPaymentProcessed] = useState(false)
   const [shouldRefreshBalance, setShouldRefreshBalance] = useState(false)
-  const [showSuccessView, setShowSuccessView] = useState(false) // 🎉 Exibir view de sucesso dentro do mesmo modal
-  const successModal = useModal()
-
+  
+  // Estados para o modal DIGITE_O_VALOR
+  const [showAmountStep, setShowAmountStep] = useState(showAmountInput)
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [fixaAmount, setFixaAmount] = useState('')
+  const [finalAmount, setFinalAmount] = useState(amount || 0)
+  
   // 🔒 SISTEMA ANTI-DUPLICAÇÃO ROBUSTO
   const isCreatingTransaction = useRef(false)
   const hasCreatedTransaction = useRef(false)
@@ -63,11 +71,55 @@ export default function XGatePaymentModal({
     return Math.floor(value / FIXA_RATE)
   }, [])
 
-  // 🎉 FUNÇÃO PARA ATIVAR VIEW DE SUCESSO NO MESMO MODAL
-  const showSuccessInModal = useCallback(() => {
-    console.log('🎉 Ativando view de sucesso dentro do modal PIX')
-    setShowSuccessView(true)
+  // Funções de conversão
+  const convertRealToFixa = useCallback((realValue: string) => {
+    const real = parseFloat(realValue) || 0
+    const fixa = real / FIXA_RATE
+    return fixa.toFixed(0)
   }, [])
+
+  const convertFixaToReal = useCallback((fixaValue: string) => {
+    const fixa = parseFloat(fixaValue) || 0
+    const real = fixa * FIXA_RATE
+    return real.toFixed(2)
+  }, [])
+
+  // Handlers para os inputs de valor
+  const handleRealChange = useCallback((value: string) => {
+    setPaymentAmount(value)
+    if (value) {
+      setFixaAmount(convertRealToFixa(value))
+    } else {
+      setFixaAmount('')
+    }
+  }, [convertRealToFixa])
+
+  const handleFixaChange = useCallback((value: string) => {
+    setFixaAmount(value)
+    if (value) {
+      setPaymentAmount(convertFixaToReal(value))
+    } else {
+      setPaymentAmount('')
+    }
+  }, [convertFixaToReal])
+
+  // Função para confirmar valor e ir para QR Code
+  const handleConfirmAmount = useCallback(() => {
+    const amountValue = parseFloat(paymentAmount)
+    if (amountValue && amountValue >= 5.00) {
+      setFinalAmount(amountValue)
+      setShowAmountStep(false)
+    }
+  }, [paymentAmount])
+
+  // Função para voltar ao step de valor
+  const handleBackToAmount = useCallback(() => {
+    setShowAmountStep(true)
+    // Reset transaction if going back
+    if (currentTransaction) {
+      clearCurrentTransaction()
+    }
+  }, [currentTransaction, clearCurrentTransaction])
 
   // Função para atualizar saldo de tokens FXA
   const triggerBalanceRefresh = useCallback(() => {
@@ -83,56 +135,39 @@ export default function XGatePaymentModal({
 
   // Função para processar sucesso do pagamento
   const handlePaymentSuccess = useCallback((transactionId: string, tokensAdded?: number) => {
-    console.log('🎉 [DEBUG] Processando sucesso do pagamento')
-    console.log('🎉 [DEBUG] transactionId:', transactionId)
-    console.log('🎉 [DEBUG] tokensAdded:', tokensAdded)
-    console.log('🎉 [DEBUG] amount:', amount)
-    console.log('🎉 [DEBUG] calculateFixas(amount):', calculateFixas(amount))
+    console.log('🎉 Processando sucesso do pagamento')
     
     // 🛑 PARAR TODAS as verificações desta transação primeiro
     stopAllChecksForTransaction(transactionId)
-    console.log('🎉 [DEBUG] Verificações paradas')
     
     // Marcar como processado para evitar duplo processamento
     setPaymentProcessed(true)
-    console.log('🎉 [DEBUG] Marcado como processado')
     
     // Parar verificação automática local
     if (autoCheck) {
       clearInterval(autoCheck)
       setAutoCheck(null)
-      console.log('🎉 [DEBUG] AutoCheck parado')
     }
     
     // Parar monitoramento
     setIsMonitoring(false)
-    console.log('🎉 [DEBUG] Monitoramento parado')
     
     // Atualizar saldo de tokens FXA
     triggerBalanceRefresh()
-    console.log('🎉 [DEBUG] Balance refresh acionado')
-    
-    // 🎉 MOSTRAR VIEW DE SUCESSO NO MESMO MODAL PIX
-    console.log('🎉 Ativando view de sucesso no modal PIX!')
-    showSuccessInModal()
-    
-    // Chamar callback de sucesso (sem causar reload)
-    if (onSuccess) {
-      console.log('🎉 [DEBUG] Chamando callback onSuccess')
-      setTimeout(() => {
-        onSuccess(amount, transactionId)
-      }, 100) // Pequeno delay para evitar conflitos
-    }
     
     // Toast de sucesso
-    const tokensText = tokensAdded || calculateFixas(amount)
-    console.log('🎉 [DEBUG] Exibindo toast com tokens:', tokensText)
     toast.success('PAGAMENTO_CONFIRMADO!', {
-      description: `+${tokensText} TOKENS FXA adicionados à sua conta`
+      description: `+${tokensAdded || calculateFixas(finalAmount)} TOKENS FXA adicionados à sua conta`
     })
     
-    console.log('🎉 [DEBUG] handlePaymentSuccess concluído com sucesso!')
-  }, [autoCheck, triggerBalanceRefresh, successModal, onSuccess, amount, calculateFixas, stopAllChecksForTransaction, showSuccessInModal])
+    // Chamar callback de sucesso
+    if (onSuccess) {
+      onSuccess(finalAmount, transactionId)
+    }
+    
+    // Fechar modal imediatamente após sucesso
+    onClose()
+  }, [autoCheck, triggerBalanceRefresh, onSuccess, finalAmount, calculateFixas, stopAllChecksForTransaction, onClose])
 
   // Função para copiar para a área de transferência
   const copyToClipboard = useCallback(async (text: string) => {
@@ -176,19 +211,15 @@ export default function XGatePaymentModal({
       }
 
       try {
-        console.log('🔍 Verificando status da transação:', transactionId)
         const statusData = await checkPaymentStatus(transactionId)
         
         if (statusData) {
-          console.log('📊 Status recebido:', statusData.status, 'shouldStopChecking:', statusData.shouldStopChecking)
-          
           // ✅ Verificar se deve parar completamente as verificações
           if (statusData.shouldStopChecking) {
             console.log('🛑 Servidor solicitou parada de verificações')
             
             // Se status é completed, processar sucesso
             if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
-              console.log('🎉 Pagamento confirmado via shouldStopChecking! tokensAdded:', statusData.tokensAdded)
               handlePaymentSuccess(transactionId, statusData.tokensAdded)
             }
             
@@ -197,17 +228,10 @@ export default function XGatePaymentModal({
           
           // ✅ Verificação para casos onde ainda não deve parar
           if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
-            console.log('🎉 Pagamento confirmado via status check! tokensAdded:', statusData.tokensAdded)
-            
-            // 🔥 FORÇAR MODAL DE SUCESSO - Debug
-            console.log('🚨 FORÇANDO MODAL DE SUCESSO - DEBUG')
-            handlePaymentSuccess(transactionId, statusData.tokensAdded || calculateFixas(amount))
+            console.log('🎉 Pagamento confirmado!')
+            handlePaymentSuccess(transactionId, statusData.tokensAdded)
             return
           }
-          
-          console.log('⏳ Status ainda pendente:', statusData.status)
-        } else {
-          console.log('❌ Nenhum status retornado')
         }
       } catch (error) {
         console.error('❌ Erro na verificação:', error)
@@ -223,14 +247,16 @@ export default function XGatePaymentModal({
     setAutoCheck(interval)
     
     return interval
-  }, [checkPaymentStatus, paymentProcessed, isTransactionCached, handlePaymentSuccess, stopAllChecksForTransaction, registerActiveCheck, calculateFixas, amount])
+  }, [checkPaymentStatus, paymentProcessed, isTransactionCached, handlePaymentSuccess, stopAllChecksForTransaction, registerActiveCheck])
 
   // 🔒 SISTEMA DE CRIAÇÃO ÚNICA E ANTI-DUPLICAÇÃO ULTRA RIGOROSO
   useEffect(() => {
     // ✅ Verificações fundamentais
     if (!isOpen) return
+    if (showAmountStep) return // ✅ Não criar transação se estivermos no step de valor
     if (currentTransaction) return // ✅ Já tem transação
     if (isLoading) return // ✅ Aguardar carregar
+    if (!finalAmount || finalAmount < 5.00) return // ✅ Valor válido obrigatório
     
     // 🔒 PROTEÇÃO ANTI-DUPLICAÇÃO ABSOLUTA
     if (isCreatingTransaction.current) {
@@ -244,21 +270,21 @@ export default function XGatePaymentModal({
     }
     
     // 🆔 Chave única para esta criação específica
-    const currentKey = `${userId}-${amount}-${Date.now()}`
+    const currentKey = `${userId}-${finalAmount}-${Date.now()}`
     if (creationKey.current === currentKey) {
       console.log('🚫 Mesma chave de criação - BLOQUEANDO duplicação')
       return
     }
     
     // 🔒 BLOQUEAR imediatamente
-    console.log('🔨 Iniciando criação ÚNICA de transação - Valor:', amount)
+    console.log('🔨 Iniciando criação ÚNICA de transação - Valor:', finalAmount)
     isCreatingTransaction.current = true
     hasCreatedTransaction.current = true
     creationKey.current = currentKey
 
     const createTransaction = async () => {
       try {
-        const transaction = await createPixDeposit(amount, userId)
+        const transaction = await createPixDeposit(finalAmount, userId)
         if (transaction) {
           console.log('✅ Transação criada com sucesso:', transaction.transactionId)
           setTimeLeft(15 * 60) // 15 minutos
@@ -290,14 +316,12 @@ export default function XGatePaymentModal({
     return () => {
       clearTimeout(debounceTimer)
     }
-  }, [isOpen, currentTransaction, isLoading, amount, userId, createPixDeposit, startAutoStatusCheck])
+  }, [isOpen, showAmountStep, currentTransaction, isLoading, finalAmount, userId, createPixDeposit, startAutoStatusCheck])
 
   // 🔒 RESET COMPLETO ao fechar modal
   useEffect(() => {
     if (!isOpen) {
-      console.log('🚪 Modal fechado - Executando reset completo')
-      
-      console.log('🚪 Executando RESET COMPLETO')
+      console.log('🚪 Modal fechado - RESET COMPLETO')
       
       // 🛑 Parar TODAS as verificações
       stopAllActiveChecks()
@@ -307,12 +331,17 @@ export default function XGatePaymentModal({
         setAutoCheck(null)
       }
       
-      // 🔄 Reset ABSOLUTO de TODAS as flags
+      // 🔄 RESET ABSOLUTO de TODAS as flags
       setPaymentProcessed(false)
       setIsMonitoring(false)
       setTimeLeft(null)
       setCopied(false)
-      // 🔥 NÃO resetar modal hardcoded - deve ser independente!
+      
+      // 🔄 Reset estados do valor
+      setShowAmountStep(showAmountInput)
+      setPaymentAmount('')
+      setFixaAmount('')
+      setFinalAmount(amount || 0)
       
       // 🔓 Liberar flags anti-duplicação para próxima abertura
       isCreatingTransaction.current = false
@@ -321,7 +350,7 @@ export default function XGatePaymentModal({
       
       console.log('✅ Reset completo finalizado')
     }
-  }, [isOpen, autoCheck, stopAllActiveChecks])
+  }, [isOpen, autoCheck, stopAllActiveChecks, showAmountInput, amount])
 
   // Countdown timer
   useEffect(() => {
@@ -339,16 +368,6 @@ export default function XGatePaymentModal({
 
     return () => clearInterval(timer)
       }, [timeLeft])
-
-  // 🧹 Cleanup: Reset view de sucesso se componente for desmontado
-  useEffect(() => {
-    return () => {
-      if (showSuccessView) {
-        console.log('🧹 Cleanup: Resetando view de sucesso')
-        setShowSuccessView(false)
-      }
-    }
-  }, [showSuccessView])
 
   // Formatar tempo restante
   const formatTimeLeft = (seconds: number): string => {
@@ -415,8 +434,6 @@ export default function XGatePaymentModal({
 
   // 🔒 Fechar modal LIMPANDO TUDO
   const handleClose = useCallback(() => {
-    console.log('🚪 Fechando modal - showSuccessView:', showSuccessView)
-    
     console.log('🚪 Fechando modal e limpando sistema')
     
     // 🛑 Parar TODAS as verificações
@@ -432,7 +449,12 @@ export default function XGatePaymentModal({
     setPaymentProcessed(false)
     setTimeLeft(null)
     setCopied(false)
-    setShowSuccessView(false) // Reset view de sucesso
+    
+    // 🔄 Reset estados do valor
+    setShowAmountStep(showAmountInput)
+    setPaymentAmount('')
+    setFixaAmount('')
+    setFinalAmount(amount || 0)
     
     // 🔓 Reset flags anti-duplicação
     isCreatingTransaction.current = false
@@ -444,14 +466,14 @@ export default function XGatePaymentModal({
     
     // Fechar modal
     onClose()
-  }, [clearCurrentTransaction, onClose, autoCheck, stopAllActiveChecks, showSuccessView])
+  }, [clearCurrentTransaction, onClose, autoCheck, stopAllActiveChecks, showAmountInput, amount])
 
   // Fechar modal de sucesso
-  const handleSuccessClose = useCallback(() => {
-    console.log('🚪 handleSuccessClose chamado')
-    successModal.closeModal()
-    handleClose()
-  }, [successModal, handleClose])
+  // const handleSuccessClose = useCallback(() => {
+  //   successModal.closeModal()
+  //   // Não fechar o modal principal automaticamente
+  //   // O usuário pode fechar manualmente ou o componente pai decidir
+  // }, [successModal])
 
   // Status info para exibição
   const getStatusInfo = () => {
@@ -481,85 +503,153 @@ export default function XGatePaymentModal({
 
   return (
     <>
-      {/* Modal Principal de Pagamento */}
+      {/* Modal Principal */}
       <Modal
         isOpen={isOpen}
         onClose={handleClose}
-        title={title}
-        description={description}
+        title={showAmountStep ? 'DIGITE_O_VALOR' : title}
+        description={showAmountStep ? 'Informe o valor que deseja adicionar' : description}
         type="info"
       >
-        <div className="space-y-6">
-          {showSuccessView ? (
-            /* 🎉 VIEW DE SUCESSO */
-            <div className="text-center space-y-6">
-              {/* Success Icon */}
-              <div className="mx-auto w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center">
-                <CheckCircle className="h-12 w-12 text-green-400" />
-              </div>
-              
-              {/* Success Message */}
+        {showAmountStep ? (
+          /* UI DIGITE_O_VALOR */
+          <div className="space-y-6">
+            {/* Conversor estilo cripto */}
+            <div className="bg-gray-800/50 border border-gray-600 rounded-lg p-4 space-y-4">
+
+              {/* Campo Real */}
               <div className="space-y-2">
-                <h2 className="text-3xl font-bold text-green-400 font-mono">
-                  🎉 PAGAMENTO CONFIRMADO! 🎉
-                </h2>
-                <p className="text-gray-300 font-mono text-base">
-                  Seus tokens foram adicionados à sua conta!
-                </p>
-              </div>
-              
-              {/* Details */}
-              <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-gray-400 font-mono">VALOR:</span>
-                  <span className="text-green-400 font-bold font-mono">R$ {amount.toFixed(2)}</span>
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-4 w-4 text-green-400" />
+                  <Label htmlFor="real-amount" className="text-sm font-mono text-green-400 font-semibold">
+                    REAL BRASILEIRO (BRL)
+                  </Label>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-400 font-mono">TOKENS:</span>
-                  <span className="text-purple-400 font-bold font-mono">+{calculateFixas(amount)} FXA</span>
-                </div>
-              </div>
-              
-              {/* Action Button */}
-              <Button
-                onClick={handleClose}
-                className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono text-xl py-4"
-              >
-                🎯 FECHAR
-              </Button>
-            </div>
-          ) : (
-            /* 📱 VIEW PIX NORMAL */
-            <>
-              {/* Header com valor e status */}
-              <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Banknote className="h-6 w-6 text-green-400" />
-                    <h3 className="text-lg font-bold text-green-400 font-mono">COMPRA_CRÉDITOS</h3>
+                <div className="relative">
+                  <Input
+                    id="real-amount"
+                    type="number"
+                    min="5.00"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={paymentAmount}
+                    onChange={(e) => handleRealChange(e.target.value)}
+                    className="bg-gray-900/50 border border-green-500/30 text-green-400 font-mono text-lg pl-12 pr-16 h-12 text-center focus:border-green-400"
+                  />
+                  <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
+                    <span className="text-green-400 font-mono text-sm">R$</span>
                   </div>
-                  <div className="text-xl font-bold text-green-400 font-mono">
-                    R$ {amount.toFixed(2)}
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                    <span className="text-green-400/60 font-mono text-xs">BRL</span>
                   </div>
                 </div>
-                
-                {/* Detalhes do que receberá */}
-                <div className="mt-3 pt-3 border-t border-green-500/20">
-                  <div className="flex items-center justify-between text-sm font-mono">
-                    <span className="text-gray-400">TOKENS:</span>
-                    <div className="flex items-center gap-1">
-                      <Coins className="h-4 w-4 text-purple-400" />
-                      <span className="text-purple-400 font-bold">{calculateFixas(amount)} FXA</span>
+              </div>
+
+              {/* Ícone de conversão */}
+              <div className="flex justify-center">
+                <div className="bg-blue-500/20 border border-blue-500/30 rounded-full p-2">
+                  <ArrowUpDown className="h-4 w-4 text-blue-400" />
+                </div>
+              </div>
+
+              {/* Campo FIXA */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Coins className="h-4 w-4 text-purple-400" />
+                  <Label htmlFor="fixa-amount" className="text-sm font-mono text-purple-400 font-semibold">
+                    FIXA TOKEN (FXA)
+                  </Label>
+                </div>
+                <div className="relative">
+                  <Input
+                    id="fixa-amount"
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="0"
+                    value={fixaAmount}
+                    onChange={(e) => handleFixaChange(e.target.value)}
+                    className="bg-gray-900/50 border border-purple-500/30 text-purple-400 font-mono text-lg pl-12 pr-16 h-12 text-center focus:border-purple-400"
+                  />
+                  <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
+                    <Coins className="h-4 w-4 text-purple-400" />
+                  </div>
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                    <span className="text-purple-400/60 font-mono text-xs">FXA</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Info sobre os créditos que receberá */}
+              {paymentAmount && parseFloat(paymentAmount) >= 5.00 && (
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono text-gray-400">VOCÊ_RECEBERÁ:</span>
+                    <div className="flex items-center gap-2">
+                      <Coins className="h-4 w-4 text-blue-400" />
+                      <span className="text-sm font-mono text-blue-400 font-bold">
+                        {fixaAmount} TOKENS
+                      </span>
                     </div>
                   </div>
+                  <div className="text-xs text-gray-400 font-mono mt-1">
+                    ≈ R$ {parseFloat(paymentAmount).toFixed(2)} convertidos em tokens
+                  </div>
                 </div>
-                
-                <div className="flex items-center justify-between mt-3 pt-3 border-t border-green-500/20">
-                  <div className="flex items-center gap-2">
-                    <statusInfo.icon className={`h-4 w-4 ${statusInfo.color}`} />
-                    <span className={`text-sm font-mono ${statusInfo.color}`}>
-                      {showSuccessView ? "Pagamento efetuado" : statusInfo.text}
-                    </span>
+              )}
+
+              {/* Validação */}
+              {paymentAmount && parseFloat(paymentAmount) < 5.00 && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <p className="text-xs text-red-400 font-mono text-center">
+                    ⚠️ Valor mínimo: R$ 5,00 (20 TOKENS)
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <Button
+              onClick={handleConfirmAmount}
+              disabled={!paymentAmount || parseFloat(paymentAmount) < 5.00}
+              className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono h-12 text-base"
+              variant="outline"
+            >
+              <CreditCard className="h-5 w-5 mr-2" />
+              CONTINUAR_PARA_PIX
+            </Button>
+          </div>
+        ) : (
+          /* UI PAGAMENTO_PIX */
+        <div className="space-y-6">
+          {/* Header com valor e status */}
+          <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Banknote className="h-6 w-6 text-green-400" />
+                <h3 className="text-lg font-bold text-green-400 font-mono">COMPRA_CRÉDITOS</h3>
+              </div>
+              <div className="text-xl font-bold text-green-400 font-mono">
+                R$ {finalAmount.toFixed(2)}
+              </div>
+            </div>
+            
+            {/* Detalhes do que receberá */}
+            <div className="mt-3 pt-3 border-t border-green-500/20">
+              <div className="flex items-center justify-between text-sm font-mono">
+                <span className="text-gray-400">TOKENS:</span>
+                <div className="flex items-center gap-1">
+                  <Coins className="h-4 w-4 text-purple-400" />
+                  <span className="text-purple-400 font-bold">{calculateFixas(finalAmount)} FXA</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-green-500/20">
+              <div className="flex items-center gap-2">
+                <statusInfo.icon className={`h-4 w-4 ${statusInfo.color}`} />
+                <span className={`text-sm font-mono ${statusInfo.color}`}>
+                  {statusInfo.text}
+                </span>
               </div>
               {timeLeft !== null && timeLeft > 0 && (
                 <div className="text-sm text-yellow-400 font-mono">
@@ -638,13 +728,21 @@ export default function XGatePaymentModal({
             <p>2. Escolha um dos métodos de pagamento:</p>
             <p className="pl-4">• Escaneie o QR Code acima, OU</p>
             <p className="pl-4">• Copie o código PIX copia e cola</p>
-            <p>3. Envie exatamente o valor mostrado: R$ {amount.toFixed(2)}</p>
+            <p>3. Envie exatamente o valor mostrado: R$ {finalAmount.toFixed(2)}</p>
             <p>4. O pagamento será confirmado automaticamente</p>
             <p>5. Seus créditos serão adicionados em instantes</p>
           </CollapsibleSection>
 
           {/* Botões de Ação */}
           <div className="flex gap-3">
+            <Button
+              onClick={handleBackToAmount}
+              variant="outline"
+              className="border-gray-600 text-gray-400 hover:text-white hover:bg-gray-800"
+            >
+              ALTERAR_VALOR
+            </Button>
+            
             <Button
               onClick={handleCheckStatus}
               disabled={isLoading || isMonitoring}
@@ -662,100 +760,18 @@ export default function XGatePaymentModal({
             <Button
               onClick={handleClose}
               variant="outline"
-              className="flex-1 border-gray-600 text-gray-400 hover:text-white"
+              className="border-gray-600 text-gray-400 hover:text-white"
             >
               CANCELAR
             </Button>
           </div>
-            </>
-          )}
+
         </div>
+        )}
       </Modal>
 
       {/* Modal de Sucesso */}
-      <Modal
-        isOpen={successModal.isOpen}
-        onClose={handleSuccessClose}
-        title=""
-        description=""
-        type="success"
-      >
-        <div className="text-center space-y-6">
-          {/* Success Animation Header */}
-          <div className="relative">
-            <div className="mx-auto w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mb-4">
-              <CheckCircle className="h-10 w-10 text-green-400" />
-            </div>
-          </div>
-
-          {/* Success Message */}
-          <div className="space-y-2">
-            <h2 className="text-2xl font-bold text-green-400 font-mono">
-              PAGAMENTO_CONFIRMADO!
-            </h2>
-            <p className="text-gray-300 font-mono text-sm">
-              Seus tokens foram adicionados à sua conta
-            </p>
-          </div>
-
-          {/* Transaction Details */}
-          <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Banknote className="h-6 w-6 text-green-400" />
-                <span className="font-semibold text-green-400 font-mono">COMPRA_REALIZADA</span>
-              </div>
-              <span className="text-green-400 font-bold font-mono">
-                R$ {amount.toFixed(2)}
-              </span>
-            </div>
-            
-            <div className="border-t border-green-500/20 pt-3">
-              <div className="flex items-center justify-between text-sm font-mono">
-                <span className="text-gray-400">TOKENS_RECEBIDOS:</span>
-                <div className="flex items-center gap-1">
-                  <Coins className="h-4 w-4 text-purple-400" />
-                  <span className="text-purple-400 font-bold">+{calculateFixas(amount)} FXA</span>
-                </div>
-              </div>
-              
-              <div className="border-t border-green-500/20 pt-2 mt-3">
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-gray-400">MÉTODO_PAGAMENTO:</span>
-                  <span className="text-blue-400">PIX</span>
-                </div>
-
-                {currentTransaction && (
-                  <div className="flex items-center justify-between text-xs font-mono mt-1">
-                    <span className="text-gray-400">ID_TRANSAÇÃO:</span>
-                    <span className="text-gray-300 text-xs">
-                      #{currentTransaction.transactionId.slice(-8).toUpperCase()}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Success Actions */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 justify-center text-sm text-gray-400 font-mono">
-              <CheckCircle className="h-4 w-4 text-green-400" />
-              <span>Transação processada com sucesso</span>
-            </div>
-            
-            <Button
-              onClick={handleSuccessClose}
-              className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono"
-              variant="outline"
-            >
-              CONTINUAR
-            </Button>
-          </div>
-        </div>
-      </Modal>
-      
-      {/* 🔥 MODAL HARDCODED CRIADO VIA DOM - Nada mais renderizado pelo React */}
+      {/* REMOVIDO */}
     </>
   )
 } 

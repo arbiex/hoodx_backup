@@ -33,7 +33,7 @@ async function processPaymentConfirmation(transactionId: string, webhookData: an
 
     // Buscar transação no banco usando payment_reference
     const { data: transaction, error: findError } = await supabase
-      .from('credit_transactions')
+      .from('fxa_token_transactions')
       .select('*')
       .eq('payment_reference', transactionId)
       .single()
@@ -60,7 +60,7 @@ async function processPaymentConfirmation(transactionId: string, webhookData: an
 
     // Atualizar transação como completed
     const { error: updateError } = await supabase
-      .from('credit_transactions')
+      .from('fxa_token_transactions')
       .update({
         status: 'completed',
         balance_after: newBalance,

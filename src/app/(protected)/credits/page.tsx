@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { DollarSign, TrendingUp, TrendingDown, Clock, CreditCard, History } from 'lucide-react'
 import MatrixRain from '@/components/MatrixRain'
-import CreditPlans from '@/components/CreditPlans'
+
 import { useCredits } from '@/hooks/useCredits'
 import { format } from 'date-fns'
 
@@ -108,8 +108,7 @@ export default function Credits() {
 
 
 
-          {/* Credit Plans */}
-          <CreditPlans showTitle={true} compact={true} />
+
 
           {/* Transaction History */}
           <Card className="border-green-500/30 backdrop-blur-sm">

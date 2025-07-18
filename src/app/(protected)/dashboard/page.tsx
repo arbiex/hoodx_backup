@@ -6,7 +6,7 @@ import { Bot, RefreshCw, Play, Square, Trash2, Settings } from 'lucide-react'
 import MatrixRain from '@/components/MatrixRain'
 import Modal, { useModal } from '@/components/ui/modal'
 import InlineAlert from '@/components/ui/inline-alert'
-import CreditPlans from '@/components/CreditPlans'
+
 import CreditDisplay from '@/components/CreditDisplay'
 import { useState, useEffect, memo, useCallback, useMemo } from 'react'
 import { useCredits } from '@/hooks/useCredits'
@@ -878,14 +878,6 @@ export default function Dashboard() {
           {/* Card 1 - Credits - Always show when data is loaded */}
           {!isDataLoading && credits && (
             <CreditDisplay />
-          )}
-
-          {/* Credit Plans */}
-          {!isDataLoading && credits && (
-            <CreditPlans 
-              showTitle={true} 
-              compact={true} 
-            />
           )}
 
           {/* Card de Controles de Áudio removido - funcionalidade não utilizada */}

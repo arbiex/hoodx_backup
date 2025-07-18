@@ -63,24 +63,24 @@ export default function XGatePaymentModal({
   const hasCreatedTransaction = useRef(false)
   const creationKey = useRef<string | null>(null)
 
-  // Conversão: R$ 0.25 = 1 FIXA (Valor mínimo: R$ 5.00 = 20 FIXAS)
-  const FIXA_RATE = 0.25
+  // Conversão: R$ 1.00 = 25 FXA (Valor mínimo: R$ 5.00 = 125 FXA)
+  const FIXA_RATE = 25
 
   // Calcular FIXAs baseado no valor
   const calculateFixas = useCallback((value: number): number => {
-    return Math.floor(value / FIXA_RATE)
+    return Math.floor(value * FIXA_RATE)
   }, [])
 
   // Funções de conversão
   const convertRealToFixa = useCallback((realValue: string) => {
     const real = parseFloat(realValue) || 0
-    const fixa = real / FIXA_RATE
+    const fixa = real * FIXA_RATE
     return fixa.toFixed(0)
   }, [])
 
   const convertFixaToReal = useCallback((fixaValue: string) => {
     const fixa = parseFloat(fixaValue) || 0
-    const real = fixa * FIXA_RATE
+    const real = fixa / FIXA_RATE
     return real.toFixed(2)
   }, [])
 

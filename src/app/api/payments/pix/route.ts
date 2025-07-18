@@ -377,7 +377,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Salvar intent de pagamento (pending) para rastreamento
-    const tokensEquivalent = Math.floor(amount / 0.25) // Converter BRL para tokens
+    const tokensEquivalent = Math.floor(amount * 25) // Converter BRL para tokens (R$ 1,00 = 25 tokens)
     
     const { data: transaction, error: dbError } = await supabase
       .from('fxa_token_transactions')

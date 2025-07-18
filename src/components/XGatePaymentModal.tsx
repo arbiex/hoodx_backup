@@ -96,6 +96,44 @@ export default function XGatePaymentModal({
         if (statusData) {
           console.log('🔍 Auto-check status:', statusData.status)
           
+          // ✅ Verificar se deve parar completamente as verificações
+          if (statusData.shouldStopChecking) {
+            console.log('🛑 Servidor solicitou parada de verificações - Parando definitivamente')
+            
+            // Marcar como processado para evitar novas verificações
+            setPaymentProcessed(true)
+            
+            // Parar verificação automática
+            if (autoCheck) {
+              clearInterval(autoCheck)
+              setAutoCheck(null)
+            }
+            
+            // Parar monitoramento
+            setIsMonitoring(false)
+            
+            // Se status é completed, mostrar modal de sucesso
+            if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
+              console.log('🎉 Pagamento confirmado - Mostrando modal de sucesso')
+              
+              // Mostrar modal de sucesso
+              successModal.openModal()
+              
+              // Chamar callback de sucesso
+              if (onSuccess) {
+                onSuccess(amount, transactionId)
+              }
+              
+              // Toast de sucesso
+              toast.success('PAGAMENTO_CONFIRMADO!', {
+                description: `+${calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
+              })
+            }
+            
+            return
+          }
+          
+          // ✅ Verificação tradicional para casos onde ainda não deve parar
           if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
             console.log('🎉 Pagamento confirmado automaticamente!')
             
@@ -214,7 +252,38 @@ export default function XGatePaymentModal({
       if (statusData) {
         console.log('🔍 Verificação manual - Status:', statusData.status)
         
-        if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
+        // ✅ Verificar se deve parar verificações
+        if (statusData.shouldStopChecking) {
+          console.log('🛑 Servidor solicitou parada de verificações - Parando verificação manual')
+          
+          // Marcar como processado
+          setPaymentProcessed(true)
+          
+          // Parar verificação automática
+          if (autoCheck) {
+            clearInterval(autoCheck)
+            setAutoCheck(null)
+          }
+          
+          // Se status é completed, mostrar modal de sucesso
+          if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
+            console.log('🎉 Pagamento confirmado na verificação manual!')
+            
+            // Mostrar modal de sucesso
+            successModal.openModal()
+            if (onSuccess) {
+              onSuccess(amount, currentTransaction.transactionId)
+            }
+            
+            toast.success('PAGAMENTO_CONFIRMADO!', {
+              description: `+${calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
+            })
+          } else {
+            toast.info('TRANSAÇÃO_FINALIZADA', {
+              description: `Status final: ${statusData.status}`
+            })
+          }
+        } else if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
           console.log('🎉 Pagamento confirmado na verificação manual!')
           
           // Marcar como processado para evitar duplo processamento

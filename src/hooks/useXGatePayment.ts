@@ -150,7 +150,8 @@ export function useXGatePayment() {
         message: data.message,
         amount: data.transaction?.amount || 0,
         confirmedAt: data.transaction?.updated_at,
-        expiresAt: data.expiresAt
+        expiresAt: data.expiresAt,
+        shouldStopChecking: data.shouldStopChecking || false // 🛑 Campo para parar verificações
       }
 
     } catch (error) {

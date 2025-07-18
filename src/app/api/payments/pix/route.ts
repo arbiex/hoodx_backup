@@ -410,12 +410,13 @@ export async function GET(request: NextRequest) {
       }, { status: 500 })
     }
 
-    // Se já foi processado como completed, retornar success
+    // Se já foi processado como completed, retornar success e parar verificações
     if (localTransaction?.status === 'completed') {
-      console.log('✅ Transação já processada como completed')
+      console.log('✅ Transação já processada como completed - Parando verificações')
       return NextResponse.json({
         success: true,
         status: 'completed',
+        shouldStopChecking: true, // 🛑 Sinal para parar verificações
         transaction: localTransaction,
         message: 'Pagamento confirmado e processado'
       })
@@ -492,6 +493,7 @@ export async function GET(request: NextRequest) {
               return NextResponse.json({
                 success: true,
                 status: 'completed',
+                shouldStopChecking: true, // 🛑 Parar verificações após processamento
                 transaction: {
                   ...localTransaction,
                   status: 'completed'

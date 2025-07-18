@@ -18,6 +18,13 @@ primary_region = "gru"
   NEXT_FLY_APP_URL = "https://hoodx.fly.dev"
   NEXT_PUBLIC_APP_URL = "https://hoodx.ai"
   SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODQwOTA1NywiZXhwIjoyMDYzOTg1MDU3fQ.qokqoM6yHAZRj-iEpNR448fI3Br9Q57dYrF_g0LJHOo"
+  
+  # XGATE Global Payment Gateway
+  XGATE_API_BASE_URL = "https://api.xgateglobal.com"
+  XGATE_EMAIL = "SEU_EMAIL_XGATE"
+  XGATE_PASSWORD = "SUA_SENHA_XGATE"
+  XGATE_CLIENT_ID = "SEU_CLIENT_ID_XGATE"
+  XGATE_WEBHOOK_URL = "https://hoodx.ai/api/xgate-webhook"
 
 [http_service]
   internal_port = 3000

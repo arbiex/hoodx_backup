@@ -10,6 +10,8 @@ import Modal, { useModal } from '@/components/ui/modal'
 import CollapsibleSection from '@/components/ui/collapsible-section'
 import { toast } from 'sonner'
 import { useCredits } from '@/hooks/useCredits'
+import { useAuth } from '@/hooks/useAuth'
+import XGatePaymentModal from './XGatePaymentModal'
 
 interface CreditPlansProps {
   showTitle?: boolean
@@ -23,7 +25,10 @@ export default function CreditPlans({ showTitle = true, compact = false, maxPlan
   const [pixCopiaCola, setPixCopiaCola] = useState('')
   const [qrCodeData, setQrCodeData] = useState('')
   const [loadingPixData, setLoadingPixData] = useState(false)
+  const [xgateModalOpen, setXgateModalOpen] = useState(false)
+  const [paymentAmount, setPaymentAmount] = useState(0)
   const { packages, purchaseCredits, loading, refresh } = useCredits()
+  const { user } = useAuth()
   const pixModal = useModal()
   const successModal = useModal()
 
@@ -48,6 +53,18 @@ export default function CreditPlans({ showTitle = true, compact = false, maxPlan
   const displayPackages = maxPlans ? creditPackages.slice(0, maxPlans) : creditPackages
 
   const handlePurchase = async (packageData: typeof creditPackages[0]) => {
+    if (!user) {
+      toast.error('Você precisa estar logado para comprar créditos')
+      return
+    }
+    
+    setSelectedPackage(packageData.id)
+    setPaymentAmount(packageData.amount)
+    setXgateModalOpen(true)
+  }
+
+  // Mantendo a função original para compatibilidade com PIX simulado
+  const handlePurchaseSimulated = async (packageData: typeof creditPackages[0]) => {
     setSelectedPackage(packageData.id)
     setLoadingPixData(true)
     pixModal.openModal()
@@ -129,6 +146,30 @@ export default function CreditPlans({ showTitle = true, compact = false, maxPlan
     setPixCopiaCola('')
     setQrCodeData('')
     setLoadingPixData(false)
+  }
+
+  // Função para lidar com sucesso do pagamento XGATE
+  const handleXGatePaymentSuccess = (amount: number, transactionId: string) => {
+    // Fechar modal XGATE
+    setXgateModalOpen(false)
+    
+    // Mostrar modal de sucesso
+    successModal.openModal()
+    
+    // Mostrar toast de sucesso
+    toast.success(`PAGAMENTO_CONFIRMADO_XGATE`, {
+      description: `+R$ ${amount.toFixed(2)} adicionados à sua conta`,
+    })
+    
+    // Refresh dos dados com delay para garantir consistência do DB
+    setTimeout(() => {
+      refresh()
+      
+      // Dispatch evento customizado para notificar outras páginas
+      window.dispatchEvent(new CustomEvent('credits-updated', {
+        detail: { amount, type: 'purchase', transactionId }
+      }))
+    }, 500)
   }
 
   const handleSuccessClose = () => {
@@ -479,6 +520,19 @@ export default function CreditPlans({ showTitle = true, compact = false, maxPlan
           </div>
         </div>
       </Modal>
+
+      {/* Modal de Pagamento XGATE */}
+      {user && (
+        <XGatePaymentModal
+          isOpen={xgateModalOpen}
+          onClose={() => setXgateModalOpen(false)}
+          onSuccess={handleXGatePaymentSuccess}
+          title="PAGAMENTO_PIX_XGATE"
+          description="Complete sua compra via PIX - Sistema XGATE Global"
+          amount={paymentAmount}
+          userId={user.id}
+        />
+      )}
     </>
   )
 } 

@@ -5,11 +5,14 @@ import { Button } from '@/components/ui/button'
 import { DollarSign, CreditCard } from 'lucide-react'
 import { useCredits } from '@/hooks/useCredits'
 import { useState } from 'react'
-import PixPaymentModal from './PixPaymentModal'
+import { useAuth } from '@/hooks/useAuth'
+import XGatePaymentModal from './XGatePaymentModal'
 
 export default function CreditDisplay() {
   const { credits, loading: creditsLoading, refresh } = useCredits()
-  const [pixModalOpen, setPixModalOpen] = useState(false)
+  const { user } = useAuth()
+  const [xgateModalOpen, setXgateModalOpen] = useState(false)
+  const [paymentAmount, setPaymentAmount] = useState(10)
 
   // Função para lidar com sucesso do pagamento
   const handlePaymentSuccess = (amount: number, transactionId: string) => {
@@ -20,6 +23,12 @@ export default function CreditDisplay() {
         detail: { amount, type: 'purchase' }
       }))
     }, 500)
+  }
+
+  // Função para abrir modal de pagamento
+  const handleOpenPayment = (amount: number) => {
+    setPaymentAmount(amount)
+    setXgateModalOpen(true)
   }
 
   if (creditsLoading || !credits) {
@@ -58,27 +67,31 @@ export default function CreditDisplay() {
               </div>
             </div>
             
-            {/* Botão Comprar Fixa */}
+            {/* Botão Comprar Créditos */}
             <Button
-              onClick={() => setPixModalOpen(true)}
+              onClick={() => handleOpenPayment(10)}
               className="w-full bg-blue-500/20 border border-blue-500/50 text-blue-400 hover:bg-blue-500/30 font-mono text-sm"
               variant="outline"
             >
               <CreditCard className="h-4 w-4 mr-2" />
-              COMPRAR_FIXA
+              COMPRAR_CRÉDITOS
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Modal de Pagamento PIX */}
-      <PixPaymentModal
-        isOpen={pixModalOpen}
-        onClose={() => setPixModalOpen(false)}
-        onSuccess={handlePaymentSuccess}
-        title="PAGAMENTO_PIX"
-        description="Complete sua compra via transferência PIX"
-      />
+      {/* Modal de Pagamento XGATE */}
+      {user && (
+        <XGatePaymentModal
+          isOpen={xgateModalOpen}
+          onClose={() => setXgateModalOpen(false)}
+          onSuccess={handlePaymentSuccess}
+          title="PAGAMENTO_PIX"
+          description="Complete sua compra via PIX - XGATE Global"
+          amount={paymentAmount}
+          userId={user.id}
+        />
+      )}
     </>
   )
 } 

@@ -33,11 +33,18 @@ import OperationsCard from '@/components/OperationsCard';
  *    - Hash comparisons & gap recovery ❌ (REMOVIDO)
  *    - FrequencyAnalysisCard auto-refresh ❌ (REMOVIDO)
  *    - Logs e console.warn ❌ (REMOVIDO)
+ *    - Modo automático ❌ (REMOVIDO)
+ *    - M1 simulado + M2 real ❌ (REMOVIDO)
  *
  * ✅ ÚNICO POLLING ATIVO:
- *    - Insights polling: 3s (Monitoramento URL silencioso)
+ *    - Insights polling: 1s (Monitoramento URL silencioso)
  *    - Só dispara atualizações quando gameId muda
  *    - Zero logs, zero re-renders desnecessários
+ *    - Seleção manual de tipos de aposta
+ *
+ * 🎯 NOVA ESTRATÉGIA: Repetição Inteligente
+ *    - Monitora resultado desejado aparecer
+ *    - Aposta para repetir o resultado detectado
  *
  * 🎯 RESULTADO: Sistema ultra-eficiente, polling verdadeiramente silencioso
  */
@@ -287,18 +294,20 @@ export default function BMGBR3() {
 
   // Função checkFrequencyThresholds removida - não mais necessária no modo M4 direto
 
-  // 💰 NOVA LÓGICA: Array dos níveis de stake fixos com custos (10 níveis)
+  // 💰 NOVA LÓGICA: Array dos níveis de stake para 12 níveis - Repetição Inteligente
   const STAKE_LEVELS = [
-    { level: 1, m1: 0.5, m2: 1.0, cost: 1.5 },
-    { level: 2, m1: 1.0, m2: 1.5, cost: 2.5 },
-    { level: 3, m1: 1.5, m2: 2.5, cost: 4.0 },
-    { level: 4, m1: 2.5, m2: 4.0, cost: 6.5 },
-    { level: 5, m1: 4.0, m2: 6.5, cost: 10.5 },
-    { level: 6, m1: 6.5, m2: 10.5, cost: 17.0 },
-    { level: 7, m1: 10.5, m2: 17.0, cost: 27.5 },
-    { level: 8, m1: 17.0, m2: 27.5, cost: 44.5 },
-    { level: 9, m1: 27.5, m2: 44.5, cost: 72.0 },
-    { level: 10, m1: 44.5, m2: 72.0, cost: 116.5 }
+    { level: 1, m1: 0, m2: 0.50, cost: 0.50 },
+    { level: 2, m1: 0, m2: 1.50, cost: 1.50 },
+    { level: 3, m1: 0, m2: 3.50, cost: 3.50 },
+    { level: 4, m1: 0, m2: 7.50, cost: 7.50 },
+    { level: 5, m1: 0, m2: 15.50, cost: 15.50 },
+    { level: 6, m1: 0, m2: 31.50, cost: 31.50 },
+    { level: 7, m1: 0, m2: 63.50, cost: 63.50 },
+    { level: 8, m1: 0, m2: 127.50, cost: 127.50 },
+    { level: 9, m1: 0, m2: 255.50, cost: 255.50 },
+    { level: 10, m1: 0, m2: 511.50, cost: 511.50 },
+    { level: 11, m1: 0, m2: 1023.50, cost: 1023.50 },
+    { level: 12, m1: 0, m2: 2047.50, cost: 2047.50 }
   ];
 
   // 💰 NOVA FUNÇÃO: Calcular stakes com multiplicador
@@ -313,7 +322,7 @@ export default function BMGBR3() {
   // 💰 NOVA FUNÇÃO: Calcular sequência de martingale (Nível 1 com multiplicador)
   const calculateMartingaleSequence = (): number[] => {
     const stakes = calculateStakesWithMultiplier(1, stakeMultiplier);
-    return [stakes.m1, stakes.m2];
+    return [stakes.m2]; // Apenas valor real da aposta
   };
 
   // 💰 NOVA FUNÇÃO: Calcular valor total acumulado
@@ -321,10 +330,28 @@ export default function BMGBR3() {
     return sequence.reduce((total, value) => total + value, 0);
   };
 
-  // 💰 FUNÇÃO HELPER: Obter stake atual (M1) - Nível 1 com multiplicador
+  // 💰 FUNÇÃO HELPER: Obter valor da aposta atual - Nível 1 com multiplicador
   const getCurrentStake = (): number => {
     const stakes = calculateStakesWithMultiplier(1, stakeMultiplier);
-    return stakes.m1;
+    return stakes.m2;
+  };
+
+  // 💰 NOVA FUNÇÃO: Calcular lucro real considerando gastos acumulados
+  const calculateRealProfit = (currentLevel: number): number => {
+    const currentLevelData = STAKE_LEVELS[currentLevel - 1];
+    const currentBetValue = currentLevelData.m2 * stakeMultiplier;
+    
+    // Calcular total gasto até chegar neste nível (soma de todas as apostas anteriores)
+    let totalSpent = 0;
+    for (let i = 0; i < currentLevel; i++) {
+      totalSpent += STAKE_LEVELS[i].m2 * stakeMultiplier;
+    }
+    
+    // Valor recebido quando ganha (2x o valor da aposta atual)
+    const amountWon = currentBetValue * 2;
+    
+    // Lucro real = valor recebido - total gasto
+    return amountWon - totalSpent;
   };
 
   // 🚀 NOVA FUNÇÃO: Atualizar multiplicador de stake
@@ -881,8 +908,8 @@ export default function BMGBR3() {
   const getPollingInterval = () => {
     const intervals = {
       waiting: 1000,  // 1s - Polling rápido quando aguardando resultado
-      normal: 5000,   // 5s - Polling normal durante operação
-      inactive: 15000 // 15s - Polling lento quando inativo
+      normal: 1000,   // 1s - Polling normal durante operação
+      inactive: 1000  // 1s - Polling constante
     };
     
     return intervals[pollingMode] || intervals.inactive;
@@ -2521,99 +2548,7 @@ export default function BMGBR3() {
     updateBetType();
   }, [m4DirectBetType, isOperating, connectionStatus.connected]);
 
-  // 🤖 NOVO: Modo Automático - Detecta e opera automaticamente tipos com 15+ rodadas
-  useEffect(() => {
-    // Só atuar quando estiver operando e em modo "aguardar"
-    if (!isOperating || m4DirectBetType !== 'await' || !insightsComparison.hasData) {
-      return;
-    }
 
-    // Converter valores para números, tratando casos especiais
-    const parseRounds = (value: any): number => {
-      if (typeof value === 'number') return value;
-      if (typeof value === 'string') {
-        const cleaned = value.replace(/[^\d]/g, '');
-        const num = parseInt(cleaned);
-        return isNaN(num) ? 0 : num;
-      }
-      return 0;
-    };
-
-    // Obter dados de rodadas sem sair para cada tipo
-    const roundsData = {
-      red: parseRounds(insightsComparison.roundsSinceLastSequence?.red),
-      black: parseRounds(insightsComparison.roundsSinceLastSequence?.black),
-      even: parseRounds(insightsComparison.roundsSinceLastSequence?.even),
-      odd: parseRounds(insightsComparison.roundsSinceLastSequence?.odd),
-      low: parseRounds(insightsComparison.roundsSinceLastSequence?.low),
-      high: parseRounds(insightsComparison.roundsSinceLastSequence?.high)
-    };
-
-    // Filtrar tipos com 15+ rodadas
-    const candidatos = Object.entries(roundsData)
-      .filter(([_, rounds]) => rounds >= 15)
-      .sort((a, b) => b[1] - a[1]); // Ordenar por maior número de rodadas
-
-    // Se encontrou candidatos, automaticamente mudar para o melhor
-    if (candidatos.length > 0) {
-      const [melhorTipo, rodadas] = candidatos[0];
-      
-      // Mapear tipos para valores aceitos pelo sistema
-      const tipoMapping: { [key: string]: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' } = {
-        'red': 'red',
-        'black': 'black', 
-        'even': 'even',
-        'odd': 'odd',
-        'low': 'low',
-        'high': 'high'
-      };
-
-      const novoTipo = tipoMapping[melhorTipo];
-      if (novoTipo && novoTipo !== m4DirectBetType) {
-        console.log(`🤖 MODO AUTOMÁTICO: Detectado ${melhorTipo} com ${rodadas} rodadas - Mudando automaticamente`);
-        setM4DirectBetType(novoTipo);
-        
-        // Mostrar notificação de ativação automática
-        const nomesTipos = {
-          'red': 'VERMELHO',
-          'black': 'PRETO', 
-          'even': 'PAR',
-          'odd': 'ÍMPAR',
-          'low': 'BAIXAS (1-18)',
-          'high': 'ALTAS (19-36)'
-        };
-        
-        const nomeTipo = nomesTipos[melhorTipo as keyof typeof nomesTipos];
-        setOperationSuccess(`🤖 MODO AUTOMÁTICO: ${nomeTipo} detectado (${rodadas} rodadas)`);
-        setTimeout(() => setOperationSuccess(null), 5000);
-      }
-    }
-  }, [
-    isOperating, 
-    m4DirectBetType, 
-    insightsComparison.hasData,
-    insightsComparison.roundsSinceLastSequence?.red,
-    insightsComparison.roundsSinceLastSequence?.black,
-    insightsComparison.roundsSinceLastSequence?.even,
-    insightsComparison.roundsSinceLastSequence?.odd,
-    insightsComparison.roundsSinceLastSequence?.low,
-    insightsComparison.roundsSinceLastSequence?.high
-  ]);
-
-  // 🔄 NOVO: Transição automática após finalização de operação
-  useEffect(() => {
-    // Quando operação para e não estamos em modo "aguardar", retornar automaticamente
-    if (!isOperating && m4DirectBetType !== 'await') {
-      const timer = setTimeout(() => {
-        console.log('🔄 TRANSIÇÃO AUTOMÁTICA: Operação finalizada - Retornando ao modo aguardar');
-        setM4DirectBetType('await');
-        setOperationSuccess('🔄 Retornando ao modo automático para detectar próximo candidato');
-        setTimeout(() => setOperationSuccess(null), 4000);
-      }, 2000); // Aguardar 2 segundos antes de retornar
-
-      return () => clearTimeout(timer);
-    }
-  }, [isOperating, m4DirectBetType]);
 
   useEffect(() => {
     if (userIdRef.current && isOperating) {
@@ -3259,15 +3194,10 @@ export default function BMGBR3() {
                 {/* 🔥 SEÇÃO: Tipo de Aposta */}
                 <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20 space-y-3">
                   <label className="text-sm font-semibold font-mono text-purple-400">
-                    Tipo de Aposta {m4DirectBetType === 'await' && isOperating && (
-                      <span className="text-xs text-blue-400 ml-2">🤖 MODO AUTOMÁTICO</span>
-                    )}
+                    Tipo de Aposta
                   </label>
                   <div className="text-xs text-gray-400 font-mono">
-                    {m4DirectBetType === 'await' && isOperating ? 
-                      'Monitorando tipos com 15+ rodadas - Sistema irá apostar automaticamente' :
-                      'Selecione um tipo de aposta'
-                    }
+                    Selecione um tipo de aposta
                   </div>
                   
                   {/* 🔥 SELEÇÃO: Tipo de aposta */}
@@ -3296,22 +3226,17 @@ export default function BMGBR3() {
                         </button>
                       ))}
                     </div>
-                                         <div className="mt-2 text-xs text-gray-500 font-mono">
-                         <span>Aposta selecionada: <span className="text-purple-400">{
-                         m4DirectBetType === 'await' ? (isOperating ? 'AGUARDAR (Modo Automático)' : 'AGUARDAR') :
-                           m4DirectBetType === 'red' ? 'VERMELHO' :
-                           m4DirectBetType === 'black' ? 'PRETO' :
-                           m4DirectBetType === 'even' ? 'PAR' :
-                           m4DirectBetType === 'odd' ? 'ÍMPAR' :
-                           m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
-                           'ALTAS (19-36)'
-                         }</span></span>
-                         {m4DirectBetType === 'await' && isOperating && (
-                           <div className="mt-1 text-xs text-blue-400">
-                             🔍 Procurando tipos com 15+ rodadas no INSIGHTS DE DADOS
-                           </div>
-                         )}
-                     </div>
+                    <div className="mt-2 text-xs text-gray-500 font-mono">
+                      <span>Aposta selecionada: <span className="text-purple-400">{
+                        m4DirectBetType === 'await' ? 'AGUARDAR' :
+                        m4DirectBetType === 'red' ? 'VERMELHO' :
+                        m4DirectBetType === 'black' ? 'PRETO' :
+                        m4DirectBetType === 'even' ? 'PAR' :
+                        m4DirectBetType === 'odd' ? 'ÍMPAR' :
+                        m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
+                        'ALTAS (19-36)'
+                      }</span></span>
+                    </div>
                   </div>
                 </div>
 
@@ -3369,25 +3294,26 @@ export default function BMGBR3() {
                   
 
                   
-                  {/* Informações da Lógica */}
+                  {/* Informações da Nova Estratégia */}
                   <div className="mt-3 pt-3 border-t border-blue-500/10">
                     <div className="text-xs text-gray-400 font-mono">
-                      <div className="mb-1">
-                        <span className="text-blue-400">Multiplicador:</span> {stakeMultiplier}x aplicado aos valores base
+                      <div className="mb-2">
+                        <span className="text-purple-400">NOVA ESTRATÉGIA:</span> Repetição Inteligente
                       </div>
                       <div className="mb-1">
-                        <span className="text-green-400">Lucro fixo:</span> +{formatCurrency(stakeMultiplier * 1.0)} (quando acerta M2)
+                        <span className="text-blue-400">1. Monitora:</span> Aguarda resultado desejado aparecer
                       </div>
-                      <div className="text-xs text-gray-500">
-                        Lucro é igual para todos os níveis • Multiplicador × R$ 1,00
+                      <div className="mb-1">
+                        <span className="text-green-400">2. Aposta:</span> Para repetir o resultado detectado
                       </div>
+
                     </div>
                   </div>
                   
                   {/* Tabela de Todos os Níveis */}
                   <div className="mt-4 pt-4 border-t border-blue-500/10">
                     <div className="text-xs text-blue-400 font-mono font-semibold mb-3">
-                      TABELA COMPLETA - 10 NÍVEIS (Multiplicador: {stakeMultiplier}x)
+                      TABELA COMPLETA - 12 NÍVEIS (Multiplicador: {stakeMultiplier}x)
                     </div>
                     
                     <div className="max-h-48 overflow-y-auto border border-gray-600/30 rounded-lg bg-gray-900/30">
@@ -3395,23 +3321,23 @@ export default function BMGBR3() {
                         <thead className="sticky top-0 bg-gray-800/80 border-b border-gray-600/30">
                           <tr>
                             <th className="px-2 py-1 text-left text-gray-400">Nível</th>
-                            <th className="px-2 py-1 text-right text-gray-400">M1</th>
-                            <th className="px-2 py-1 text-right text-gray-400">M2</th>
+                            <th className="px-2 py-1 text-right text-gray-400">Aposta</th>
                             <th className="px-2 py-1 text-right text-gray-400">Custo</th>
+                            <th className="px-2 py-1 text-right text-gray-400">Lucro</th>
                           </tr>
                         </thead>
                         <tbody>
                           {STAKE_LEVELS.map((level, index) => (
                             <tr key={level.level} className={`border-b border-gray-700/20 hover:bg-gray-800/20 ${index % 2 === 0 ? 'bg-gray-800/10' : ''}`}>
                               <td className="px-2 py-1 text-white font-semibold">{level.level}</td>
-                              <td className="px-2 py-1 text-right text-green-400">
-                                {formatCurrency(level.m1 * stakeMultiplier)}
-                              </td>
                               <td className="px-2 py-1 text-right text-yellow-400">
                                 {formatCurrency(level.m2 * stakeMultiplier)}
                               </td>
-                              <td className="px-2 py-1 text-right text-red-400">
+                              <td className="px-2 py-1 text-right text-green-400">
                                 {formatCurrency(level.cost * stakeMultiplier)}
+                              </td>
+                              <td className="px-2 py-1 text-right text-blue-400">
+                                {formatCurrency(calculateRealProfit(level.level))}
                               </td>
                             </tr>
                           ))}
@@ -3419,11 +3345,7 @@ export default function BMGBR3() {
                       </table>
                     </div>
                     
-                    <div className="mt-2 text-xs text-gray-500 font-mono">
-                      <span className="text-green-400">M1:</span> Primeira aposta | 
-                      <span className="text-yellow-400"> M2:</span> Segunda aposta | 
-                      <span className="text-red-400"> Custo:</span> Banca necessária
-                    </div>
+
                   </div>
                 </div>
 

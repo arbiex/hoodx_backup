@@ -76,38 +76,54 @@ export default function XGatePaymentModal({
 
   // Função para processar sucesso do pagamento
   const handlePaymentSuccess = useCallback((transactionId: string, tokensAdded?: number) => {
-    console.log('🎉 Processando sucesso do pagamento')
+    console.log('🎉 [DEBUG] Processando sucesso do pagamento')
+    console.log('🎉 [DEBUG] transactionId:', transactionId)
+    console.log('🎉 [DEBUG] tokensAdded:', tokensAdded)
+    console.log('🎉 [DEBUG] amount:', amount)
+    console.log('🎉 [DEBUG] calculateFixas(amount):', calculateFixas(amount))
     
     // 🛑 PARAR TODAS as verificações desta transação primeiro
     stopAllChecksForTransaction(transactionId)
+    console.log('🎉 [DEBUG] Verificações paradas')
     
     // Marcar como processado para evitar duplo processamento
     setPaymentProcessed(true)
+    console.log('🎉 [DEBUG] Marcado como processado')
     
     // Parar verificação automática local
     if (autoCheck) {
       clearInterval(autoCheck)
       setAutoCheck(null)
+      console.log('🎉 [DEBUG] AutoCheck parado')
     }
     
     // Parar monitoramento
     setIsMonitoring(false)
+    console.log('🎉 [DEBUG] Monitoramento parado')
     
     // Atualizar saldo de tokens FXA
     triggerBalanceRefresh()
+    console.log('🎉 [DEBUG] Balance refresh acionado')
     
     // Mostrar modal de sucesso
+    console.log('🎉 [DEBUG] Abrindo modal de sucesso...')
     successModal.openModal()
+    console.log('🎉 [DEBUG] Modal de sucesso aberto!')
     
     // Chamar callback de sucesso
     if (onSuccess) {
+      console.log('🎉 [DEBUG] Chamando callback onSuccess')
       onSuccess(amount, transactionId)
     }
     
     // Toast de sucesso
+    const tokensText = tokensAdded || calculateFixas(amount)
+    console.log('🎉 [DEBUG] Exibindo toast com tokens:', tokensText)
     toast.success('PAGAMENTO_CONFIRMADO!', {
-      description: `+${tokensAdded || calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
+      description: `+${tokensText} TOKENS FXA adicionados à sua conta`
     })
+    
+    console.log('🎉 [DEBUG] handlePaymentSuccess concluído com sucesso!')
   }, [autoCheck, triggerBalanceRefresh, successModal, onSuccess, amount, calculateFixas, stopAllChecksForTransaction])
 
   // Função para copiar para a área de transferência
@@ -152,15 +168,19 @@ export default function XGatePaymentModal({
       }
 
       try {
+        console.log('🔍 Verificando status da transação:', transactionId)
         const statusData = await checkPaymentStatus(transactionId)
         
         if (statusData) {
+          console.log('📊 Status recebido:', statusData.status, 'shouldStopChecking:', statusData.shouldStopChecking)
+          
           // ✅ Verificar se deve parar completamente as verificações
           if (statusData.shouldStopChecking) {
             console.log('🛑 Servidor solicitou parada de verificações')
             
             // Se status é completed, processar sucesso
             if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
+              console.log('🎉 Pagamento confirmado via shouldStopChecking! tokensAdded:', statusData.tokensAdded)
               handlePaymentSuccess(transactionId, statusData.tokensAdded)
             }
             
@@ -169,10 +189,17 @@ export default function XGatePaymentModal({
           
           // ✅ Verificação para casos onde ainda não deve parar
           if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
-            console.log('🎉 Pagamento confirmado!')
-            handlePaymentSuccess(transactionId, statusData.tokensAdded)
+            console.log('🎉 Pagamento confirmado via status check! tokensAdded:', statusData.tokensAdded)
+            
+            // 🔥 FORÇAR MODAL DE SUCESSO - Debug
+            console.log('🚨 FORÇANDO MODAL DE SUCESSO - DEBUG')
+            handlePaymentSuccess(transactionId, statusData.tokensAdded || calculateFixas(amount))
             return
           }
+          
+          console.log('⏳ Status ainda pendente:', statusData.status)
+        } else {
+          console.log('❌ Nenhum status retornado')
         }
       } catch (error) {
         console.error('❌ Erro na verificação:', error)
@@ -188,7 +215,7 @@ export default function XGatePaymentModal({
     setAutoCheck(interval)
     
     return interval
-  }, [checkPaymentStatus, paymentProcessed, isTransactionCached, handlePaymentSuccess, stopAllChecksForTransaction, registerActiveCheck])
+  }, [checkPaymentStatus, paymentProcessed, isTransactionCached, handlePaymentSuccess, stopAllChecksForTransaction, registerActiveCheck, calculateFixas, amount])
 
   // 🔒 SISTEMA DE CRIAÇÃO ÚNICA E ANTI-DUPLICAÇÃO ULTRA RIGOROSO
   useEffect(() => {

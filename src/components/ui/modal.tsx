@@ -54,11 +54,16 @@ const Modal: React.FC<ModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      console.log('🔥 [MODAL DEBUG] Modal abrindo - isOpen=true')
       setIsVisible(true)
       document.body.style.overflow = 'hidden'
     } else {
+      console.log('🔥 [MODAL DEBUG] Modal fechando - isOpen=false')
       document.body.style.overflow = 'unset'
-      const timer = setTimeout(() => setIsVisible(false), 150)
+      const timer = setTimeout(() => {
+        console.log('🔥 [MODAL DEBUG] setIsVisible(false) executado')
+        setIsVisible(false)
+      }, 150)
       return () => clearTimeout(timer)
     }
 
@@ -252,8 +257,17 @@ const Modal: React.FC<ModalProps> = ({
 export const useModal = () => {
   const [isOpen, setIsOpen] = useState(false)
   
-  const openModal = () => setIsOpen(true)
-  const closeModal = () => setIsOpen(false)
+  const openModal = () => {
+    console.log('🔥 [MODAL DEBUG] openModal chamado')
+    setIsOpen(true)
+    console.log('🔥 [MODAL DEBUG] setIsOpen(true) executado')
+  }
+  
+  const closeModal = () => {
+    console.log('🔥 [MODAL DEBUG] closeModal chamado')
+    setIsOpen(false)
+    console.log('🔥 [MODAL DEBUG] setIsOpen(false) executado')
+  }
   
   return {
     isOpen,

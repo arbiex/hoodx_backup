@@ -47,12 +47,13 @@ export default function XGatePaymentModal({
   const [autoCheck, setAutoCheck] = useState<NodeJS.Timeout | null>(null)
   const [paymentProcessed, setPaymentProcessed] = useState(false)
   const [shouldRefreshBalance, setShouldRefreshBalance] = useState(false)
-  
+  const [showHardcodedSuccessModal, setShowHardcodedSuccessModal] = useState(false) // 🔥 Modal que não pode ser fechado por nada
+  const successModal = useModal()
+
   // 🔒 SISTEMA ANTI-DUPLICAÇÃO ROBUSTO
   const isCreatingTransaction = useRef(false)
   const hasCreatedTransaction = useRef(false)
   const creationKey = useRef<string | null>(null)
-  const successModal = useModal()
 
   // Conversão: R$ 0.25 = 1 FIXA (Valor mínimo: R$ 5.00 = 20 FIXAS)
   const FIXA_RATE = 0.25
@@ -105,10 +106,12 @@ export default function XGatePaymentModal({
     triggerBalanceRefresh()
     console.log('🎉 [DEBUG] Balance refresh acionado')
     
-    // Mostrar modal de sucesso
-    console.log('🎉 [DEBUG] Abrindo modal de sucesso...')
-    successModal.openModal()
-    console.log('🎉 [DEBUG] Modal de sucesso aberto!')
+    // 🔥 FORÇAR MODAL HARDCODED QUE NÃO PODE SER FECHADO POR NADA
+    console.log('🔥 ATIVANDO MODAL HARDCODED!')
+    setShowHardcodedSuccessModal(true)
+    
+    // NÃO mostrar modal de sucesso do useModal - apenas hardcoded
+    // successModal.openModal() // DESABILITADO
     
     // Chamar callback de sucesso
     if (onSuccess) {
@@ -297,11 +300,12 @@ export default function XGatePaymentModal({
         setAutoCheck(null)
       }
       
-      // 🔄 RESET ABSOLUTO de TODAS as flags
+      // 🔄 Reset ABSOLUTO de TODAS as flags
       setPaymentProcessed(false)
       setIsMonitoring(false)
       setTimeLeft(null)
       setCopied(false)
+      // 🔥 NÃO resetar modal hardcoded - deve ser independente!
       
       // 🔓 Liberar flags anti-duplicação para próxima abertura
       isCreatingTransaction.current = false
@@ -424,9 +428,19 @@ export default function XGatePaymentModal({
 
   // Fechar modal de sucesso
   const handleSuccessClose = useCallback(() => {
+    console.log('🚪 handleSuccessClose chamado, showHardcodedSuccessModal:', showHardcodedSuccessModal)
+    
+    // Se o modal hardcoded estiver ativo, NÃO fechar o modal principal
+    if (showHardcodedSuccessModal) {
+      console.log('🔒 Modal hardcoded ativo - NÃO fechando modal principal')
+      successModal.closeModal()
+      return
+    }
+    
+    // Se não há modal hardcoded, fechar normalmente
     successModal.closeModal()
     handleClose()
-  }, [successModal, handleClose])
+  }, [successModal, handleClose, showHardcodedSuccessModal])
 
   // Status info para exibição
   const getStatusInfo = () => {
@@ -688,6 +702,53 @@ export default function XGatePaymentModal({
           </div>
         </div>
       </Modal>
+      
+      {/* 🔥 MODAL HARDCODED QUE NÃO PODE SER FECHADO POR NADA */}
+      {showHardcodedSuccessModal && (
+        <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-green-500/30 rounded-lg p-8 max-w-md w-full shadow-2xl">
+            <div className="text-center space-y-6">
+              {/* Success Icon */}
+              <div className="mx-auto w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mb-4">
+                <CheckCircle className="h-12 w-12 text-green-400" />
+              </div>
+              
+              {/* Success Message */}
+              <div className="space-y-2">
+                <h2 className="text-3xl font-bold text-green-400 font-mono">
+                  🎉 PAGAMENTO CONFIRMADO! 🎉
+                </h2>
+                <p className="text-gray-300 font-mono text-base">
+                  Seus tokens foram adicionados à sua conta!
+                </p>
+              </div>
+              
+              {/* Details */}
+              <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-400 font-mono">VALOR:</span>
+                  <span className="text-green-400 font-bold font-mono">R$ {amount.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400 font-mono">TOKENS:</span>
+                  <span className="text-purple-400 font-bold font-mono">+{calculateFixas(amount)} FXA</span>
+                </div>
+              </div>
+              
+              {/* Action Button */}
+              <Button
+                onClick={() => {
+                  console.log('🔥 FECHANDO MODAL HARDCODED')
+                  setShowHardcodedSuccessModal(false)
+                }}
+                className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono text-xl py-4"
+              >
+                🎯 CONTINUAR
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 } 

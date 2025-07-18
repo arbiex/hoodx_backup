@@ -297,6 +297,67 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
+    // 🔒 VERIFICAÇÃO ANTI-DUPLICAÇÃO: Verificar se já existe transação pendente recente
+    const supabase = getSupabaseClient()
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+    
+    console.log('🔍 Verificando transações pendentes recentes...')
+    const { data: recentTransactions, error: checkError } = await supabase
+      .from('credit_transactions')
+      .select('id, payment_reference, amount, status, created_at')
+      .eq('user_id', userId)
+      .eq('status', 'pending')
+      .gte('created_at', fiveMinutesAgo)
+      .order('created_at', { ascending: false })
+      .limit(3)
+
+    if (checkError) {
+      console.error('⚠️ Erro ao verificar transações pendentes:', checkError)
+      // Continuar mesmo com erro na verificação
+    }
+
+    // Verificar se existe transação pendente idêntica (mesmo valor ±R$0.01)
+    if (recentTransactions && recentTransactions.length > 0) {
+      const duplicateTransaction = recentTransactions.find(tx => 
+        Math.abs(tx.amount - amount) <= 0.01 // Margem de R$0,01
+      )
+      
+      if (duplicateTransaction) {
+        console.log('🚫 BLOQUEANDO: Transação duplicada detectada!', {
+          existing: duplicateTransaction,
+          requested: { amount, userId }
+        })
+        
+        return NextResponse.json({
+          success: false,
+          error: 'TRANSAÇÃO_DUPLICADA',
+          message: 'Já existe uma transação pendente com este valor',
+          existingTransaction: {
+            id: duplicateTransaction.payment_reference,
+            amount: duplicateTransaction.amount,
+            status: duplicateTransaction.status,
+            createdAt: duplicateTransaction.created_at
+          }
+        }, { status: 409 }) // 409 Conflict
+      }
+      
+      // Se há muitas transações pendentes recentes, também bloquear
+      if (recentTransactions.length >= 3) {
+        console.log('🚫 BLOQUEANDO: Muitas transações pendentes recentes!', {
+          count: recentTransactions.length,
+          userId
+        })
+        
+        return NextResponse.json({
+          success: false,
+          error: 'MUITAS_TRANSAÇÕES_PENDENTES',
+          message: 'Você tem muitas transações pendentes. Aguarde ou cancele uma transação antes de criar outra.'
+        }, { status: 429 }) // 429 Too Many Requests
+      }
+    }
+
+    console.log('✅ Verificação anti-duplicação aprovada - Prosseguindo...')
+
     const finalDescription = description || `Compra de créditos - R$ ${amount.toFixed(2)}`
 
     // Verificar se ambiente está configurado
@@ -316,8 +377,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Salvar transação no banco
-    const supabase = getSupabaseClient()
-    
     // Buscar saldo atual do usuário para balance_before/after
     const { data: userCredit } = await supabase
       .from('user_credits')
@@ -345,7 +404,9 @@ export async function POST(request: NextRequest) {
           xgate_customer_id: xgateResult.customerId,
           xgate_response: xgateResult.data,
           endpoint_used: '/deposit',
-          webhook_url: XGATE_CONFIG.webhookUrl
+          webhook_url: XGATE_CONFIG.webhookUrl,
+          anti_duplication_check: true,
+          creation_timestamp: new Date().toISOString()
         }
       })
       .select()
@@ -357,7 +418,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('✅ Cobrança PIX criada com sucesso')
-          console.log('🔗 Endpoint usado: /deposit')
+    console.log('🔗 Endpoint usado: /deposit')
 
     return NextResponse.json({
       success: true,
@@ -368,7 +429,10 @@ export async function POST(request: NextRequest) {
       amount: amount,
       description: finalDescription,
       dbTransactionId: transaction.id,
-              endpointUsed: '/deposit'
+      provider: 'XGATE',
+      status: 'pending',
+      externalId: xgateResult.transactionId,
+      endpointUsed: '/deposit'
     })
 
   } catch (error) {

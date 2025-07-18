@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { X, QrCode, Copy, Clock, CheckCircle, AlertCircle, RefreshCw, Banknote, Coins } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import Modal, { useModal } from '@/components/ui/modal'
@@ -35,14 +35,23 @@ export default function XGatePaymentModal({
     checkPaymentStatus,
     monitorPaymentStatus,
     clearCurrentTransaction,
-    isTransactionCached
+    isTransactionCached,
+    stopAllChecksForTransaction,
+    registerActiveCheck,
+    stopAllActiveChecks
   } = useXGatePayment()
 
   const [copied, setCopied] = useState(false)
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
   const [isMonitoring, setIsMonitoring] = useState(false)
   const [autoCheck, setAutoCheck] = useState<NodeJS.Timeout | null>(null)
-  const [paymentProcessed, setPaymentProcessed] = useState(false) // Nova flag para evitar processamento múltiplo
+  const [paymentProcessed, setPaymentProcessed] = useState(false)
+  const [shouldRefreshBalance, setShouldRefreshBalance] = useState(false)
+  
+  // 🔒 SISTEMA ANTI-DUPLICAÇÃO ROBUSTO
+  const isCreatingTransaction = useRef(false)
+  const hasCreatedTransaction = useRef(false)
+  const creationKey = useRef<string | null>(null)
   const successModal = useModal()
 
   // Conversão: R$ 0.25 = 1 FIXA (Valor mínimo: R$ 5.00 = 20 FIXAS)
@@ -52,6 +61,54 @@ export default function XGatePaymentModal({
   const calculateFixas = useCallback((value: number): number => {
     return Math.floor(value / FIXA_RATE)
   }, [])
+
+  // Função para atualizar saldo de tokens FXA
+  const triggerBalanceRefresh = useCallback(() => {
+    console.log('💰 Sinalizando atualização de saldo FXA')
+    setShouldRefreshBalance(true)
+    
+    // Disparar evento customizado para componentes que escutam mudanças de saldo
+    window.dispatchEvent(new CustomEvent('fxaBalanceUpdate', { detail: { userId } }))
+    
+    // Reset após um tempo
+    setTimeout(() => setShouldRefreshBalance(false), 1000)
+  }, [userId])
+
+  // Função para processar sucesso do pagamento
+  const handlePaymentSuccess = useCallback((transactionId: string, tokensAdded?: number) => {
+    console.log('🎉 Processando sucesso do pagamento')
+    
+    // 🛑 PARAR TODAS as verificações desta transação primeiro
+    stopAllChecksForTransaction(transactionId)
+    
+    // Marcar como processado para evitar duplo processamento
+    setPaymentProcessed(true)
+    
+    // Parar verificação automática local
+    if (autoCheck) {
+      clearInterval(autoCheck)
+      setAutoCheck(null)
+    }
+    
+    // Parar monitoramento
+    setIsMonitoring(false)
+    
+    // Atualizar saldo de tokens FXA
+    triggerBalanceRefresh()
+    
+    // Mostrar modal de sucesso
+    successModal.openModal()
+    
+    // Chamar callback de sucesso
+    if (onSuccess) {
+      onSuccess(amount, transactionId)
+    }
+    
+    // Toast de sucesso
+    toast.success('PAGAMENTO_CONFIRMADO!', {
+      description: `+${tokensAdded || calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
+    })
+  }, [autoCheck, triggerBalanceRefresh, successModal, onSuccess, amount, calculateFixas, stopAllChecksForTransaction])
 
   // Função para copiar para a área de transferência
   const copyToClipboard = useCallback(async (text: string) => {
@@ -69,165 +126,164 @@ export default function XGatePaymentModal({
     }
   }, [])
 
-  // Iniciar verificação automática
+  // 🔧 Iniciar verificação automática SIMPLIFICADA
   const startAutoStatusCheck = useCallback((transactionId: string) => {
-    console.log('🚀 Iniciando verificação automática para:', transactionId)
+    console.log('🚀 Iniciando verificação para transação única:', transactionId)
     
     // ✅ VERIFICAÇÃO CACHE - Se já foi processada, não iniciar verificação
     if (isTransactionCached(transactionId)) {
-      console.log('🚫 Transação já no cache, não iniciando verificação:', transactionId)
+      console.log('🚫 Transação já no cache, não iniciando verificação')
       setPaymentProcessed(true)
       return
     }
     
-    // Limpar qualquer verificação anterior
-    if (autoCheck) {
-      console.log('🛑 Limpando verificação anterior')
-      clearInterval(autoCheck)
-      setAutoCheck(null)
-    }
-
+    // 🛑 Parar QUALQUER verificação anterior desta transação
+    stopAllChecksForTransaction(transactionId)
+    
     // Reset da flag de processamento
     setPaymentProcessed(false)
 
     const checkStatus = async () => {
-      // ✅ VERIFICAÇÃO DUPLA - Evitar verificação se já foi processado OU está no cache
+      // ✅ Evitar verificação se já foi processado OU está no cache
       if (paymentProcessed || isTransactionCached(transactionId)) {
-        console.log('⏭️ Pagamento já processado ou em cache, pulando verificação')
-        if (autoCheck) {
-          clearInterval(autoCheck)
-          setAutoCheck(null)
-        }
+        console.log('⏭️ Pagamento processado/cache - parando verificação')
+        stopAllChecksForTransaction(transactionId)
         return
       }
 
       try {
-        console.log('🔍 Auto-check para:', transactionId)
         const statusData = await checkPaymentStatus(transactionId)
         
         if (statusData) {
-          console.log('🔍 Auto-check status:', statusData.status)
-          
           // ✅ Verificar se deve parar completamente as verificações
           if (statusData.shouldStopChecking) {
-            console.log('🛑 Servidor solicitou parada de verificações - Parando definitivamente')
+            console.log('🛑 Servidor solicitou parada de verificações')
             
-            // Marcar como processado para evitar novas verificações
-            setPaymentProcessed(true)
-            
-            // Parar verificação automática
-            if (autoCheck) {
-              clearInterval(autoCheck)
-              setAutoCheck(null)
-            }
-            
-            // Parar monitoramento
-            setIsMonitoring(false)
-            
-            // Se status é completed, mostrar modal de sucesso
+            // Se status é completed, processar sucesso
             if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
-              console.log('🎉 Pagamento confirmado - Mostrando modal de sucesso')
-              
-              // Mostrar modal de sucesso
-              successModal.openModal()
-              
-              // Chamar callback de sucesso
-              if (onSuccess) {
-                onSuccess(amount, transactionId)
-              }
-              
-              // Toast de sucesso
-              toast.success('PAGAMENTO_CONFIRMADO!', {
-                description: `+${calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
-              })
+              handlePaymentSuccess(transactionId, statusData.tokensAdded)
             }
             
             return
           }
           
-          // ✅ Verificação tradicional para casos onde ainda não deve parar
+          // ✅ Verificação para casos onde ainda não deve parar
           if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
-            console.log('🎉 Pagamento confirmado automaticamente!')
-            
-            // Marcar como processado IMEDIATAMENTE
-            setPaymentProcessed(true)
-            
-            // Parar verificação automática
-            if (autoCheck) {
-              clearInterval(autoCheck)
-              setAutoCheck(null)
-            }
-            
-            // Parar monitoramento
-            setIsMonitoring(false)
-            
-            // Mostrar modal de sucesso
-            successModal.openModal()
-            
-            // Chamar callback de sucesso
-            if (onSuccess) {
-              onSuccess(amount, transactionId)
-            }
-            
-            // Toast de sucesso
-            toast.success('PAGAMENTO_CONFIRMADO!', {
-              description: `+${calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
-            })
-            
+            console.log('🎉 Pagamento confirmado!')
+            handlePaymentSuccess(transactionId, statusData.tokensAdded)
             return
           }
         }
       } catch (error) {
-        console.error('❌ Erro na verificação automática:', error)
+        console.error('❌ Erro na verificação:', error)
       }
     }
 
-    // Verificar imediatamente e depois a cada 1 segundo
+    // Verificar a cada 3 segundos (reduzindo ainda mais a frequência)
     checkStatus()
-    const interval = setInterval(checkStatus, 1000)
+    const interval = setInterval(checkStatus, 3000)
+    
+    // 📝 REGISTRAR no controle global
+    registerActiveCheck(transactionId, interval)
     setAutoCheck(interval)
     
     return interval
-  }, [checkPaymentStatus, autoCheck, successModal, onSuccess, amount, calculateFixas, paymentProcessed, isTransactionCached])
+  }, [checkPaymentStatus, paymentProcessed, isTransactionCached, handlePaymentSuccess, stopAllChecksForTransaction, registerActiveCheck])
 
-  // Criar transação ao abrir o modal
+  // 🔒 SISTEMA DE CRIAÇÃO ÚNICA E ANTI-DUPLICAÇÃO ULTRA RIGOROSO
   useEffect(() => {
-    if (isOpen && !currentTransaction && !isLoading) {
-      const createTransaction = async () => {
-        try {
-          const transaction = await createPixDeposit(amount, userId)
-          if (transaction) {
-            setTimeLeft(15 * 60) // 15 minutos
-            setIsMonitoring(true)
-            
-            // Iniciar verificação automática a cada 1 segundo
-            startAutoStatusCheck(transaction.transactionId)
-          }
-        } catch (error) {
-          console.error('Erro ao criar transação:', error)
-          toast.error('ERRO_TRANSAÇÃO', {
-            description: 'Falha ao gerar código PIX'
-          })
-        }
-      }
+    // ✅ Verificações fundamentais
+    if (!isOpen) return
+    if (currentTransaction) return // ✅ Já tem transação
+    if (isLoading) return // ✅ Aguardar carregar
+    
+    // 🔒 PROTEÇÃO ANTI-DUPLICAÇÃO ABSOLUTA
+    if (isCreatingTransaction.current) {
+      console.log('🚫 Criação já em andamento - BLOQUEANDO duplicação')
+      return
+    }
+    
+    if (hasCreatedTransaction.current) {
+      console.log('🚫 Transação já foi criada nesta sessão - BLOQUEANDO duplicação')
+      return
+    }
+    
+    // 🆔 Chave única para esta criação específica
+    const currentKey = `${userId}-${amount}-${Date.now()}`
+    if (creationKey.current === currentKey) {
+      console.log('🚫 Mesma chave de criação - BLOQUEANDO duplicação')
+      return
+    }
+    
+    // 🔒 BLOQUEAR imediatamente
+    console.log('🔨 Iniciando criação ÚNICA de transação - Valor:', amount)
+    isCreatingTransaction.current = true
+    hasCreatedTransaction.current = true
+    creationKey.current = currentKey
 
-      createTransaction()
+    const createTransaction = async () => {
+      try {
+        const transaction = await createPixDeposit(amount, userId)
+        if (transaction) {
+          console.log('✅ Transação criada com sucesso:', transaction.transactionId)
+          setTimeLeft(15 * 60) // 15 minutos
+          setIsMonitoring(true)
+          
+          // Iniciar verificação automática para ESTA transação específica
+          startAutoStatusCheck(transaction.transactionId)
+        }
+      } catch (error) {
+        console.error('❌ Erro ao criar transação:', error)
+        toast.error('ERRO_TRANSAÇÃO', {
+          description: 'Falha ao gerar código PIX'
+        })
+        
+        // 🔓 Liberar em caso de erro para permitir nova tentativa
+        isCreatingTransaction.current = false
+        hasCreatedTransaction.current = false
+        creationKey.current = null
+        
+      } finally {
+        // 🔓 Liberar flag de "criando" (mas manter "já criou")
+        isCreatingTransaction.current = false
+      }
+    }
+
+    // 🚀 Debounce de 300ms para evitar múltiplas execuções rápidas
+    const debounceTimer = setTimeout(createTransaction, 300)
+    
+    return () => {
+      clearTimeout(debounceTimer)
     }
   }, [isOpen, currentTransaction, isLoading, amount, userId, createPixDeposit, startAutoStatusCheck])
 
-  // Limpar verificação automática ao fechar
+  // 🔒 RESET COMPLETO ao fechar modal
   useEffect(() => {
     if (!isOpen) {
+      console.log('🚪 Modal fechado - RESET COMPLETO')
+      
+      // 🛑 Parar TODAS as verificações
+      stopAllActiveChecks()
+      
       if (autoCheck) {
-        console.log('🛑 Parando verificação automática ao fechar modal')
         clearInterval(autoCheck)
         setAutoCheck(null)
       }
-      // Reset flags quando fechar
+      
+      // 🔄 RESET ABSOLUTO de TODAS as flags
       setPaymentProcessed(false)
       setIsMonitoring(false)
+      setTimeLeft(null)
+      setCopied(false)
+      
+      // 🔓 Liberar flags anti-duplicação para próxima abertura
+      isCreatingTransaction.current = false
+      hasCreatedTransaction.current = false
+      creationKey.current = null
+      
+      console.log('✅ Reset completo finalizado')
     }
-  }, [isOpen, autoCheck])
+  }, [isOpen, autoCheck, stopAllActiveChecks])
 
   // Countdown timer
   useEffect(() => {
@@ -259,7 +315,7 @@ export default function XGatePaymentModal({
 
     // ✅ VERIFICAÇÃO CACHE - Se já foi processada, não verificar
     if (isTransactionCached(currentTransaction.transactionId)) {
-      console.log('🚫 Transação já no cache, não verificando manualmente:', currentTransaction.transactionId)
+      console.log('🚫 Transação já no cache - verificação manual')
       setPaymentProcessed(true)
       toast.info('TRANSAÇÃO_FINALIZADA', {
         description: 'Esta transação já foi processada'
@@ -276,86 +332,68 @@ export default function XGatePaymentModal({
         
         // ✅ Verificar se deve parar verificações
         if (statusData.shouldStopChecking) {
-          console.log('🛑 Servidor solicitou parada de verificações - Parando verificação manual')
+          console.log('🛑 Servidor solicitou parada de verificações - Verificação manual')
           
-          // Marcar como processado
-          setPaymentProcessed(true)
-          
-          // Parar verificação automática
-          if (autoCheck) {
-            clearInterval(autoCheck)
-            setAutoCheck(null)
-          }
-          
-          // Se status é completed, mostrar modal de sucesso
+          // Se status é completed, processar sucesso
           if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
-            console.log('🎉 Pagamento confirmado na verificação manual!')
-            
-            // Mostrar modal de sucesso
-            successModal.openModal()
-            if (onSuccess) {
-              onSuccess(amount, currentTransaction.transactionId)
-            }
-            
-            toast.success('PAGAMENTO_CONFIRMADO!', {
-              description: `+${calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
-            })
+            handlePaymentSuccess(currentTransaction.transactionId, statusData.tokensAdded)
           } else {
             toast.info('TRANSAÇÃO_FINALIZADA', {
               description: `Status final: ${statusData.status}`
             })
           }
-        } else if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
-          console.log('🎉 Pagamento confirmado na verificação manual!')
           
-          // Marcar como processado para evitar duplo processamento
-          setPaymentProcessed(true)
-          
-          // Parar verificação automática
-          if (autoCheck) {
-            clearInterval(autoCheck)
-            setAutoCheck(null)
-          }
-          
-          // Mostrar modal de sucesso
-          successModal.openModal()
-          if (onSuccess) {
-            onSuccess(amount, currentTransaction.transactionId)
-          }
-          
-          toast.success('PAGAMENTO_CONFIRMADO!', {
-            description: `+${calculateFixas(amount)} TOKENS FXA adicionados à sua conta`
-          })
+          return
+        }
+        
+        // ✅ Se completed, processar sucesso
+        if (statusData.status === 'completed' || statusData.status === 'COMPLETED') {
+          handlePaymentSuccess(currentTransaction.transactionId, statusData.tokensAdded)
         } else {
-          const statusText = statusData.status === 'pending' ? 'Aguardando pagamento' : statusData.status || 'Desconhecido'
           toast.info('STATUS_ATUALIZADO', {
-            description: `Status atual: ${statusText}`
+            description: `Status atual: ${statusData.status}`
           })
         }
       }
     } catch (error) {
+      console.error('❌ Erro na verificação manual:', error)
       toast.error('ERRO_VERIFICAÇÃO', {
         description: 'Falha ao verificar status do pagamento'
       })
     } finally {
       setIsMonitoring(false)
     }
-  }, [currentTransaction, checkPaymentStatus, onSuccess, amount, successModal, autoCheck, calculateFixas, paymentProcessed, isTransactionCached])
+  }, [currentTransaction, paymentProcessed, isTransactionCached, checkPaymentStatus, handlePaymentSuccess])
 
-  // Fechar modal
+  // 🔒 Fechar modal LIMPANDO TUDO
   const handleClose = useCallback(() => {
-    // Parar verificação automática
+    console.log('🚪 Fechando modal e limpando sistema')
+    
+    // 🛑 Parar TODAS as verificações
+    stopAllActiveChecks()
+    
     if (autoCheck) {
       clearInterval(autoCheck)
       setAutoCheck(null)
     }
     
+    // 🔄 Reset completo do estado
     setIsMonitoring(false)
-    clearCurrentTransaction()
+    setPaymentProcessed(false)
     setTimeLeft(null)
     setCopied(false)
+    
+    // 🔓 Reset flags anti-duplicação
+    isCreatingTransaction.current = false
+    hasCreatedTransaction.current = false
+    creationKey.current = null
+    
+    // Limpar transação atual
+    clearCurrentTransaction()
+    
+    // Fechar modal
     onClose()
-  }, [clearCurrentTransaction, onClose, autoCheck])
+  }, [clearCurrentTransaction, onClose, autoCheck, stopAllActiveChecks])
 
   // Fechar modal de sucesso
   const handleSuccessClose = useCallback(() => {

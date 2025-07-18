@@ -5,6 +5,37 @@ import { toast } from 'sonner'
 // Cache local para transações que já foram finalizadas (evita verificações desnecessárias)
 const processedTransactionsCache = new Set<string>()
 
+// 🔧 CONTROLE GLOBAL DE VERIFICAÇÕES ATIVAS
+const activeChecks = new Map<string, NodeJS.Timeout>()
+
+// Função para parar TODAS as verificações de uma transação
+const stopAllChecksForTransaction = (transactionId: string) => {
+  const intervalId = activeChecks.get(transactionId)
+  if (intervalId) {
+    console.log('🛑 Parando TODAS as verificações para transação:', transactionId)
+    clearInterval(intervalId)
+    activeChecks.delete(transactionId)
+  }
+}
+
+// Função para registrar nova verificação
+const registerActiveCheck = (transactionId: string, intervalId: NodeJS.Timeout) => {
+  // Parar verificação anterior se existir
+  stopAllChecksForTransaction(transactionId)
+  // Registrar nova verificação
+  activeChecks.set(transactionId, intervalId)
+  console.log('📝 Registrada verificação ativa para:', transactionId)
+}
+
+// Função para parar TODAS as verificações globalmente
+const stopAllActiveChecks = () => {
+  console.log('🛑 Parando TODAS as verificações ativas (' + activeChecks.size + ')')
+  activeChecks.forEach((intervalId, transactionId) => {
+    clearInterval(intervalId)
+  })
+  activeChecks.clear()
+}
+
 // Configuração do Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -60,12 +91,29 @@ export function useXGatePayment() {
         })
       })
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || 'Erro ao criar depósito PIX')
-      }
-
       const data = await response.json()
+
+      // ✅ Tratamento especial para transações duplicadas
+      if (!response.ok) {
+        if (response.status === 409 && data.error === 'TRANSAÇÃO_DUPLICADA') {
+          console.log('🚫 Transação duplicada detectada pelo servidor')
+          toast.error('TRANSAÇÃO_DUPLICADA', {
+            description: 'Já existe uma transação PIX pendente com este valor. Aguarde a conclusão ou cancele-a primeiro.'
+          })
+          return null
+        }
+        
+        if (response.status === 429 && data.error === 'MUITAS_TRANSAÇÕES_PENDENTES') {
+          console.log('🚫 Muitas transações pendentes')
+          toast.error('MUITAS_TRANSAÇÕES_PENDENTES', {
+            description: 'Você tem muitas transações pendentes. Complete ou cancele uma antes de criar outra.'
+          })
+          return null
+        }
+
+        // Outros erros
+        throw new Error(data.error || data.message || 'Erro ao criar depósito PIX')
+      }
       
       if (!data.success) {
         throw new Error(data.error || 'Falha ao criar depósito')
@@ -73,23 +121,23 @@ export function useXGatePayment() {
 
       const paymentData: XGatePaymentData = {
         transactionId: data.transactionId,
-        externalId: data.externalId,
+        externalId: data.externalId || data.transactionId,
         amount: data.amount,
         pixQrCode: data.pixQrCode,
         pixCopyPaste: data.pixCopyPaste,
         expiresAt: data.expiresAt,
-        status: data.status,
-        provider: data.provider
+        status: data.status || 'pending',
+        provider: data.provider || 'XGATE'
       }
 
       setCurrentTransaction(paymentData)
       
       // Salvar na lista de transações
       const newTransaction: PaymentTransaction = {
-        id: data.transactionId,
+        id: data.dbTransactionId || data.transactionId,
         transaction_id: data.transactionId,
         amount: data.amount,
-        status: data.status,
+        status: data.status || 'pending',
         created_at: new Date().toISOString(),
         expires_at: data.expiresAt,
         xgate_response: data
@@ -97,14 +145,23 @@ export function useXGatePayment() {
       
       setTransactions(prev => [newTransaction, ...prev])
       
-      toast.success('Depósito PIX criado com sucesso!')
+      toast.success('Depósito PIX criado com sucesso!', {
+        description: `QR Code gerado para R$ ${amount.toFixed(2)}`
+      })
       
       return paymentData
 
     } catch (error) {
       console.error('❌ Erro ao criar depósito PIX:', error)
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido'
-      toast.error(`Erro ao criar depósito: ${errorMessage}`)
+      
+      // Não mostrar toast para erros já tratados (duplicação, etc)
+      if (!errorMessage.includes('TRANSAÇÃO_DUPLICADA') && !errorMessage.includes('MUITAS_TRANSAÇÕES_PENDENTES')) {
+        toast.error(`Erro ao criar depósito`, {
+          description: errorMessage
+        })
+      }
+      
       return null
     } finally {
       setIsLoading(false)
@@ -116,7 +173,7 @@ export function useXGatePayment() {
     try {
       // ✅ VERIFICAÇÃO CACHE LOCAL - Se já foi processada, não verificar novamente
       if (processedTransactionsCache.has(transactionId)) {
-        console.log('🚫 Transação já finalizada no cache local, pulando verificação:', transactionId)
+        // SEM LOG para evitar spam no console
         return {
           status: 'completed',
           transactionId,
@@ -145,10 +202,13 @@ export function useXGatePayment() {
 
       console.log('📊 Status recebido:', data.status)
 
-      // ✅ Se deve parar verificações OU status é completed, adicionar ao cache
+      // ✅ Se deve parar verificações OU status é completed, adicionar ao cache E parar verificações
       if (data.shouldStopChecking || data.status === 'completed' || data.status === 'COMPLETED') {
         console.log('🔒 Adicionando transação ao cache de finalizadas:', transactionId)
         processedTransactionsCache.add(transactionId)
+        
+        // 🛑 PARAR TODAS as verificações desta transação
+        stopAllChecksForTransaction(transactionId)
       }
 
       // Atualizar transação atual se for a mesma
@@ -297,6 +357,11 @@ export function useXGatePayment() {
     monitorPaymentStatus,
     clearCurrentTransaction,
     clearTransactionCache,
-    isTransactionCached
+    isTransactionCached,
+    
+    // 🔧 Controles globais de verificação
+    stopAllChecksForTransaction,
+    registerActiveCheck,
+    stopAllActiveChecks
   }
 } 

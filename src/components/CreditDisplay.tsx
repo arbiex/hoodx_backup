@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { DollarSign, CreditCard, X, ArrowUpDown, Coins } from 'lucide-react'
 import { useCredits } from '@/hooks/useCredits'
 import { useFxaTokens } from '@/hooks/useFxaTokens'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import XGatePaymentModal from './XGatePaymentModal'
 
@@ -35,6 +35,20 @@ export default function CreditDisplay() {
       }))
     }, 500)
   }
+
+  // ✅ Escutar eventos de atualização de saldo FXA
+  useEffect(() => {
+    const handleFxaBalanceUpdate = (event: CustomEvent) => {
+      console.log('💰 Recebido evento de atualização de saldo FXA')
+      refreshFxa()
+    }
+
+    window.addEventListener('fxaBalanceUpdate', handleFxaBalanceUpdate as EventListener)
+    
+    return () => {
+      window.removeEventListener('fxaBalanceUpdate', handleFxaBalanceUpdate as EventListener)
+    }
+  }, [refreshFxa])
 
   // Funções de conversão
   const convertRealToFixa = (realValue: string) => {

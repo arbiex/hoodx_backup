@@ -48,6 +48,7 @@ export default function XGatePaymentModal({
   const [paymentProcessed, setPaymentProcessed] = useState(false)
   const [shouldRefreshBalance, setShouldRefreshBalance] = useState(false)
   const [showHardcodedSuccessModal, setShowHardcodedSuccessModal] = useState(false) // 🔥 Modal que não pode ser fechado por nada
+  const hardcodedModalRef = useRef<boolean>(false) // 🔥 Controle via ref para evitar re-renders
   const successModal = useModal()
 
   // 🔒 SISTEMA ANTI-DUPLICAÇÃO ROBUSTO
@@ -62,6 +63,138 @@ export default function XGatePaymentModal({
   const calculateFixas = useCallback((value: number): number => {
     return Math.floor(value / FIXA_RATE)
   }, [])
+
+  // 🔥 FUNÇÃO PARA CRIAR MODAL HARDCODED DIRETAMENTE NO DOM
+  const createHardcodedSuccessModal = useCallback((transactionAmount: number) => {
+    // Verificar se modal já existe
+    const existingModal = document.getElementById('hardcoded-success-modal')
+    if (existingModal) {
+      existingModal.remove()
+    }
+
+    console.log('🔥 Criando modal hardcoded no DOM diretamente')
+    hardcodedModalRef.current = true
+
+    // Criar modal diretamente no DOM
+    const modalHTML = `
+      <div id="hardcoded-success-modal" style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 999999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(4px);
+      ">
+        <div style="
+          background: #111827;
+          border: 1px solid rgba(34, 197, 94, 0.3);
+          border-radius: 8px;
+          padding: 32px;
+          max-width: 400px;
+          width: 100%;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        ">
+          <div style="text-align: center;">
+            <!-- Success Icon -->
+            <div style="
+              margin: 0 auto 24px auto;
+              width: 80px;
+              height: 80px;
+              background: rgba(34, 197, 94, 0.2);
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            ">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22,4 12,14.01 9,11.01"/>
+              </svg>
+            </div>
+            
+            <!-- Success Message -->
+            <div style="margin-bottom: 24px;">
+              <h2 style="
+                font-size: 32px;
+                font-weight: bold;
+                color: #22c55e;
+                font-family: monospace;
+                margin: 0 0 8px 0;
+              ">
+                🎉 PAGAMENTO CONFIRMADO! 🎉
+              </h2>
+              <p style="
+                color: #d1d5db;
+                font-family: monospace;
+                font-size: 16px;
+                margin: 0;
+              ">
+                Seus tokens foram adicionados à sua conta!
+              </p>
+            </div>
+            
+            <!-- Details -->
+            <div style="
+              background: rgba(34, 197, 94, 0.1);
+              border: 1px solid rgba(34, 197, 94, 0.3);
+              border-radius: 8px;
+              padding: 16px;
+              margin-bottom: 24px;
+            ">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: #9ca3af; font-family: monospace;">VALOR:</span>
+                <span style="color: #22c55e; font-weight: bold; font-family: monospace;">R$ ${transactionAmount.toFixed(2)}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #9ca3af; font-family: monospace;">TOKENS:</span>
+                <span style="color: #a855f7; font-weight: bold; font-family: monospace;">+${calculateFixas(transactionAmount)} FXA</span>
+              </div>
+            </div>
+            
+            <!-- Action Button -->
+            <button id="hardcoded-continue-btn" style="
+              width: 100%;
+              background: rgba(34, 197, 94, 0.2);
+              border: 1px solid rgba(34, 197, 94, 0.5);
+              color: #22c55e;
+              font-family: monospace;
+              font-size: 20px;
+              padding: 16px;
+              border-radius: 8px;
+              cursor: pointer;
+              transition: all 0.2s;
+            " onmouseover="this.style.background='rgba(34, 197, 94, 0.3)'" onmouseout="this.style.background='rgba(34, 197, 94, 0.2)'">
+              🎯 CONTINUAR
+            </button>
+          </div>
+        </div>
+      </div>
+    `
+
+    // Adicionar ao body
+    document.body.insertAdjacentHTML('beforeend', modalHTML)
+
+    // Adicionar event listener no botão
+    const continueBtn = document.getElementById('hardcoded-continue-btn')
+    if (continueBtn) {
+      continueBtn.addEventListener('click', () => {
+        console.log('🔥 Fechando modal hardcoded via DOM')
+        const modal = document.getElementById('hardcoded-success-modal')
+        if (modal) {
+          modal.remove()
+          hardcodedModalRef.current = false
+        }
+      })
+    }
+
+    console.log('🔥 Modal hardcoded criado e adicionado ao DOM')
+  }, [calculateFixas])
 
   // Função para atualizar saldo de tokens FXA
   const triggerBalanceRefresh = useCallback(() => {
@@ -106,12 +239,13 @@ export default function XGatePaymentModal({
     triggerBalanceRefresh()
     console.log('🎉 [DEBUG] Balance refresh acionado')
     
-    // 🔥 FORÇAR MODAL HARDCODED QUE NÃO PODE SER FECHADO POR NADA
-    console.log('🔥 ATIVANDO MODAL HARDCODED!')
-    setShowHardcodedSuccessModal(true)
+    // 🔥 CRIAR MODAL HARDCODED DIRETAMENTE NO DOM (INDESTRUTÍVEL)
+    console.log('🔥 ATIVANDO MODAL HARDCODED VIA DOM!')
+    createHardcodedSuccessModal(amount)
     
-    // NÃO mostrar modal de sucesso do useModal - apenas hardcoded
+    // NÃO mostrar modal de sucesso do useModal - apenas hardcoded via DOM
     // successModal.openModal() // DESABILITADO
+    // setShowHardcodedSuccessModal(true) // DESABILITADO - usando DOM direto
     
     // Chamar callback de sucesso
     if (onSuccess) {
@@ -127,7 +261,7 @@ export default function XGatePaymentModal({
     })
     
     console.log('🎉 [DEBUG] handlePaymentSuccess concluído com sucesso!')
-  }, [autoCheck, triggerBalanceRefresh, successModal, onSuccess, amount, calculateFixas, stopAllChecksForTransaction])
+  }, [autoCheck, triggerBalanceRefresh, successModal, onSuccess, amount, calculateFixas, stopAllChecksForTransaction, createHardcodedSuccessModal])
 
   // Função para copiar para a área de transferência
   const copyToClipboard = useCallback(async (text: string) => {
@@ -290,7 +424,15 @@ export default function XGatePaymentModal({
   // 🔒 RESET COMPLETO ao fechar modal
   useEffect(() => {
     if (!isOpen) {
-      console.log('🚪 Modal fechado - RESET COMPLETO')
+      console.log('🚪 Modal fechado - hardcodedModalRef.current:', hardcodedModalRef.current)
+      
+      // 🔒 BLOQUEIO ABSOLUTO: Se modal hardcoded DOM estiver ativo, NÃO RESETAR
+      if (hardcodedModalRef.current) {
+        console.log('🚫 BLOQUEIO TOTAL: Modal hardcoded DOM ativo - IMPEDINDO reset!')
+        return
+      }
+      
+      console.log('🚪 Executando RESET COMPLETO')
       
       // 🛑 Parar TODAS as verificações
       stopAllActiveChecks()
@@ -332,6 +474,18 @@ export default function XGatePaymentModal({
 
     return () => clearInterval(timer)
       }, [timeLeft])
+
+  // 🧹 Cleanup: Remover modal hardcoded se componente for desmontado
+  useEffect(() => {
+    return () => {
+      const existingModal = document.getElementById('hardcoded-success-modal')
+      if (existingModal) {
+        console.log('🧹 Cleanup: Removendo modal hardcoded DOM')
+        existingModal.remove()
+        hardcodedModalRef.current = false
+      }
+    }
+  }, [])
 
   // Formatar tempo restante
   const formatTimeLeft = (seconds: number): string => {
@@ -398,6 +552,14 @@ export default function XGatePaymentModal({
 
   // 🔒 Fechar modal LIMPANDO TUDO
   const handleClose = useCallback(() => {
+    console.log('🚪 Tentativa de fechar modal - hardcodedModalRef.current:', hardcodedModalRef.current)
+    
+    // 🔒 BLOQUEIO ABSOLUTO: Se modal hardcoded estiver ativo via DOM, NÃO FECHAR
+    if (hardcodedModalRef.current) {
+      console.log('🚫 BLOQUEIO TOTAL: Modal hardcoded DOM ativo - IMPEDINDO fechamento!')
+      return
+    }
+    
     console.log('🚪 Fechando modal e limpando sistema')
     
     // 🛑 Parar TODAS as verificações
@@ -428,11 +590,11 @@ export default function XGatePaymentModal({
 
   // Fechar modal de sucesso
   const handleSuccessClose = useCallback(() => {
-    console.log('🚪 handleSuccessClose chamado, showHardcodedSuccessModal:', showHardcodedSuccessModal)
+    console.log('🚪 handleSuccessClose chamado, hardcodedModalRef.current:', hardcodedModalRef.current)
     
-    // Se o modal hardcoded estiver ativo, NÃO fechar o modal principal
-    if (showHardcodedSuccessModal) {
-      console.log('🔒 Modal hardcoded ativo - NÃO fechando modal principal')
+    // Se o modal hardcoded DOM estiver ativo, NÃO fechar o modal principal
+    if (hardcodedModalRef.current) {
+      console.log('🔒 Modal hardcoded DOM ativo - NÃO fechando modal principal')
       successModal.closeModal()
       return
     }
@@ -440,7 +602,7 @@ export default function XGatePaymentModal({
     // Se não há modal hardcoded, fechar normalmente
     successModal.closeModal()
     handleClose()
-  }, [successModal, handleClose, showHardcodedSuccessModal])
+  }, [successModal, handleClose])
 
   // Status info para exibição
   const getStatusInfo = () => {
@@ -473,7 +635,9 @@ export default function XGatePaymentModal({
       {/* Modal Principal de Pagamento */}
       <Modal
         isOpen={isOpen}
-        onClose={handleClose}
+        onClose={hardcodedModalRef.current ? () => {
+          console.log('🚫 BLOQUEIO: Tentativa de fechar modal com hardcoded DOM ativo - IGNORADO')
+        } : handleClose}
         title={title}
         description={description}
         type="info"
@@ -703,52 +867,7 @@ export default function XGatePaymentModal({
         </div>
       </Modal>
       
-      {/* 🔥 MODAL HARDCODED QUE NÃO PODE SER FECHADO POR NADA */}
-      {showHardcodedSuccessModal && (
-        <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-gray-900 border border-green-500/30 rounded-lg p-8 max-w-md w-full shadow-2xl">
-            <div className="text-center space-y-6">
-              {/* Success Icon */}
-              <div className="mx-auto w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mb-4">
-                <CheckCircle className="h-12 w-12 text-green-400" />
-              </div>
-              
-              {/* Success Message */}
-              <div className="space-y-2">
-                <h2 className="text-3xl font-bold text-green-400 font-mono">
-                  🎉 PAGAMENTO CONFIRMADO! 🎉
-                </h2>
-                <p className="text-gray-300 font-mono text-base">
-                  Seus tokens foram adicionados à sua conta!
-                </p>
-              </div>
-              
-              {/* Details */}
-              <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-gray-400 font-mono">VALOR:</span>
-                  <span className="text-green-400 font-bold font-mono">R$ {amount.toFixed(2)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-400 font-mono">TOKENS:</span>
-                  <span className="text-purple-400 font-bold font-mono">+{calculateFixas(amount)} FXA</span>
-                </div>
-              </div>
-              
-              {/* Action Button */}
-              <Button
-                onClick={() => {
-                  console.log('🔥 FECHANDO MODAL HARDCODED')
-                  setShowHardcodedSuccessModal(false)
-                }}
-                className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono text-xl py-4"
-              >
-                🎯 CONTINUAR
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 🔥 MODAL HARDCODED CRIADO VIA DOM - Nada mais renderizado pelo React */}
     </>
   )
 } 

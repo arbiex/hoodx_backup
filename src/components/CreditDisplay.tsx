@@ -85,12 +85,12 @@ export default function CreditDisplay() {
         <XGatePaymentModal
           isOpen={xgateModalOpen}
           onClose={() => setXgateModalOpen(false)}
-          onSuccess={handlePaymentSuccess}
-          title="PAGAMENTO_PIX"
+        onSuccess={handlePaymentSuccess}
+        title="PAGAMENTO_PIX"
           description="Complete sua compra via PIX - XGATE Global"
           amount={paymentAmount}
           userId={user.id}
-        />
+      />
       )}
     </>
   )

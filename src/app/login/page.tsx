@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -21,5 +21,17 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center">
       <div className="text-green-400 font-mono">Redirecionando...</div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-green-400 font-mono">Carregando...</div>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   )
 } 

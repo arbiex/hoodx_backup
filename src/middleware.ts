@@ -46,7 +46,7 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     '/api/bmgbr/:path*',
-    '/api/bmgbr2/:path*',
-    '/api/bmgbr3/:path*'  // 🎯 ADICIONADO: bmgbr3 estava faltando
+    '/api/bmgbr2-old/:path*',
+    '/api/bmgbr3/:path*'
   ]
 }; 

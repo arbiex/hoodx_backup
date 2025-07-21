@@ -423,7 +423,7 @@ export default function Dashboard() {
 
   // Função para ativar/parar o bot
   const handleNavigateToBot = () => {
-    router.push('/bmgbr2')
+    router.push('/bmgbr3')
   }
 
   const handleBotToggle = async () => {

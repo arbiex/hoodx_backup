@@ -460,6 +460,8 @@ export default function BMGBR3() {
     }
   }, []);
 
+
+
   // 🚀 REMOVIDO: Função de progressão automática não aplicável à nova lógica
 
     // 📱 RESPONSIVO: Detectar mobile e ajustar número de resultados
@@ -3540,6 +3542,15 @@ export default function BMGBR3() {
                 <div className="text-xs text-gray-400 font-mono">
                   Ajuste o multiplicador da banca (1x a 5x)
                 </div>
+                
+                {/* Aviso quando bloqueado */}
+                {isOperating && (
+                  <div className="p-2 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                    <div className="text-xs text-orange-400 font-mono flex items-center gap-1">
+                      🔒 Multiplicador bloqueado durante operação ativa
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-3">
                   {/* Multiplicador */}
@@ -3551,7 +3562,7 @@ export default function BMGBR3() {
     setStakeMultiplier(newMultiplier);
     updateStakeMultiplier(newMultiplier);
                         }}
-                        disabled={stakeMultiplier <= 1}
+                        disabled={stakeMultiplier <= 1 || isOperating}
                         className="w-8 h-8 sm:w-10 sm:h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                       >
                         -
@@ -3569,7 +3580,8 @@ export default function BMGBR3() {
                         setStakeMultiplier(value);
                         updateStakeMultiplier(value);
                       }}
-                      className="w-full h-8 sm:h-10 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center text-white font-mono text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      disabled={isOperating}
+                      className="w-full h-8 sm:h-10 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center text-white font-mono text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                       placeholder="1-5x"
                     />
                       
@@ -3580,13 +3592,15 @@ export default function BMGBR3() {
     setStakeMultiplier(newMultiplier);
     updateStakeMultiplier(newMultiplier);
                         }}
-                        disabled={stakeMultiplier >= 5}
+                        disabled={stakeMultiplier >= 5 || isOperating}
                         className="w-8 h-8 sm:w-10 sm:h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                       >
                         +
                       </button>
                     </div>
                   </div>
+                  
+                  
                   
                   {/* Tabela de Todos os Níveis */}
                   <div className="mt-4 pt-4 border-t border-gray-600/30">
@@ -3701,13 +3715,15 @@ export default function BMGBR3() {
       </Modal>
 
       {/* Modal de Controle de Sessão */}
-      <SessionControlModal
+            <SessionControlModal 
         isOpen={showSessionModal}
         onTakeControl={takeControl}
         onStayInactive={stayInactive}
         activeSessionInfo={activeSessionInfo}
         wasControlTaken={wasControlTaken}
       />
+
+      
 
       {/* Modal de Estratégia Removido - Agora usamos diretamente o card CONFIGURAR_BANCA */}
     </div>

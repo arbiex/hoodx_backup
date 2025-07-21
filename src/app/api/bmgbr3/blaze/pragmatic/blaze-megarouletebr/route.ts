@@ -865,14 +865,42 @@ export async function POST(request: NextRequest) {
             const level = STAKE_LEVELS.find(l => l.level === selectedLevel) || STAKE_LEVELS[0];
             operationState[userId].currentLevel = level.level;
             addWebSocketLog(userId, `💰 Nível atualizado: Nível ${level.level} - M1: R$ ${level.m1.toFixed(2)}, M2: R$ ${level.m2.toFixed(2)}`, 'success');
-        }
+          }
         
           // Atualizar multiplicador se fornecido
-                if (stakeMultiplier && stakeMultiplier >= 1 && stakeMultiplier <= 5) {
-        operationState[userId].stakeMultiplier = stakeMultiplier;
-                    addWebSocketLog(userId, `🔢 Multiplicador atualizado: ${stakeMultiplier}x`, 'success');
+          if (stakeMultiplier && stakeMultiplier >= 1 && stakeMultiplier <= 5) {
+            operationState[userId].stakeMultiplier = stakeMultiplier;
+            addWebSocketLog(userId, `🔢 Multiplicador atualizado: ${stakeMultiplier}x`, 'success');
+          } else if (stakeMultiplier) {
+            addWebSocketLog(userId, `❌ Multiplicador inválido: ${stakeMultiplier}x (deve ser entre 1x e 5x)`, 'error');
+          }
+        } else {
+          // Criar estado se não existir (para permitir configuração antes de conectar)
+          if (userId) {
+            operationState[userId] = {
+              active: false,
+              martingaleLevel: 0,
+              waitingForResult: false,
+              strategy: {
+                sequences: [0.5, 1],
+                maxMartingale: 2
+              },
+              currentLevel: 1,
+              stakeMultiplier: stakeMultiplier || 1,
+              stats: {
+                totalBets: 0,
+                wins: 0,
+                losses: 0,
+                profit: 0,
+                startedAt: Date.now()
+              },
+              m4DirectBetType: 'await',
+              waitingForTrigger: false,
+              triggerDetected: false
+            };
+            addWebSocketLog(userId, `🔧 Estado criado - Multiplicador configurado: ${stakeMultiplier || 1}x`, 'success');
           } else {
-          addWebSocketLog(userId, `❌ Estado da operação não encontrado para atualizar multiplicador`, 'error');
+            addWebSocketLog(userId, `❌ UserId não fornecido para atualizar multiplicador`, 'error');
           }
         }
         
@@ -950,26 +978,29 @@ export async function POST(request: NextRequest) {
             }, { status: 400 });
           }
           
-                     // 🔥 NOVO: Resetar quando trocar tipo de aposta (exceto se continuar em 'await')
+                                                  // 🔥 NOVO: Resetar estado da operação quando trocar tipo de aposta (mas preservar banca)
            const shouldReset = previousBetType !== newBetType && newBetType !== 'await';
            
            if (shouldReset) {
+             // 🔧 CORREÇÃO: Salvar multiplicador antes do reset
+             const savedMultiplier = operationState[userId].stakeMultiplier || 1;
+             
              // Resetar estado da operação
              operationState[userId].martingaleLevel = 0;
              operationState[userId].waitingForResult = false;
              operationState[userId].currentBetColor = undefined;
              operationState[userId].lastBetAmount = undefined;
              
-             // 🚀 NOVO: Resetar para nível 1 e multiplicador 1x
+             // 🚀 NOVO: Resetar para nível 1 mas PRESERVAR multiplicador
              operationState[userId].currentLevel = 1;
-             operationState[userId].stakeMultiplier = 1;
+             operationState[userId].stakeMultiplier = savedMultiplier;
              
              // ⏰ SISTEMA SIMPLIFICADO: Flags de trigger não são mais necessárias
              // Sistema de janela de 10 segundos no frontend substitui trigger detection
              
              // 🎯 NOVO: NÃO resetar estatísticas ao trocar tipo - apenas ao iniciar nova operação
              
-   
+             addWebSocketLog(userId, `🔧 Estado resetado - Multiplicador preservado: ${savedMultiplier}x`, 'success');
            }
            
           // Atualizar tipo de aposta no estado da operação
@@ -2635,6 +2666,9 @@ async function startSimpleOperation(userId: string) {
     // 🚀 INICIALIZAÇÃO RÁPIDA: Criar estado limpo otimizado
     console.log('🧹 Inicializando estado otimizado para usuário:', userId);
     
+    // 🔧 CORREÇÃO: Preservar multiplicador existente antes de recriar estado
+    const existingMultiplier = operationState[userId]?.stakeMultiplier || 1;
+    
     // Criar estado limpo sem lógica pesada
     operationState[userId] = {
       active: true,
@@ -2648,7 +2682,7 @@ async function startSimpleOperation(userId: string) {
         maxMartingale: 2
       },
       currentLevel: 1,
-      stakeMultiplier: 1,
+      stakeMultiplier: existingMultiplier,
       stats: {
         totalBets: 0,
         wins: 0,

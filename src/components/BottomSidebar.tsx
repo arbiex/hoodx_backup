@@ -27,10 +27,8 @@ export default function BottomSidebar() {
   const [isAgent, setIsAgent] = useState<boolean>(false)
   const [agentLoading, setAgentLoading] = useState(true)
   
-  // Ocultar sidebar nas páginas de jogos
-  if (pathname === '/bmgbr3' || pathname === '/bmgbr' || pathname === '/bmgbr2') {
-    return null
-  }
+  // Verificar se deve ocultar sidebar (DEPOIS dos hooks para evitar erro de hooks)
+  const shouldHide = pathname === '/bmgbr3' || pathname === '/bmgbr' || pathname === '/bmgbr2-old'
 
   // Verificar se o usuário é um agente (ativo ou inativo)
   useEffect(() => {
@@ -67,6 +65,11 @@ export default function BottomSidebar() {
 
     checkAgentStatus()
   }, [])
+
+  // 🚨 CORREÇÃO: Return condicional DEPOIS dos hooks para evitar erro "fewer hooks than expected"
+  if (shouldHide) {
+    return null
+  }
 
   const navigationItems: NavigationItem[] = [
     {

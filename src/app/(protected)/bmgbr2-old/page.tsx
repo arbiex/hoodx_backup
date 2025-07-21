@@ -4,7 +4,7 @@
  * Esta é uma cópia da página BMGBR original para testar novas funcionalidades
  * sem interferir no sistema em produção.
  * 
- * API: /api/bmgbr2/blaze/pragmatic/blaze-megarouletebr
+ * API: /api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr
  * Página: /bmgbr2
  */
 'use client';
@@ -348,7 +348,7 @@ export default function BMGBR2() {
         return;
       }
 
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetchWithCacheBusting('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -734,7 +734,7 @@ export default function BMGBR2() {
       setInsightsLoading(true);
       setInsightsError(null);
 
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights', {
+      const response = await fetchWithCacheBusting('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr/insights', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json'
@@ -767,7 +767,7 @@ export default function BMGBR2() {
     try {
       setInsightsLoading(true);
 
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights', {
+      const response = await fetchWithCacheBusting('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr/insights', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json'
@@ -821,7 +821,7 @@ export default function BMGBR2() {
     if (!user) return;
 
     try {
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights', {
+      const response = await fetchWithCacheBusting('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr/insights', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json'
@@ -1787,7 +1787,7 @@ export default function BMGBR2() {
       // 🤖 REMOVIDO: Log de oportunidades não é mais necessário - usa contadores em tempo real
 
       // ✅ ETAPA 1: Buscar token da Blaze
-      const tokenResponse = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const tokenResponse = await fetch('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1848,7 +1848,7 @@ export default function BMGBR2() {
       // ✅ Debug: Mostrar que os tokens foram atualizados
       
       // ✅ ETAPA 3: Conectar usando tokens gerados via Edge Function
-      const connectResponse = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const connectResponse = await fetchWithCacheBusting('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1901,7 +1901,7 @@ export default function BMGBR2() {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // ✅ ETAPA 2: Iniciar operação (start-operation)
-      const operationResponse = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const operationResponse = await fetchWithCacheBusting('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1953,7 +1953,7 @@ export default function BMGBR2() {
           throw new Error('Usuário não autenticado');
         }
         
-        const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetchWithCacheBusting('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -2039,7 +2039,7 @@ export default function BMGBR2() {
     while (monitoringRef.current) {
     try {
       // 🚀 OTIMIZADO: Agora o backend inclui operation report no get-websocket-logs
-      const response = await fetchWithCacheBusting('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetchWithCacheBusting('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2146,7 +2146,7 @@ export default function BMGBR2() {
   // Buscar relatório
   const fetchOperationReport = async () => {
     try {
-      const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2168,7 +2168,7 @@ export default function BMGBR2() {
   // Reset relatório
   const resetOperationReport = async () => {
     try {
-      const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+      const response = await fetch('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2190,7 +2190,7 @@ export default function BMGBR2() {
   // 2. Função para atualizar o backend sempre que o switch mudar
   useEffect(() => {
     if (!userIdRef.current) return;
-          fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+          fetch('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2216,7 +2216,7 @@ export default function BMGBR2() {
 
     const updateBetType = async () => {
       try {
-        const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetch('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2293,7 +2293,7 @@ export default function BMGBR2() {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
           
-          const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+          const response = await fetch('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2438,7 +2438,7 @@ export default function BMGBR2() {
 
       // Se há operação ativa OU aguardando resultado, aguarda derrota para aplicar
       if (isOperating || operationState?.waitingForResult) {
-        const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetch('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2461,7 +2461,7 @@ export default function BMGBR2() {
         }
       } else {
         // Se não há operação, aplica imediatamente no backend também
-        const response = await fetch('/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr', {
+        const response = await fetch('/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

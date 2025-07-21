@@ -949,7 +949,7 @@ async function checkForNewResults(userId: string): Promise<void> {
 
     
     // 🎯 SOLUÇÃO: Usar getBaseUrl() para funcionar tanto no localhost quanto em produção
-    const response = await fetch(`${getBaseUrl()}/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights`, {
+    const response = await fetch(`${getBaseUrl()}/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr/insights`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

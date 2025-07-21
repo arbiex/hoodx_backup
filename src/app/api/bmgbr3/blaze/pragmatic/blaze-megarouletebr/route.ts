@@ -11,7 +11,7 @@ import { getBaseUrl } from '@/lib/utils';
 
 interface MegaRouletteConfig {
   userId: string;
-  action?: 'bet-connect' | 'connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic' | 'get-sessions-history' | 'blaze-proxy' | 'pragmatic-proxy' | 'debug-auth' | 'get-blaze-token' | 'frontend-auth' | 'generate-client-tokens' | 'generate-tokens' | 'update-strategy' | 'update-stake' | 'update-bet-type' | 'force-check-api-results' | 'set-pending-stake' | 'update-auto-progression' | 'activate-real-mode';
+  action?: 'bet-connect' | 'connect' | 'start-operation' | 'stop-operation' | 'get-websocket-logs' | 'get-operation-report' | 'reset-operation-report' | 'get-connection-status' | 'server-diagnostic' | 'get-sessions-history' | 'blaze-proxy' | 'pragmatic-proxy' | 'debug-auth' | 'get-blaze-token' | 'frontend-auth' | 'generate-client-tokens' | 'generate-tokens' | 'update-strategy' | 'update-stake' | 'update-bet-type' | 'force-check-api-results' | 'set-pending-stake' | 'update-auto-progression' | 'activate-real-mode' | 'get-memory-stats' | 'cleanup-memory' | 'process-unified-result' | 'execute-immediate-bet';
   forceClientSideAuth?: boolean;
   blazeToken?: string;
   selectedCurrencyType?: string;
@@ -68,6 +68,7 @@ const operationState: { [userId: string]: {
   // 🎯 NOVA ESTRATÉGIA: Repetição Inteligente
   waitingForTrigger: boolean; // Aguardando o resultado desejado aparecer
   triggerDetected: boolean; // Resultado desejado foi detectado, agora apostar para repetir
+  justMadeImmediateBet?: boolean; // Flag para ignorar próximo resultado após aposta imediata
 } } = {};
 
 const activeWebSockets: { [userId: string]: {
@@ -104,6 +105,9 @@ const bettingWindowState: { [userId: string]: {
   lastUpdate: number;
 } } = {};
 
+// 🎯 NOVO: Armazenar gameId atual das apostas abertas
+const currentBettingGameId: { [userId: string]: string } = {};
+
 // 🚀 REMOVIDO: Estado global para progressão automática - funcionalidade removida
 
 // ✅ NOVO: Tracking da primeira aposta realizada após conexão
@@ -131,6 +135,273 @@ const detailedHistory: { [userId: string]: Array<{
 }> } = {};
 
 const reconnectionTimers: { [userId: string]: NodeJS.Timeout } = {};
+
+// 🕐 FUNÇÃO DE LIMPEZA: Previne memory leaks de timers globais
+function cleanupUserTimers(userId: string): void {
+  let clearedCount = 0;
+  
+  // Limpar timer de auto-renewal
+  if (autoRenewalIntervals[userId]) {
+    clearInterval(autoRenewalIntervals[userId]);
+    delete autoRenewalIntervals[userId];
+    clearedCount++;
+  }
+  
+  // Limpar timer de reconexão
+  if (reconnectionTimers[userId]) {
+    clearTimeout(reconnectionTimers[userId]);
+    delete reconnectionTimers[userId];
+    clearedCount++;
+  }
+  
+  // Log apenas se houve limpeza (evita spam)
+  if (clearedCount > 0) {
+    console.log(`🕐 [CLEANUP] ${clearedCount} timers limpos para usuário ${userId.substring(0, 8)}...`);
+  }
+}
+
+// 🕐 FUNÇÃO GLOBAL: Limpar todos os timers órfãos (manutenção)
+function cleanupOrphanedTimers(): number {
+  let totalCleared = 0;
+  
+  // Limpar todos os auto-renewal intervals
+  Object.keys(autoRenewalIntervals).forEach(userId => {
+    clearInterval(autoRenewalIntervals[userId]);
+    delete autoRenewalIntervals[userId];
+    totalCleared++;
+  });
+  
+  // Limpar todos os reconnection timers
+  Object.keys(reconnectionTimers).forEach(userId => {
+    clearTimeout(reconnectionTimers[userId]);
+    delete reconnectionTimers[userId];
+    totalCleared++;
+  });
+  
+  if (totalCleared > 0) {
+    console.log(`🕐 [GLOBAL-CLEANUP] ${totalCleared} timers órfãos limpos`);
+  }
+  
+  return totalCleared;
+}
+
+// 🧹 SISTEMA COMPLETO DE LIMPEZA DE MEMORY LEAKS
+interface MemoryUsageStats {
+  totalUsers: number;
+  totalArrayItems: number;
+  totalObjectKeys: number;
+  largestArrays: { userId: string; type: string; size: number }[];
+  memoryScore: number; // 0-100 (100 = crítico)
+}
+
+// Limites de segurança para prevenir memory leaks
+const MEMORY_LIMITS = {
+  MAX_WEBSOCKET_LOGS_PER_USER: 1000,
+  MAX_GAME_RESULTS_PER_USER: 500,
+  MAX_DETAILED_HISTORY_PER_USER: 1000,
+  MAX_USERS_TOTAL: 100, // Limite total de usuários simultâneos
+  CLEANUP_THRESHOLD_HOURS: 6, // Limpar dados de usuários inativos há 6h
+  CRITICAL_MEMORY_SCORE: 80 // Score acima de 80 = crítico
+};
+
+// 🧹 Função para limpar arrays específicos de um usuário
+function cleanupUserArrays(userId: string, limits?: Partial<typeof MEMORY_LIMITS>): number {
+  const actualLimits = { ...MEMORY_LIMITS, ...limits };
+  let itemsRemoved = 0;
+  
+  // 1. Limpar websocket logs (manter apenas os mais recentes)
+  if (websocketLogs[userId]?.length > actualLimits.MAX_WEBSOCKET_LOGS_PER_USER) {
+    const excess = websocketLogs[userId].length - actualLimits.MAX_WEBSOCKET_LOGS_PER_USER;
+    websocketLogs[userId].splice(0, excess); // Remove do início (mais antigos)
+    itemsRemoved += excess;
+  }
+  
+  // 2. Limpar game results (manter apenas os mais recentes)  
+  if (gameResults[userId]?.length > actualLimits.MAX_GAME_RESULTS_PER_USER) {
+    const excess = gameResults[userId].length - actualLimits.MAX_GAME_RESULTS_PER_USER;
+    gameResults[userId].splice(0, excess);
+    itemsRemoved += excess;
+  }
+  
+  // 3. Limpar detailed history (manter apenas os mais recentes)
+  if (detailedHistory[userId]?.length > actualLimits.MAX_DETAILED_HISTORY_PER_USER) {
+    const excess = detailedHistory[userId].length - actualLimits.MAX_DETAILED_HISTORY_PER_USER;
+    detailedHistory[userId].splice(0, excess);
+    itemsRemoved += excess;
+  }
+  
+  return itemsRemoved;
+}
+
+// 🧹 Função para remover completamente dados de usuários inativos
+function cleanupInactiveUsers(hoursThreshold: number = MEMORY_LIMITS.CLEANUP_THRESHOLD_HOURS): number {
+  const cutoffTime = Date.now() - (hoursThreshold * 60 * 60 * 1000);
+  let usersRemoved = 0;
+  
+  // Identificar usuários inativos baseado em última atividade
+  const allUserIds = new Set<string>();
+  
+  // Coletar todos os userIds das diferentes estruturas
+  Object.keys(connectionStatus).forEach(id => allUserIds.add(id));
+  Object.keys(operationState).forEach(id => allUserIds.add(id));
+  Object.keys(activeWebSockets).forEach(id => allUserIds.add(id));
+  Object.keys(sessionControl).forEach(id => allUserIds.add(id));
+  
+  allUserIds.forEach(userId => {
+    // 🛡️ PROTEÇÃO: Não remover usuários que têm conexão ativa ou WebSocket ativo
+    const hasActiveConnection = connectionStatus[userId]?.connected || activeWebSockets[userId] != null;
+    
+    // 🛡️ PROTEÇÃO ADICIONAL: Não remover se há operação recentemente ativa (últimos 60 minutos)
+    const recentOperationActivity = operationState[userId]?.stats?.startedAt || 0;
+    const sixtyMinutesAgo = Date.now() - (60 * 60 * 1000);
+    const hasRecentOperation = recentOperationActivity > sixtyMinutesAgo;
+    
+    if (hasActiveConnection || hasRecentOperation) {
+      // 🔥 Usuário ativo ou com operação recente - NÃO LIMPAR
+              // 🛡️ Proteção silenciosa - logs removidos para reduzir verbosidade
+      return;
+    }
+    
+    // Verificar se usuário está realmente inativo (apenas se não tem conexão nem operação recente)
+    const lastActivity = Math.max(
+      connectionStatus[userId]?.lastUpdate || 0,
+      activeWebSockets[userId]?.lastActivity || 0,
+      sessionControl[userId]?.lastRenewal || 0,
+      operationState[userId]?.stats?.startedAt || 0
+    );
+    
+    if (lastActivity > 0 && lastActivity < cutoffTime) {
+      // Usuário inativo há mais de X horas, sem conexão e sem operação recente
+      // Log de remoção silencioso - verbosidade reduzida
+      cleanupAllUserData(userId);
+      usersRemoved++;
+    }
+  });
+  
+  return usersRemoved;
+}
+
+// 🧹 Função para limpar TODOS os dados de um usuário específico
+function cleanupAllUserData(userId: string): void {
+  // 🛡️ PROTEÇÃO FINAL: Verificar se usuário realmente deve ser limpo
+  const hasActiveConnection = connectionStatus[userId]?.connected || activeWebSockets[userId] != null;
+  if (hasActiveConnection) {
+    console.warn(`🚨 [CLEANUP] TENTATIVA DE LIMPAR USUÁRIO COM CONEXÃO ATIVA BLOQUEADA: ${userId.substring(0, 8)}...`);
+    return;
+  }
+  
+  // Log de limpeza silencioso - verbosidade reduzida
+  
+  // Arrays de dados
+  delete websocketLogs[userId];
+  delete gameResults[userId];
+  delete detailedHistory[userId];
+  
+  // Estados e controles
+  delete connectionStatus[userId];
+  delete operationState[userId];
+  delete activeWebSockets[userId];
+  delete sessionControl[userId];
+  delete reconnectionControl[userId];
+  delete bettingWindowState[userId];
+  
+  // Flags e controles simples
+  delete isFirstConnection[userId];
+  delete firstBetTimestamp[userId];
+  delete shouldTryImmediateBet[userId];
+  delete awaitModeLogShown[userId];
+  delete renewalControl[userId];
+  delete autoRenewal[userId];
+  delete renewalInProgress[userId];
+  
+  // Timers (já tratado em cleanupUserTimers)
+  cleanupUserTimers(userId);
+}
+
+// 📊 Função para calcular estatísticas de uso de memória
+function calculateMemoryUsage(): MemoryUsageStats {
+  let totalArrayItems = 0;
+  let totalObjectKeys = 0;
+  const largestArrays: { userId: string; type: string; size: number }[] = [];
+  
+  // Contar items em arrays
+  Object.keys(websocketLogs).forEach(userId => {
+    const size = websocketLogs[userId]?.length || 0;
+    totalArrayItems += size;
+    if (size > 100) largestArrays.push({ userId: userId.substring(0, 8) + '...', type: 'websocketLogs', size });
+  });
+  
+  Object.keys(gameResults).forEach(userId => {
+    const size = gameResults[userId]?.length || 0;
+    totalArrayItems += size;
+    if (size > 100) largestArrays.push({ userId: userId.substring(0, 8) + '...', type: 'gameResults', size });
+  });
+  
+  Object.keys(detailedHistory).forEach(userId => {
+    const size = detailedHistory[userId]?.length || 0;
+    totalArrayItems += size;
+    if (size > 100) largestArrays.push({ userId: userId.substring(0, 8) + '...', type: 'detailedHistory', size });
+  });
+  
+  // Contar chaves de objetos
+  totalObjectKeys += Object.keys(connectionStatus).length;
+  totalObjectKeys += Object.keys(operationState).length;
+  totalObjectKeys += Object.keys(activeWebSockets).length;
+  totalObjectKeys += Object.keys(sessionControl).length;
+  totalObjectKeys += Object.keys(reconnectionControl).length;
+  totalObjectKeys += Object.keys(bettingWindowState).length;
+  totalObjectKeys += Object.keys(isFirstConnection).length;
+  totalObjectKeys += Object.keys(firstBetTimestamp).length;
+  totalObjectKeys += Object.keys(shouldTryImmediateBet).length;
+  totalObjectKeys += Object.keys(awaitModeLogShown).length;
+  
+  // Calcular score de memória (0-100)
+  const memoryScore = Math.min(100, Math.floor(
+    (totalArrayItems / 10000 * 60) + // Arrays são o maior risco
+    (totalObjectKeys / 100 * 40)     // Objetos têm menor impacto
+  ));
+  
+  // Ordenar maiores arrays
+  largestArrays.sort((a, b) => b.size - a.size);
+  
+  return {
+    totalUsers: new Set([
+      ...Object.keys(connectionStatus),
+      ...Object.keys(operationState),
+      ...Object.keys(activeWebSockets)
+    ]).size,
+    totalArrayItems,
+    totalObjectKeys,
+    largestArrays: largestArrays.slice(0, 10), // Top 10
+    memoryScore
+  };
+}
+
+// 🚨 Função de limpeza de emergência para situações críticas
+function emergencyMemoryCleanup(): number {
+  console.warn('🚨 [EMERGENCY] Executando limpeza de emergência de memória!');
+  
+  let totalCleaned = 0;
+  
+  // 1. Limpar usuários inativos (mais agressivo - 2h ao invés de 6h)
+  totalCleaned += cleanupInactiveUsers(2);
+  
+  // 2. Limpar arrays de todos os usuários ativos (limites mais restritivos)
+  Object.keys(websocketLogs).forEach(userId => {
+    totalCleaned += cleanupUserArrays(userId, {
+      MAX_WEBSOCKET_LOGS_PER_USER: 100, // Reduzir drasticamente
+      MAX_GAME_RESULTS_PER_USER: 50,
+      MAX_DETAILED_HISTORY_PER_USER: 100
+    });
+  });
+  
+  // 3. Limpar todos os timers órfãos
+  totalCleaned += cleanupOrphanedTimers();
+  
+  console.warn(`🚨 [EMERGENCY] Limpeza concluída: ${totalCleaned} items removidos`);
+  
+  return totalCleaned;
+}
 
 function addDetailedHistoryEntry(userId: string, entry: {
   martingaleLevel: number;
@@ -164,8 +435,9 @@ function addDetailedHistoryEntry(userId: string, entry: {
   
   detailedHistory[userId].push(historyEntry);
   
-  if (detailedHistory[userId].length > 1000) {
-    detailedHistory[userId] = detailedHistory[userId].slice(-1000);
+  // 🧹 Aplicar limite centralizado automaticamente
+  if (detailedHistory[userId].length > MEMORY_LIMITS.MAX_DETAILED_HISTORY_PER_USER) {
+    detailedHistory[userId] = detailedHistory[userId].slice(-MEMORY_LIMITS.MAX_DETAILED_HISTORY_PER_USER);
   }
   
   // Log removido: informação técnica desnecessária
@@ -573,7 +845,7 @@ export async function POST(request: NextRequest) {
           // Atualizar multiplicador se fornecido
                 if (stakeMultiplier && stakeMultiplier >= 1 && stakeMultiplier <= 5) {
         operationState[userId].stakeMultiplier = stakeMultiplier;
-        addWebSocketLog(userId, `🔢 Multiplicador atualizado: ${stakeMultiplier}x (todos os valores serão multiplicados automaticamente)`, 'success');
+                    addWebSocketLog(userId, `🔢 Multiplicador atualizado: ${stakeMultiplier}x`, 'success');
           } else {
           addWebSocketLog(userId, `❌ Estado da operação não encontrado para atualizar multiplicador`, 'error');
           }
@@ -600,11 +872,11 @@ export async function POST(request: NextRequest) {
       case 'activate-real-mode':
         // 🛡️ NOVO: Ativar modo real automaticamente quando status melhorar
         if (userId && operationState[userId]?.active) {
-          addWebSocketLog(userId, `🛡️ Comando recebido: ativar modo real automaticamente`, 'success');
+          
           
           // 🔥 NOVO: Verificar se é modo M4 direto
           if (requestBody.m4DirectBetType) {
-            addWebSocketLog(userId, `🔥 MODO M4 DIRETO ATIVADO! Ignorando todos os limiares`, 'success');
+            // Log de modo M4 removido - informação técnica desnecessária
             
             // Forçar saída do modo análise e ativar modo real imediatamente
             const operation = operationState[userId];
@@ -621,7 +893,7 @@ export async function POST(request: NextRequest) {
               operation.m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
               'ALTAS (19-36)';
             
-            addWebSocketLog(userId, `🚀 MODO M4 DIRETO ATIVADO! Apostando em ${betTypeLabel} direto no M1 → Objetivo: acertar M4`, 'success');
+            // Log de ativação do modo M4 removido - informação técnica desnecessária
           } else {
             // Lógica normal para status seguro
             const operation = operationState[userId];
@@ -667,26 +939,28 @@ export async function POST(request: NextRequest) {
              operationState[userId].currentLevel = 1;
              operationState[userId].stakeMultiplier = 1;
              
-             // Resetar flags de trigger
-             operationState[userId].waitingForTrigger = true;
-             operationState[userId].triggerDetected = false;
+             // ⏰ SISTEMA SIMPLIFICADO: Flags de trigger não são mais necessárias
+             // Sistema de janela de 10 segundos no frontend substitui trigger detection
              
              // 🎯 NOVO: NÃO resetar estatísticas ao trocar tipo - apenas ao iniciar nova operação
              
-             addWebSocketLog(userId, `🔄 RESET: Mudança de aposta detectada → Reiniciando Repetição Inteligente`, 'success');
+   
            }
            
           // Atualizar tipo de aposta no estado da operação
           operationState[userId].m4DirectBetType = newBetType;
           
+          // 🎯 GARANTIR: Configurar estado para aguardar trigger
+          if (newBetType !== 'await') {
+            operationState[userId].waitingForTrigger = true;
+            operationState[userId].triggerDetected = false;
+          }
+          
           // 🎯 NOVO: Se estava com missão cumprida, reativar operação
           if (operationState[userId].missionCompleted) {
             operationState[userId].missionCompleted = false;
             operationState[userId].active = true;
-            operationState[userId].waitingForTrigger = true;
-            operationState[userId].triggerDetected = false;
-            addWebSocketLog(userId, `🔄 Reativando operação após missão cumprida`, 'info');
-            addWebSocketLog(userId, `✅ Sistema desbloqueado - pronto para novas apostas`, 'success');
+
           }
           
           // 🎯 NOVO: Garantir que operação esteja ativa ao trocar tipo
@@ -695,18 +969,17 @@ export async function POST(request: NextRequest) {
             addWebSocketLog(userId, `🚀 Ativando operação para novo tipo`, 'info');
           }
           
+          // Logs de configuração removidos - sistema estabilizado
+          
+          // 🔥 ATUALIZAR: Timestamp para manter usuário ativo
+          if (operationState[userId].stats) {
+            operationState[userId].stats.startedAt = Date.now();
+          }
+          
           // 🎯 NOVO: Verificar imediatamente se o último resultado já é o trigger desejado
           if (newBetType !== 'await' && gameResults[userId] && gameResults[userId].length > 0) {
-            const lastResult = gameResults[userId][gameResults[userId].length - 1];
-            const shouldTrigger = checkTriggerMatch(newBetType, lastResult.color, lastResult.number);
-            
-            if (shouldTrigger) {
-              operationState[userId].triggerDetected = true;
-              operationState[userId].waitingForTrigger = false;
-              
-              const betTypeName = getBetTypeName(newBetType);
-              addWebSocketLog(userId, `🎯 TRIGGER IMEDIATO! ${betTypeName} detectado no último resultado (${lastResult.number}) - Próxima rodada irá apostar`, 'success');
-            }
+            // ⏰ SISTEMA SIMPLIFICADO: Lógica de timing movida para frontend (janela de 10s)
+            // Trigger detection complexa removida - frontend controla quando apostar
           }
           
           // 🔄 NOVO: Resetar controle de log do modo aguardar quando tipo muda
@@ -728,34 +1001,14 @@ export async function POST(request: NextRequest) {
              addWebSocketLog(userId, `🎯 NOVO TIPO: ${typeName} → Iniciando monitoramento`, 'success');
            }
            
-           // 🎯 NOVO: Mostrar log de monitoramento imediatamente se não for 'await'
+           // 🚀 NOVO: Iniciar polling para processar resultados se não for 'await'
            if (newBetType !== 'await') {
-             addWebSocketLog(userId, `👁️ MONITORANDO ${typeName} - Aguardando resultado aparecer para apostar`, 'info');
-             // 🚀 NOVO: Iniciar polling para processar resultados
              await startApiPolling(userId);
            }
            
-           // 🚀 NOVO: Se mudou de 'await' para outro tipo, tentar apostar imediatamente se apostas estiverem abertas
-           if (previousBetType === 'await' && newBetType !== 'await' && operationState[userId]?.active) {
-             // Verificar se há uma janela de apostas ativa e WebSocket conectado
-             const wsConnection = activeWebSockets[userId];
-             if (wsConnection?.ws && connectionStatus[userId]?.connected) {
-               setTimeout(async () => {
-                 try {
-                   // Obter gameId atual da operação ou do último jogo
-                   const currentGameId = operationState[userId]?.lastGameId;
-                   if (currentGameId) {
-                     // Tentar fazer aposta imediata se condições permitirem
-                     await executeSimpleBet(userId, currentGameId, wsConnection.ws);
-                     addWebSocketLog(userId, `⚡ APOSTA IMEDIATA: Transição de aguardar → ${typeName}`, 'success');
-                   }
-                 } catch (error) {
-                   // Se não conseguir apostar agora, apostará no próximo ciclo normalmente
-                   console.log('Aposta imediata não disponível, aguardando próximo ciclo');
-                 }
-               }, 100); // Delay mínimo para garantir que a atualização foi processada
-             }
-           }
+           // 🚀 REMOVIDO: Lógica de aposta imediata que causava o bug
+           // Agora o sistema só aposta quando realmente detecta o trigger
+           // A aposta imediata será feita apenas via frontend com execute-immediate-bet
            
            return NextResponse.json({
              success: true,
@@ -849,6 +1102,192 @@ export async function POST(request: NextRequest) {
           });
         }
       
+      case 'get-memory-stats':
+        // 📊 NOVO: Obter estatísticas de uso de memória
+        try {
+          const memoryStats = calculateMemoryUsage();
+          return NextResponse.json({
+            success: true,
+            data: memoryStats
+          });
+        } catch (error) {
+          return NextResponse.json({
+            success: false,
+            error: 'Erro ao calcular estatísticas de memória'
+          }, { status: 500 });
+        }
+      
+      case 'cleanup-memory':
+        // 🧹 NOVO: Forçar limpeza de memória
+        try {
+          let totalCleaned = 0;
+          
+          // Determinar tipo de limpeza baseado em parâmetros
+          const { type = 'normal', hoursThreshold } = requestBody;
+          
+          if (type === 'emergency') {
+            totalCleaned = emergencyMemoryCleanup();
+          } else if (type === 'inactive-users') {
+            totalCleaned = cleanupInactiveUsers(hoursThreshold || 6);
+          } else if (type === 'user-specific' && userId) {
+            totalCleaned = cleanupUserArrays(userId);
+            if (requestBody.fullCleanup) {
+              cleanupAllUserData(userId);
+              totalCleaned += 1; // Contabilizar limpeza completa do usuário
+            }
+          } else {
+            // Limpeza normal: arrays + usuários inativos + timers órfãos
+            Object.keys(websocketLogs).forEach(uid => {
+              totalCleaned += cleanupUserArrays(uid);
+            });
+            totalCleaned += cleanupInactiveUsers(6);
+            totalCleaned += cleanupOrphanedTimers();
+          }
+          
+          const memoryStats = calculateMemoryUsage();
+          
+          return NextResponse.json({
+            success: true,
+            data: {
+              itemsCleaned: totalCleaned,
+              memoryStats,
+              cleanupType: type
+            }
+          });
+        } catch (error) {
+          return NextResponse.json({
+            success: false,
+            error: 'Erro ao executar limpeza de memória'
+          }, { status: 500 });
+        }
+      
+      case 'execute-immediate-bet':
+        // 🔥 NOVA AÇÃO: Executar aposta imediata (milisegundos)
+        try {
+          const { betType, stake, urgent } = requestBody;
+          
+          if (!betType || !stake) {
+            return NextResponse.json({
+              success: false,
+              error: 'betType e stake são obrigatórios'
+            }, { status: 400 });
+          }
+          
+          // 🚀 Log da aposta imediata
+          addWebSocketLog(userId, `⚡ APOSTA IMEDIATA: ${betType.toUpperCase()} - Stake: R$${stake}`, 'info');
+          
+          // 🎯 Processar aposta com prioridade máxima
+          const betResult = await processImmediateBet(userId, betType, stake, urgent);
+          
+          if (betResult.success) {
+            addWebSocketLog(userId, `✅ Aposta imediata executada com sucesso`, 'success');
+            return NextResponse.json({
+              success: true,
+              data: {
+                betType,
+                stake,
+                message: 'Aposta imediata executada com sucesso'
+              }
+            });
+          } else {
+            throw new Error(betResult.error || 'Falha na aposta imediata');
+          }
+          
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+          addWebSocketLog(userId, `❌ Erro na aposta imediata: ${errorMessage}`, 'error');
+          return NextResponse.json({
+            success: false,
+            error: 'Erro na aposta imediata'
+          }, { status: 500 });
+        }
+
+      case 'process-unified-result':
+        // 🔄 NOVO: Processar resultado via polling unificado (substitui WebSocket)
+        try {
+          const { gameId, number, color, timestamp, source } = requestBody;
+          
+          // 🛡️ VALIDAÇÕES rigorosas
+          if (!gameId || number === undefined) {
+            return NextResponse.json({
+              success: false,
+              error: 'GameId e número são obrigatórios'
+            }, { status: 400 });
+          }
+          
+          // ✅ VALIDAR número da roleta (0-36)
+          if (typeof number !== 'number' || number < 0 || number > 36) {
+            addWebSocketLog(userId, `⚠️ NÚMERO INVÁLIDO: ${String(number)} - Ignorado`, 'error');
+            return NextResponse.json({
+              success: false,
+              error: `Número inválido: ${String(number)}. Deve estar entre 0-36.`
+            }, { status: 400 });
+          }
+          
+          // ✅ VALIDAR gameId (formato adequado)
+          if (!gameId || String(gameId).length < 5) {
+            addWebSocketLog(userId, `⚠️ GAMEID INVÁLIDO: ${String(gameId)} - Ignorado`, 'error');
+            return NextResponse.json({
+              success: false,
+              error: `GameId inválido: ${String(gameId)}`
+            }, { status: 400 });
+          }
+          
+          // 🛡️ PROTEÇÃO CONTRA DUPLICAÇÃO: Verificar se gameId já foi processado
+          const operation = operationState[userId];
+          if (operation?.lastProcessedGameId === gameId) {
+            // Log silencioso - não precisa mostrar
+            return NextResponse.json({
+              success: true,
+              data: {
+                processed: false,
+                gameId,
+                number,
+                color,
+                message: 'GameId já processado anteriormente - ignorado para evitar duplicação'
+              }
+            });
+          }
+          
+          // 📝 Log do resultado
+          const colorName = color === 'red' ? 'Vermelho' : color === 'black' ? 'Preto' : 'Verde';
+          let characteristics = [colorName];
+          
+          if (number !== 0) {
+            characteristics.push(number % 2 === 0 ? 'Par' : 'Ímpar');
+            characteristics.push(number <= 18 ? 'Baixo' : 'Alto');
+          }
+          
+          const logMessage = `🎯 Resultado: ${String(number)} - ${characteristics.join(' - ')} (ID: ${String(gameId)})`;
+          addWebSocketLog(userId, logMessage, 'game');
+          
+            // ✅ ATUALIZAR lastProcessedGameId ANTES de processar
+  if (operation) {
+    operation.lastProcessedGameId = gameId;
+  }
+  
+  // ✅ PROCESSAR resultado como fazia no WebSocket
+  // Log de endpoint removido - debug concluído
+  await processGameResult(userId, String(gameId), number, String(color));
+  
+  return NextResponse.json({
+            success: true,
+            data: {
+              processed: true,
+              gameId,
+              number,
+              color,
+              message: 'Resultado processado com sucesso via polling unificado'
+            }
+          });
+        } catch (error) {
+          console.error('❌ Erro ao processar resultado unificado:', error);
+          return NextResponse.json({
+            success: false,
+            error: 'Erro ao processar resultado unificado'
+          }, { status: 500 });
+        }
+      
       default:
       return NextResponse.json({
         success: false,
@@ -935,6 +1374,97 @@ async function retryBlazeRequest(
   throw new Error(`Máximo de tentativas (${maxRetries}) esgotado para ${operationType}`);
 }
 
+// 🔥 FUNÇÃO: Processar aposta imediata REAL (não simulação)
+async function processImmediateBet(userId: string, betType: string, stake: number, urgent: boolean = false) {
+  try {
+    // Log de processamento
+    addWebSocketLog(userId, `🎯 Processando aposta ${betType} com stake R$${stake}${urgent ? ' [URGENTE]' : ''}`, 'info');
+    
+    // 🚀 EXECUTAR APOSTA REAL: Usar a mesma lógica que executeSimpleBet
+    const wsConnection = activeWebSockets[userId];
+    const operation = operationState[userId];
+    
+    if (!wsConnection?.ws || !operation?.active) {
+      throw new Error('WebSocket não conectado ou operação inativa');
+    }
+    
+    // 🎯 CONFIGURAR OPERAÇÃO PARA APOSTA IMEDIATA
+    // Mapear betType para cor de aposta
+    const betTypeToColor: { [key: string]: 'R' | 'B' | 'E' | 'O' | 'L' | 'H' } = {
+      'red': 'R',
+      'black': 'B', 
+      'even': 'E',
+      'odd': 'O',
+      'low': 'L',
+      'high': 'H'
+    };
+    
+    const betColor = betTypeToColor[betType];
+    if (!betColor) {
+      throw new Error(`Tipo de aposta inválido: ${betType}`);
+    }
+    
+    // 🔥 FORÇAR TRIGGER DETECTADO para aposta imediata
+    operation.triggerDetected = true;
+    operation.waitingForTrigger = false;
+    operation.currentBetColor = betColor;
+    
+         // 🎯 OBTER GAMEID REAL DO WEBSOCKET (apostas abertas)
+     let currentGameId = currentBettingGameId[userId] || bettingWindowState[userId]?.currentGameId || '';
+     
+     if (!currentGameId) {
+       // 🔍 Se não há gameId das apostas abertas, tentar outras fontes
+       currentGameId = operation.lastGameId || '';
+       
+       if (!currentGameId || currentGameId.startsWith('temp_')) {
+         // Verificar se WebSocket está conectado
+         const wsState = wsConnection.ws.readyState;
+         if (wsState !== 1) {
+           throw new Error('WebSocket não está conectado para aposta imediata');
+         }
+         
+         // ❌ ÚLTIMO RECURSO: gameId temporário (pode falhar)
+         currentGameId = `temp_${Date.now()}`;
+         addWebSocketLog(userId, `⚠️ Usando gameId temporário - aposta pode falhar`, 'error');
+       } else {
+         addWebSocketLog(userId, `🔧 Usando gameId da última operação: ${currentGameId}`, 'info');
+       }
+     } else {
+       addWebSocketLog(userId, `✅ Usando gameId real das apostas abertas: ${currentGameId}`, 'success');
+     }
+     
+     addWebSocketLog(userId, `🎯 GameId para aposta imediata: ${currentGameId}`, 'info');
+     
+     // ✅ EXECUTAR APOSTA REAL usando executeSimpleBet
+     await executeSimpleBet(userId, currentGameId, wsConnection.ws);
+     
+     // 🚨 CRÍTICO: Marcar que acabou de fazer aposta imediata e definir estado de espera
+     // ⚠️ NOTA: Se receber erro 1007 no WebSocket, estes estados serão cancelados
+     operation.justMadeImmediateBet = true;
+     operation.waitingForResult = true;
+     operation.lastGameId = currentGameId;
+     
+     addWebSocketLog(userId, `🔍 Aposta imediata - aguardando resultado do jogo: ${currentGameId}`, 'info');
+    
+    return {
+      success: true,
+      betType,
+      stake,
+      urgent,
+      timestamp: Date.now(),
+      realBet: true
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+    addWebSocketLog(userId, `❌ Erro na aposta imediata: ${errorMessage}`, 'error');
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
 function addWebSocketLog(userId: string, message: string, type: 'info' | 'error' | 'success' | 'game' | 'bets-open' | 'bets-closed' = 'info') {
   if (!websocketLogs[userId]) {
     websocketLogs[userId] = [];
@@ -946,9 +1476,9 @@ function addWebSocketLog(userId: string, message: string, type: 'info' | 'error'
     type
   });
   
-  // Manter apenas os últimos 50 logs
-  if (websocketLogs[userId].length > 50) {
-    websocketLogs[userId] = websocketLogs[userId].slice(0, 50);
+  // 🧹 Aplicar limite centralizado automaticamente
+  if (websocketLogs[userId].length > MEMORY_LIMITS.MAX_WEBSOCKET_LOGS_PER_USER) {
+    websocketLogs[userId] = websocketLogs[userId].slice(0, MEMORY_LIMITS.MAX_WEBSOCKET_LOGS_PER_USER);
   }
   
 
@@ -969,8 +1499,7 @@ async function startApiPolling(userId: string): Promise<void> {
     clearInterval(operation.apiPollingInterval);
   }
   
-  // 🔇 LOG SILENCIOSO: Não logar o início do polling - apenas quando há apostas
-  // addWebSocketLog(userId, `🔄 Iniciando polling da URL/API para detectar resultados`, 'info');
+  // Polling iniciado silenciosamente
   
   // Polling a cada 2 segundos
   operation.apiPollingInterval = setInterval(async () => {
@@ -990,10 +1519,14 @@ async function checkForNewResults(userId: string): Promise<void> {
   }
   
   // 🎯 NOVA LÓGICA: Usar função centralizada para determinar se deve fazer polling
-  if (!shouldPollForResults(userId)) {
+  const shouldPoll = shouldPollForResults(userId);
+  if (!shouldPoll) {
     // 🔇 SILENCIOSO: Não fazer polling se não há necessidade
+    // Polling silencioso quando não necessário
     return;
   }
+  
+  // Polling funcionando silenciosamente
   
   // 🔍 DEBUG: Log do estado atual (removido para não poluir)
   
@@ -1039,13 +1572,26 @@ async function checkForNewResults(userId: string): Promise<void> {
             // ✅ CORREÇÃO: Verificar se o resultado é para a aposta que está aguardando
             if (latestResult.gameId === operation.lastGameId) {
               // 🎯 Resultado da aposta encontrado
-              addWebSocketLog(userId, `✅ Resultado encontrado: Game ${latestResult.gameId}, Número ${latestResult.number}`, 'success');
+          
               
               // Processar resultado da aposta específica
               const correctedColor = getColorFromNumber(latestResult.number);
               const colorCode = latestResult.number === 0 ? 'green' : (correctedColor === 'red' ? 'R' : 'B');
               
-              await processGameResult(userId, latestResult.gameId, latestResult.number, correctedColor);
+              // 🎯 NOVO: Gerar log completo também no polling automático
+              const colorName = correctedColor === 'red' ? 'Vermelho' : correctedColor === 'black' ? 'Preto' : 'Verde';
+              let characteristics = [colorName];
+              
+              if (latestResult.number !== 0) {
+                characteristics.push(latestResult.number % 2 === 0 ? 'Par' : 'Ímpar');
+                characteristics.push(latestResult.number <= 18 ? 'Baixo' : 'Alto');
+              }
+              
+                          const logMessage = `🎯 Resultado: ${latestResult.number} - ${characteristics.join(' - ')} (ID: ${latestResult.gameId}) [Polling]`;
+            addWebSocketLog(userId, logMessage, 'game');
+            
+            // Log de polling removido - debug concluído
+            await processGameResult(userId, latestResult.gameId, latestResult.number, correctedColor);
               
               // ✅ Resultado processado - sistema deve continuar funcionando
               addWebSocketLog(userId, `✅ Resultado processado com sucesso!`, 'success');
@@ -1057,6 +1603,19 @@ async function checkForNewResults(userId: string): Promise<void> {
             const correctedColor = getColorFromNumber(latestResult.number);
             const colorCode = latestResult.number === 0 ? 'green' : (correctedColor === 'red' ? 'R' : 'B');
             
+            // 🎯 NOVO: Gerar log completo também no polling automático
+            const colorName = correctedColor === 'red' ? 'Vermelho' : correctedColor === 'black' ? 'Preto' : 'Verde';
+            let characteristics = [colorName];
+            
+            if (latestResult.number !== 0) {
+              characteristics.push(latestResult.number % 2 === 0 ? 'Par' : 'Ímpar');
+              characteristics.push(latestResult.number <= 18 ? 'Baixo' : 'Alto');
+            }
+            
+            const logMessage = `🎯 Resultado: ${latestResult.number} - ${characteristics.join(' - ')} (ID: ${latestResult.gameId}) [Polling]`;
+            addWebSocketLog(userId, logMessage, 'game');
+            
+            // Log de polling-B removido - debug concluído
             await processGameResult(userId, latestResult.gameId, latestResult.number, colorCode);
           }
           
@@ -1093,7 +1652,7 @@ async function checkForNewResults(userId: string): Promise<void> {
     }
   } catch (error) {
     console.warn(`Erro ao verificar novos resultados para usuário ${userId}:`, error);
-    addWebSocketLog(userId, `❌ Erro ao verificar novos resultados: ${error instanceof Error ? error.message : 'Erro desconhecido'}`, 'error');
+    // Log de erro silencioso - evitar poluição do console
   }
 }
 
@@ -1104,11 +1663,10 @@ async function stopApiPolling(userId: string): Promise<void> {
     return;
   }
   
+  // Polling parado silenciosamente
+  
   clearInterval(operation.apiPollingInterval);
   operation.apiPollingInterval = undefined;
-  
-  // 🔇 LOG SILENCIOSO: Não logar quando para o polling
-  // addWebSocketLog(userId, `🔄 Polling da URL/API parado`, 'info');
 }
 
 // 🎯 FUNÇÃO: Determinar se deve fazer polling baseado no estado da operação
@@ -1116,23 +1674,53 @@ function shouldPollForResults(userId: string): boolean {
   const operation = operationState[userId];
   if (!operation) return false;
   
-  // 🔧 CORREÇÃO: Fazer polling se operação está ativa E (há apostas pendentes OU está monitorando trigger)
-  const hasActiveBets = operation.active && operation.waitingForResult && !!operation.lastGameId;
+  // 🔥 PRIORIDADE 1: SEMPRE fazer polling se há aposta pendente (independente de operation.active)
+  const hasActiveBets = operation.waitingForResult && !!operation.lastGameId;
+  if (hasActiveBets) {
+    return true; // ✅ GARANTIR polling para apostas pendentes
+  }
+  
+  // 🔥 PRIORIDADE 2: Fazer polling se está monitorando trigger
   const isMonitoringTrigger = operation.active && operation.waitingForTrigger && !operation.triggerDetected;
   
-  // 🎯 NOVA LÓGICA: Polling ativo durante apostas pendentes OU monitoramento de trigger
-  return hasActiveBets || isMonitoringTrigger;
+  // 🔥 PRIORIDADE 3: Fazer polling se operação está ativa (qualquer estado)
+  const isOperationActive = operation.active;
+  
+  // 🎯 NOVA LÓGICA: Polling ativo se há aposta pendente OU monitoramento OU operação ativa
+  return hasActiveBets || isMonitoringTrigger || isOperationActive;
 }
 
 // 🔍 FUNÇÃO: Processar resultado do jogo com dupla validação
 async function processGameResult(userId: string, gameId: string, number: number, color: string) {
-
+  // Debug log removido - função estabilizada
   
-  // 🔍 DUPLA VALIDAÇÃO: Verificar e corrigir inconsistências
+  // ✅ PROTEÇÃO: Verificar se gameId já foi processado
+  const operation = operationState[userId];
+  if (operation?.lastProcessedGameId === gameId) {
+    // Log de duplicação removido - proteção funcionando
+    
+    // 🚨 EXCEÇÃO: Se há aposta pendente para este gameId, processar mesmo assim
+    if (operation.waitingForResult && operation.lastGameId === gameId) {
+      addWebSocketLog(userId, `🔥 [DEBUG] MAS há aposta pendente para este gameId - processando mesmo assim!`, 'info');
+    } else if (operation.waitingForTrigger && !operation.triggerDetected) {
+      // 🎯 EXCEÇÃO: Se aguardando trigger, processar para verificar trigger
+      addWebSocketLog(userId, `🎯 [DEBUG] MAS aguardando trigger - processando para verificar trigger mesmo com duplicação!`, 'info');
+    } else {
+      // Log de ignorar duplicação removido
+      return; // Ignorar resultado duplicado
+    }
+  }
+  
+        // ✅ ATUALIZAR lastProcessedGameId APENAS após processamento completo
+      // Movido para o final da função para evitar ignorar apostas pendentes
+      
+        // Log de entrada removido - debug concluído
+      
+      // 🔍 DUPLA VALIDAÇÃO: Verificar e corrigir inconsistências
   const validation = validateAndCorrectColor(number, color);
   
-  // 📋 LOG: Mostrar resultado da validação
-  addWebSocketLog(userId, validation.logMessage, 'info');
+  // 🔄 DESATIVADO: Log via WebSocket antigo - agora usa sistema unificado
+  // addWebSocketLog(userId, validation.logMessage, 'info');
   
   // 🔧 USAR SEMPRE A COR CORRIGIDA
   const correctedColor = validation.correctedColor;
@@ -1142,7 +1730,7 @@ async function processGameResult(userId: string, gameId: string, number: number,
   // Agora os resultados são processados APENAS via URL/API polling
   
   // 💾 RECOVERY: Verificar se este resultado resolve uma aposta pendente
-  const operation = operationState[userId];
+  // const operation = operationState[userId]; // Já declarado acima
   if (operation?.waitingForResult && operation.lastGameId === gameId) {
     // 🔄 RECOVERY: Resultado encontrado para aposta pendente (Game: ${gameId}) - Log removido
     
@@ -1194,9 +1782,9 @@ async function processGameResult(userId: string, gameId: string, number: number,
     timestamp: Date.now()
   });
   
-  // Mantém apenas os últimos 50 resultados
-  if (gameResults[userId].length > 50) {
-    gameResults[userId].shift();
+  // 🧹 Aplicar limite centralizado automaticamente
+  if (gameResults[userId].length > MEMORY_LIMITS.MAX_GAME_RESULTS_PER_USER) {
+    gameResults[userId] = gameResults[userId].slice(-MEMORY_LIMITS.MAX_GAME_RESULTS_PER_USER);
   }
   
   // Se for zero e há operação ativa, processa como derrota
@@ -1208,26 +1796,84 @@ async function processGameResult(userId: string, gameId: string, number: number,
   
   // Se operação ativa, processa aposta ou detecção de trigger
   if (operationState[userId]?.active) {
+    // Log de operação ativa removido
+    
     // 🎯 PRIMEIRA PRIORIDADE: Detectar trigger quando estiver monitorando
-    const operation = operationState[userId];
-    if (operation && operation.waitingForTrigger && !operation.triggerDetected) {
-      const betType = operation.m4DirectBetType || 'await';
-      const shouldTrigger = checkTriggerMatch(betType, colorCode, number);
+    // const operation = operationState[userId]; // Já declarado no início da função
+          if (operation && operation.waitingForTrigger && !operation.triggerDetected) {
+                  // Logs de trigger removidos - sistema estabilizado
+        const betType = operation.m4DirectBetType || 'await';
+        const shouldTrigger = checkTriggerMatch(betType, colorCode, number);
+                  // Logs de trigger removidos - sistema estabilizado
       
-      // 🔍 DEBUG: Log da verificação de trigger (removido para não poluir)
+      // 🔍 DEBUG: Logs removidos após correção do bug
       
       if (shouldTrigger) {
         operation.triggerDetected = true;
         operation.waitingForTrigger = false;
         
         const betTypeName = getBetTypeName(betType);
-        addWebSocketLog(userId, `🎯 TRIGGER DETECTADO! ${betTypeName} saiu (${number}) - Próxima rodada irá apostar`, 'success');
+        addWebSocketLog(userId, `🎯 TRIGGER DETECTADO! ${betTypeName} saiu (${number})`, 'success');
         addWebSocketLog(userId, `💰 Preparando aposta para repetir ${betTypeName}`, 'info');
-      }
+        
+        // 🚨 CORREÇÃO CRÍTICA: Resultado que detecta trigger NÃO é usado como resultado da aposta
+        // O sistema deve aguardar o PRÓXIMO resultado para processar a aposta
+        addWebSocketLog(userId, `⏳ Resultado atual usado para trigger - aguardando próximo resultado para aposta`, 'info');
+        addWebSocketLog(userId, `🔍 [DEBUG] RETORNANDO após detecção de trigger - não processará como resultado de aposta`, 'info');
+        return; // Sair sem processar como resultado da aposta
+              } else {
+          // 🔍 LOG: Trigger não detectado 
+          // Logs de trigger removidos - sistema estabilizado
+        }
+      } else {
+        // 🔍 LOG: Não está aguardando trigger
+        if (operation) {
+          // Logs de trigger removidos - sistema estabilizado
+        }
     }
     
     // 🎯 SEGUNDA PRIORIDADE: Processar resultado de aposta (se houver)
+    // Este resultado só será processado se NÃO foi usado para detectar trigger
+    
+    // 🚨 CORREÇÃO: Se acabou de fazer aposta imediata, verificar se é o resultado da aposta
+    if (operation && operation.justMadeImmediateBet) {
+      addWebSocketLog(userId, `🔍 [DEBUG] justMadeImmediateBet detectado - waitingForResult: ${operation.waitingForResult}`, 'info');
+      
+              // 🛡️ PROTEÇÃO: Se waitingForResult = false, significa que aposta foi cancelada (ex: erro 1007)
+        if (!operation.waitingForResult) {
+          addWebSocketLog(userId, `🚫 Aposta foi cancelada - ignorando resultado ${gameId}`, 'info');
+          operation.justMadeImmediateBet = false; // Resetar flag
+          addWebSocketLog(userId, `🔍 [DEBUG] RETORNANDO após aposta cancelada`, 'info');
+          return; // Ignorar este resultado
+        }
+        
+        // Verificação de correspondência - debug concluído
+      
+      // ✅ VERIFICAR: Se este resultado corresponde à aposta feita
+      if (operation.waitingForResult && operation.lastGameId === gameId) {
+        // 🎯 Este É o resultado da aposta - processar normalmente
+        addWebSocketLog(userId, `🎯 Processando resultado da aposta imediata: ${number} (${colorCode.toUpperCase()})`, 'info');
+        operation.justMadeImmediateBet = false; // Resetar flag
+        // Continuar processamento normal
+      } else {
+        // 🔄 Este NÃO é o resultado da aposta - ignorar
+        addWebSocketLog(userId, `⏳ Resultado ${gameId} não corresponde à aposta ${operation.lastGameId} - ignorando`, 'info');
+        operation.justMadeImmediateBet = false; // Resetar flag
+        addWebSocketLog(userId, `🔍 [DEBUG] RETORNANDO - gameId não corresponde`, 'info');
+        return; // Ignorar este resultado
+      }
+    }
+    
+      // Log de chamada processOperationResult removido
     await processOperationResult(userId, colorCode, number);
+  } else {
+    // Log de operação inativa removido
+  }
+  
+  // ✅ ATUALIZAR lastProcessedGameId APENAS NO FINAL, após processamento completo
+  if (operation) {
+    operation.lastProcessedGameId = gameId;
+    // Log de marcar gameId removido
   }
 }
 
@@ -1237,6 +1883,8 @@ function checkBetWin(betColor: 'R' | 'B' | 'E' | 'O' | 'L' | 'H' | 'AWAIT', resu
   if (resultNumber === 0) {
     return false;
   }
+  
+  // Debug checkBetWin removido - funcionando corretamente
   
   switch (betColor) {
     case 'AWAIT': // Aguardar - não há aposta
@@ -1261,33 +1909,54 @@ function checkBetWin(betColor: 'R' | 'B' | 'E' | 'O' | 'L' | 'H' | 'AWAIT', resu
 // NOVO: Função para processar resultado da operação (Nova Lógica de Aquecimento)
 async function processOperationResult(userId: string, resultColor: string, resultNumber: number = 0) {
 
+  // Debug log removido - função estabilizada
   
   const operation = operationState[userId];
   if (!operation || !operation.active || !operation.strategy?.sequences) {
-    addWebSocketLog(userId, '❌ Estado da operação inválido para processar resultado', 'error');
+    addWebSocketLog(userId, `❌ Estado da operação inválido para processar resultado - active: ${operation?.active}, strategy: ${!!operation?.strategy}`, 'error');
     return;
   }
 
   // 🎲 CORREÇÃO: Usar cor da aposta armazenada
   const betColor = operation.currentBetColor;
   
+  // Debug log removido - função estabilizada
+  
   if (!betColor) {
     // 🎯 NOVO: Verificar se é monitoramento normal ou erro real
     if (operation.waitingForTrigger && !operation.triggerDetected) {
       // Durante monitoramento, não é erro - sistema está funcionando corretamente
+      // Debug log removido
       return;
     }
     
-    // Se não está monitorando e não tem cor de aposta, aí sim é erro
-    addWebSocketLog(userId, '❌ Cor da aposta não encontrada - não é possível processar resultado', 'error');
+    // 🚨 CRÍTICO: Se não há aposta ativa, não processar resultado
+    // Debug log removido
+    return;
+  }
+  
+  // 🚨 VERIFICAÇÃO CRÍTICA: Só processar se realmente há aposta pendente
+  if (!operation.waitingForResult) {
+    // 🔍 DEBUG: Explicar por que não há aposta pendente
+    if (operation.justMadeImmediateBet === false && operation.lastGameId) {
+      // Debug log removido
+    } else {
+      // Debug log removido
+    }
     return;
   }
   
   // 🔍 LOG: Informar que o resultado está sendo processado
   addWebSocketLog(userId, `🔍 Processando resultado: ${resultColor} (${resultNumber}) vs Aposta: ${betColor}`, 'info');
   
+  // Log de tipos de aposta removido - debug concluído
+  
+  // Log de estado da operação removido - debug concluído
+  
   // ✅ NOVA LÓGICA: Verificar vitória baseada no tipo de aposta
   const isWin = checkBetWin(betColor, resultColor, resultNumber);
+  
+  // Debug log removido - validação funcionando
   
   // ✅ CORREÇÃO: Determinar modo baseado nos contadores, não na propriedade mode
   const isRealMode = canExitAnalysisMode(userId);
@@ -1301,10 +1970,8 @@ async function processOperationResult(userId: string, resultColor: string, resul
   const wasWaitingForResult = operation.waitingForResult;
   operation.waitingForResult = false;
   
-  // 🔄 NOVO: Parar polling quando resultado é processado (apenas se missão foi cumprida)
-  if (wasWaitingForResult && operation.missionCompleted) {
-    await stopApiPolling(userId);
-  }
+  // 🔄 REMOVIDO: Sistema unificado nunca para o polling
+  // Polling continua sempre ativo para manter logs e card atualizados
   
   // 🔍 LOG: Confirmar que o estado foi liberado
   if (wasWaitingForResult) {
@@ -1313,12 +1980,15 @@ async function processOperationResult(userId: string, resultColor: string, resul
   
   // ✅ NOVA ESTRATÉGIA: Obter valor baseado no modo (simulado ou real)
   let betAmount = operation.lastBetAmount;
+  // Debug log removido
+  
   if (!betAmount) {
     // Fallback: calcular dinamicamente se não foi armazenado
     const currentLevel = STAKE_LEVELS[operation.currentLevel - 1] || STAKE_LEVELS[0];
     const multiplier = operation.stakeMultiplier || 1;
-    addWebSocketLog(userId, `🔍 DEBUG: Resultado - Multiplicador ${multiplier}x aplicado`, 'info');
+    
     betAmount = currentLevel.m2 * multiplier; // Sempre valor real na repetição inteligente
+    // Debug log removido
   }
   const betColorName = COLOR_NAMES[betColor] || betColor;
   const resultColorName = COLOR_NAMES[resultColor] || resultColor;
@@ -1345,6 +2015,8 @@ async function processOperationResult(userId: string, resultColor: string, resul
   
   if (isWin) {
     // ✅ GANHOU - NOVA ESTRATÉGIA: Repetição Inteligente
+    // Debug log removido
+    
     if (isRealMode) {
       operation.stats.wins++;
       operation.stats.profit += betAmount;
@@ -1353,20 +2025,37 @@ async function processOperationResult(userId: string, resultColor: string, resul
     addWebSocketLog(userId, `✅ APOSTA GANHOU! Lucro de R$ ${betAmount.toFixed(2)}`, 'success');
     addWebSocketLog(userId, `💰 🎯 MISSÃO CUMPRIDA!`, 'success');
     
-    operation.active = false;
+    // 🔥 CORREÇÃO: NÃO desativar operação após missão cumprida - continuar monitorando
+    // operation.active = false; // ❌ REMOVIDO: Isso estava causando desconexão
     operation.missionCompleted = true;
     operation.waitingForTrigger = true; // Reset para próxima operação
     operation.triggerDetected = false;
+    
+    // 🔥 ATUALIZAR: Timestamp para evitar limpeza automática após missão cumprida
+    if (operation.stats) {
+      operation.stats.startedAt = Date.now(); // Atualizar como se fosse nova operação
+    }
+    
+    console.log('🚨 [BACKEND] Estados após vitória:', {
+      active: operation.active, // Permanece true para continuar monitoramento
+      missionCompleted: operation.missionCompleted,
+      waitingForTrigger: operation.waitingForTrigger,
+      timestamp: new Date().toLocaleTimeString()
+    });
     
     addWebSocketLog(userId, `✅ Operação finalizada com sucesso - Lucro garantido!`, 'success');
     
     // 🤖 NOVO: Retornar automaticamente ao modo aguardar para próximo candidato
     operation.m4DirectBetType = 'await';
-    addWebSocketLog(userId, `🤖 MODO AUTOMÁTICO: Retornando ao aguardar para detectar próximo candidato`, 'info');
+    // ✅ RESETAR: Permitir log "Modo aguardar ativo" após missão cumprida
+    awaitModeLogShown[userId] = false;
+    console.log('🎯 [BACKEND] Missão cumprida - m4DirectBetType definido como await, operation.active=true (mantida ativa para monitoramento)');
     
     return;
   } else {
     // ❌ PERDEU - NOVA ESTRATÉGIA: Repetição Inteligente
+    // Debug log removido
+    
     const resultCharacteristics = getNumberCharacteristics(resultNumber);
     addWebSocketLog(userId, `🎲 Resultado: ${resultCharacteristics}`, 'info');
     
@@ -1391,7 +2080,7 @@ async function processOperationResult(userId: string, resultColor: string, resul
       addWebSocketLog(userId, `💰 Próxima aposta será: R$ ${(nextLevel.m2 * multiplier).toFixed(2)}${multiplierText}`, 'info');
       
       // 🔍 DEBUG: Log do estado após derrota
-      addWebSocketLog(userId, `🔍 DEBUG: Estado após derrota - Monitorando triggers`, 'info');
+      // Logs de debug removidos - sistema estabilizado
       
       // 🚀 NOVO: Garantir que o polling continue após a derrota
       await startApiPolling(userId);
@@ -1408,17 +2097,16 @@ async function processOperationResult(userId: string, resultColor: string, resul
       
       // 🤖 NOVO: Retornar automaticamente ao modo aguardar para próximo candidato
       operation.m4DirectBetType = 'await';
-      addWebSocketLog(userId, `🤖 MODO AUTOMÁTICO: Retornando ao aguardar para detectar próximo candidato`, 'info');
+      // ✅ RESETAR: Permitir log "Modo aguardar ativo" após finalização
+      awaitModeLogShown[userId] = false;
+      console.log('🎯 DEBUG BACKEND: Operação finalizada - setando modo await');
       
       return;
     }
   }
 }
 
-// 🎲 FUNÇÃO: Sempre apostar no vermelho (sem randomização)
-function generateRedBet(): 'R' {
-  return 'R'; // Sempre vermelho
-}
+// Função generateRedBet removida - era redundante (sempre retornava 'R')
   
 // 🔍 NOVA FUNÇÃO: Verificar se pode sair do modo análise
 function canExitAnalysisMode(userId: string): boolean {
@@ -1456,7 +2144,7 @@ function activateRealModeNow(userId: string): void {
   
   // 🎯 NOVO: Resetar para M1 quando ativado
   operation.martingaleLevel = 0;
-  addWebSocketLog(userId, `🔄 Resetando para M1 no modo real`, 'info');
+  
 }
 
 // 🔄 NOVA FUNÇÃO: Reset contadores de análise
@@ -1839,11 +2527,11 @@ async function startSimpleOperation(userId: string) {
     if (!websocketLogs[userId]) websocketLogs[userId] = [];
     
     addWebSocketLog(userId, '🚀 Iniciando operações...', 'success');
-    addWebSocketLog(userId, '🛡️ Proteção ativa: Sistema para automaticamente após missão cumprida', 'info');
+    
     
     // 🔢 NOVO: Log do multiplicador aplicado
     const appliedMultiplier = operationState[userId]?.stakeMultiplier || 1;
-    addWebSocketLog(userId, `🔢 Multiplicador aplicado: ${appliedMultiplier}x (todos os valores serão multiplicados)`, 'info');
+    
     
     // 🔄 LIMPAR: Apenas controles necessários
     awaitModeLogShown[userId] = false;
@@ -1858,14 +2546,14 @@ async function startSimpleOperation(userId: string) {
       return NextResponse.json({
         success: true,
         data: {
-          operationActive: false,
+          operationActive: true, // 🔥 MANTÉM true para não desconectar frontend
           missionCompleted: true,
-          message: 'Missão cumprida - sistema protegido'
+          message: 'Missão cumprida - aguardando novo tipo de aposta'
         }
       });
     }
     
-    return NextResponse.json({
+          return NextResponse.json({
       success: true,
       data: {
         operationActive: true,
@@ -1904,6 +2592,15 @@ async function stopSimpleOperation(userId: string) {
     
     // 🔄 PARAR: Polling da URL/API
     stopApiPolling(userId);
+    
+    // 🕐 LIMPEZA: Timers específicos do usuário
+    cleanupUserTimers(userId);
+    
+    // 🧹 LIMPEZA: Arrays do usuário para prevenir acúmulo
+    const itemsRemoved = cleanupUserArrays(userId);
+    if (itemsRemoved > 0) {
+      console.log(`🧹 [CLEANUP] ${itemsRemoved} items antigos removidos para usuário ${userId.substring(0, 8)}...`);
+    }
     
     // Parar todas as conexões
     stopAllConnections(userId, true);
@@ -2350,6 +3047,9 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             const table = tableMatch?.[1] || '';
             const seq = seqMatch?.[1] || '';
             
+            // 🎯 CRÍTICO: Armazenar gameId atual das apostas abertas
+            currentBettingGameId[userId] = gameId;
+            
             // NOVO: Atualizar estado da janela de apostas
             bettingWindowState[userId] = {
               isOpen: true,
@@ -2376,13 +3076,22 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
               // Log removido: informação técnica desnecessária
       // addWebSocketLog(userId, `🎯 Operação ativa detectada - executando aposta automaticamente (modo: ${currentMode})`, 'success');
               
-              // 🚀 NOVO: Marcar que primeira aposta foi executada
-              if (shouldTryImmediateBet[userId]) {
-                addWebSocketLog(userId, `🎯 Primeira aposta executada com sucesso!`, 'success');
-                shouldTryImmediateBet[userId] = false;
+              // 🎯 CORRIGIDO: Só apostar quando trigger foi detectado
+              const operation = operationState[userId];
+              if (operation && operation.triggerDetected) {
+                // Limpar flag de aposta imediata
+                if (shouldTryImmediateBet[userId]) {
+                  shouldTryImmediateBet[userId] = false;
+                }
+                
+                addWebSocketLog(userId, `🎯 APOSTAS ABERTAS + TRIGGER DETECTADO → Executando aposta`, 'success');
+                executeSimpleBet(userId, gameId, ws);
+              } else {
+                        // 🔍 LOG: Explicar por que não está apostando  
+        const currentBetType = operation?.m4DirectBetType || 'await';
+        const betTypeName = getBetTypeName(currentBetType);
+        addWebSocketLog(userId, `⏳ Apostas abertas, mas aguardando trigger ${betTypeName} (tipo: ${currentBetType})`, 'info');
               }
-              
-              executeSimpleBet(userId, gameId, ws);
             }
           }
         }
@@ -2442,7 +3151,37 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
             // Outros erros de validação de aposta (não relacionados à sessão)
             const codeMatch = message.match(/code="([^"]*)"/);
             const errorCode = codeMatch?.[1] || 'unknown';
-            addWebSocketLog(userId, `⚠️ Erro de validação de aposta (code ${errorCode}): ${message}`, 'error');
+            
+            // 🚨 TRATAMENTO ESPECIAL: Erros que cancelam a operação
+            const cancelOperationErrors = ['1007']; // Apostas fechadas
+            
+            if (cancelOperationErrors.includes(errorCode)) {
+              let errorMessage = '';
+              
+              switch (errorCode) {
+                case '1007':
+                  errorMessage = '⚠️ Apostas já fechadas - não deu tempo para apostar';
+                  break;
+                default:
+                  errorMessage = `⚠️ Erro crítico de aposta (${errorCode})`;
+              }
+              
+              addWebSocketLog(userId, errorMessage, 'error');
+              addWebSocketLog(userId, `🔄 Voltando ao modo aguardar para próxima oportunidade`, 'info');
+              
+              // 🎯 CANCELAR operação pendente
+              if (operationState[userId]) {
+                operationState[userId].waitingForResult = false;
+                operationState[userId].justMadeImmediateBet = false;
+                operationState[userId].m4DirectBetType = 'await';
+                
+                addWebSocketLog(userId, `🛡️ Operação cancelada devido ao erro ${errorCode}`, 'info');
+              }
+              
+              return; // Não processar mais esta mensagem
+            } else {
+              addWebSocketLog(userId, `⚠️ Erro de validação de aposta (code ${errorCode}): ${message}`, 'error');
+            }
           }
         }
         
@@ -2688,7 +3427,8 @@ function createWebSocketFrame(message: string): Buffer {
   return frame;
 }
 
-// 📤 FUNÇÃO: Executar aposta COM SISTEMA DE PENDING BETS
+// 🎯 FUNÇÃO PRINCIPAL: Executar apostas (ESTA É A FUNÇÃO PRINCIPAL)
+// Responsável por: validar condições, gerar tipos, executar apostas, gerenciar Martingale
 async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   const operation = operationState[userId];
   if (!operation || !operation.active || !operation.strategy?.sequences) {
@@ -2712,8 +3452,7 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   
 
   
-  // 🎲 CORREÇÃO: Sempre aposta no vermelho (igual ao @/bots)
-  const redBet = generateRedBet();
+  // Função redundante generateRedBet removida
   
   // 🎲 NOVO: Usar função atualizada que suporta modo M4 direto
   const betColor = generateBet(userId);
@@ -2722,23 +3461,16 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   if (betColor === 'AWAIT') {
     // Só mostrar log uma vez para evitar repetição
     if (!awaitModeLogShown[userId]) {
+      console.log('⏳ DEBUG: Mostrando log modo aguardar ativo');
       addWebSocketLog(userId, '⏳ Modo aguardar ativo - Conectado mas não apostando', 'info');
       awaitModeLogShown[userId] = true;
     }
     return;
   }
 
-  // 🎯 NOVA LÓGICA: Verificar se deve apostar ou apenas monitorar
-  if (operation.waitingForTrigger) {
-    // Apenas monitorando - aguardando o trigger aparecer (log já mostrado na seleção do tipo)
-    return;
-  }
-
-  // 🎯 NOVA LÓGICA: Só aposta se trigger foi detectado
-  if (!operation.triggerDetected) {
-    addWebSocketLog(userId, `⏳ Trigger não detectado - aguardando resultado desejado aparecer`, 'info');
-    return;
-  }
+  // ⏰ NOVA LÓGICA SIMPLIFICADA: Sistema de janela de 10s no frontend
+  // A lógica de timing agora é controlada pelo frontend com janela de 10 segundos
+  // Não precisamos mais da complexa verificação de trigger aqui
   
   // 🔍 DEBUG: Log quando vai apostar (removido para não poluir)
   
@@ -2756,11 +3488,11 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   const currentLevel = STAKE_LEVELS[operation.currentLevel - 1] || STAKE_LEVELS[0];
   const multiplier = operation.stakeMultiplier || 1;
   
-  addWebSocketLog(userId, `🔍 DEBUG: Calculando aposta - Nível ${operation.currentLevel}, Multiplicador ${multiplier}x`, 'info');
+  
   
   // 🎯 NOVA ESTRATÉGIA: Repetição Inteligente - Sempre valor real
   betAmount = currentLevel.m2 * multiplier;
-  addWebSocketLog(userId, `🔍 DEBUG: APOSTA REAL - Valor base: R$ ${currentLevel.m2.toFixed(2)} × ${multiplier}x = R$ ${betAmount.toFixed(2)}`, 'info');
+  
   
   // ✅ NOVO: Armazenar valor real da aposta
   operation.lastBetAmount = betAmount;
@@ -2852,6 +3584,9 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
     // ✅ SUCESSO: Aposta real enviada com sucesso
     operation.waitingForResult = true;
     operation.lastGameId = gameId;
+    
+    // 🔍 DEBUG: Confirmar estado após aposta
+    addWebSocketLog(userId, `🔍 Aposta enviada - Estado: waitingForResult=true, lastGameId=${gameId}`, 'info');
     
     // 🔄 NOVO: Iniciar polling quando aposta é feita
     await startApiPolling(userId);
@@ -3075,13 +3810,13 @@ function stopAllConnections(userId: string, setErrorStatus: boolean = true, pres
   
   // Parar operação
   if (operationState[userId]) {
-    addWebSocketLog(userId, `🔍 DEBUG: stopAllConnections - multiplicador antes: ${operationState[userId].stakeMultiplier}x`, 'info');
+    
     operationState[userId].active = false;
     operationState[userId].waitingForResult = false;
     operationState[userId].currentBetColor = undefined;
     // 🔧 NOVO: Limpar stake pendente quando operação para
     // 🔧 REMOVIDO: pendingStake não existe mais na nova lógica
-    addWebSocketLog(userId, `🔍 DEBUG: stopAllConnections - multiplicador após: ${operationState[userId].stakeMultiplier}x`, 'info');
+    
   }
   
   // Fechar WebSocket
@@ -3343,6 +4078,9 @@ async function getConnectionStatus(userId: string) {
     const results = gameResults[userId] || [];
     const operation = operationState[userId];
 
+    // 🔥 OPERAÇÃO ATIVA: true se operação existe (mesmo com missão cumprida)
+    const operationActive = !!operation;
+    
     return NextResponse.json({
       success: true,
       data: {
@@ -3350,8 +4088,14 @@ async function getConnectionStatus(userId: string) {
         lastUpdate: status.lastUpdate,
         error: status.error,
         resultsCount: results.length,
-        operationActive: operation?.active || false,
-        missionCompleted: operation?.missionCompleted || false
+        operationActive,
+        missionCompleted: operation?.missionCompleted || false,
+        operationState: operation ? {
+          m4DirectBetType: operation.m4DirectBetType || 'await',
+          missionCompleted: operation.missionCompleted || false,
+          active: operation.active || false,
+          waitingForResult: operation.waitingForResult || false
+        } : null
       }
     });
   } catch (error) {
@@ -3402,7 +4146,8 @@ function stopAutoReconnectionTimer(userId: string) {
   }
 }
 
-// 🎲 FUNÇÃO: Gerar aposta baseada no modo M4 direto ou padrão (vermelho)
+// 🎲 FUNÇÃO AUXILIAR: Gerar tipo de aposta baseado no ciclo selecionado (await/red/black/etc)
+// Converte o tipo selecionado (m4DirectBetType) em código de aposta para executeSimpleBet
 function generateBet(userId: string): 'R' | 'B' | 'E' | 'O' | 'L' | 'H' | 'AWAIT' {
   const operation = operationState[userId];
   if (!operation) return 'R';
@@ -3422,20 +4167,33 @@ function generateBet(userId: string): 'R' | 'B' | 'E' | 'O' | 'L' | 'H' | 'AWAIT
   }
 }
 
-// 🎯 FUNÇÃO: Verificar se o resultado corresponde ao tipo selecionado (trigger)
+// 🛡️ FUNÇÃO REMOVIDA: validateTriggerMatch não é mais necessária após correção do bug principal
+
+// 🔍 FUNÇÃO AUXILIAR: Verificar se resultado é trigger para o tipo selecionado
+// Usada para detectar quando deve apostar (ex: se selecionou "red" e saiu vermelho = trigger)
 function checkTriggerMatch(betType: string, resultColor: string, resultNumber: number): boolean {
   // Zero nunca é trigger
   if (resultNumber === 0) return false;
   
+  // Log de debug removido - função corrigida
+  
   switch (betType) {
     case 'await': return false;
-    case 'red': return resultColor === 'R';
-    case 'black': return resultColor === 'B';
-    case 'even': return resultNumber % 2 === 0;
-    case 'odd': return resultNumber % 2 === 1;
-    case 'low': return resultNumber >= 1 && resultNumber <= 18;
-    case 'high': return resultNumber >= 19 && resultNumber <= 36;
-    default: return false;
+    case 'red': 
+    case 'vermelho': return resultColor === 'R';
+    case 'black': 
+    case 'preto': return resultColor === 'B';
+    case 'even': 
+    case 'par': return resultNumber % 2 === 0;
+    case 'odd': 
+    case 'ímpar': 
+    case 'impar': return resultNumber % 2 === 1;
+    case 'low': 
+    case 'baixas': return resultNumber >= 1 && resultNumber <= 18;
+    case 'high': 
+    case 'altas': return resultNumber >= 19 && resultNumber <= 36;
+         default: 
+       return false;
   }
 }
 
@@ -3559,7 +4317,7 @@ function initializeAutoRenewal(userId: string) {
     nextRenewalTime: now + (10 * 60 * 1000), // 10 minutos
     lastRenewalTime: now
   };
-  addWebSocketLog(userId, '⏰ Renovação automática iniciada - próxima em 10 minutos', 'info');
+  
 }
 
 // 🎯 NOVA FUNÇÃO: Forçar renovação imediata após resultado
@@ -3641,7 +4399,7 @@ function shouldRenewAutomatically(userId: string): boolean {
 function clearAutoRenewal(userId: string) {
   if (autoRenewal[userId]) {
     delete autoRenewal[userId];
-    addWebSocketLog(userId, '⏰ Renovação automática limpa', 'info');
+    
   }
   
   // 🔧 NOVO: Limpar flag de renovação em andamento
@@ -3660,6 +4418,93 @@ function clearAutoRenewal(userId: string) {
 
 // 💰 NOVA LÓGICA: Sistema de stakes fixas por nível
 // Funções antigas removidas - agora usa STAKE_LEVELS diretamente
+
+// 🧹 SISTEMA COMPLETO DE MANUTENÇÃO DE MEMÓRIA
+// Controle simples para evitar múltiplas instâncias
+let maintenanceSystemInitialized = false;
+
+if (!maintenanceSystemInitialized) {
+  maintenanceSystemInitialized = true;
+  
+  // 🕐 Limpeza de timers órfãos a cada 30 minutos
+  setInterval(() => {
+    const clearedCount = cleanupOrphanedTimers();
+    if (clearedCount > 0) {
+      console.log(`🕐 [MAINTENANCE] Limpeza de timers: ${clearedCount} órfãos removidos`);
+    }
+  }, 30 * 60 * 1000);
+  
+  // 🧹 Monitoramento de memória a cada 15 minutos
+  setInterval(() => {
+    const memoryStats = calculateMemoryUsage();
+    
+    // Log apenas se houver uso significativo
+    if (memoryStats.totalUsers > 0) {
+      console.log(`📊 [MEMORY] ${memoryStats.totalUsers} usuários, ${memoryStats.totalArrayItems} items em arrays, score: ${memoryStats.memoryScore}/100`);
+      
+      // Log arrays grandes para debugging
+      if (memoryStats.largestArrays.length > 0) {
+        console.log(`📊 [MEMORY] Top arrays: ${memoryStats.largestArrays.slice(0, 3).map(a => `${a.type}(${a.size})`).join(', ')}`);
+      }
+    }
+    
+    // Limpeza automática se score crítico (80+)
+    if (memoryStats.memoryScore >= MEMORY_LIMITS.CRITICAL_MEMORY_SCORE) {
+      console.warn(`🚨 [MEMORY] Score crítico: ${memoryStats.memoryScore}/100 - Executando limpeza automática`);
+      
+      // Limpeza progressiva
+      let totalCleaned = 0;
+      
+      // 1. Limpar usuários inativos (2h ao invés de 6h)
+      totalCleaned += cleanupInactiveUsers(2);
+      
+      // 2. Limpar arrays de todos os usuários com limites reduzidos
+      Object.keys(websocketLogs).forEach(userId => {
+        totalCleaned += cleanupUserArrays(userId, {
+          MAX_WEBSOCKET_LOGS_PER_USER: 200,
+          MAX_GAME_RESULTS_PER_USER: 100,
+          MAX_DETAILED_HISTORY_PER_USER: 200
+        });
+      });
+      
+      // 3. Limpar timers órfãos
+      totalCleaned += cleanupOrphanedTimers();
+      
+      console.warn(`🚨 [MEMORY] Limpeza automática concluída: ${totalCleaned} items removidos`);
+      
+      // Verificar score final
+      const newStats = calculateMemoryUsage();
+      console.log(`📊 [MEMORY] Score após limpeza: ${newStats.memoryScore}/100`);
+      
+      // Se ainda crítico, executar limpeza de emergência
+      if (newStats.memoryScore >= 90) {
+        console.error(`🆘 [MEMORY] Score ainda crítico: ${newStats.memoryScore}/100 - Executando limpeza de emergência`);
+        const emergencyCleaned = emergencyMemoryCleanup();
+        console.error(`🆘 [MEMORY] Limpeza de emergência: ${emergencyCleaned} items removidos`);
+      }
+    }
+  }, 15 * 60 * 1000); // 15 minutos
+  
+  // 🧹 Limpeza de usuários inativos a cada 2 horas
+  setInterval(() => {
+    const inactiveRemoved = cleanupInactiveUsers(6); // 6 horas de inatividade
+    if (inactiveRemoved > 0) {
+      console.log(`🧹 [MAINTENANCE] Usuários inativos removidos: ${inactiveRemoved}`);
+    }
+  }, 2 * 60 * 60 * 1000); // 2 horas
+  
+  // 🕐 Limpeza inicial após 5 minutos de startup  
+  setTimeout(() => {
+    console.log('🚀 [STARTUP] Executando limpeza inicial do sistema...');
+    
+    const timersCleaned = cleanupOrphanedTimers();
+    const inactiveRemoved = cleanupInactiveUsers(1); // Mais agressivo no startup (1h)
+    const memoryStats = calculateMemoryUsage();
+    
+    console.log(`🚀 [STARTUP] Limpeza concluída: ${timersCleaned} timers, ${inactiveRemoved} usuários inativos removidos`);
+    console.log(`📊 [STARTUP] Status da memória: ${memoryStats.totalUsers} usuários, score ${memoryStats.memoryScore}/100`);
+  }, 5 * 60 * 1000); // 5 minutos
+}
 
 
 

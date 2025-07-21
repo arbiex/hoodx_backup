@@ -50,7 +50,7 @@ export default function CreditDisplay() {
 
   if (fxaLoading) {
     return (
-      <Card className="border-purple-500/30 backdrop-blur-sm">
+      <Card className="border-gray-700/30 backdrop-blur-sm">
         <CardContent className="p-6">
           <div className="flex items-center justify-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-400"></div>
@@ -63,7 +63,7 @@ export default function CreditDisplay() {
 
   return (
     <>
-      <Card className="border-purple-500/30 backdrop-blur-sm">
+      <Card className="border-gray-700/30 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-purple-400 font-mono">
             <Coins className="h-5 w-5" />

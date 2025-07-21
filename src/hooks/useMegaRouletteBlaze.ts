@@ -304,7 +304,7 @@ export function useMegaRouletteBlaze() {
           if (activeMonitoringSession === sessionId) {
             setState(prev => {
               if (prev.isActive) {
-                monitoringTimeoutRef = setTimeout(monitorHistory, 3000); // 3 segundos - otimizado!
+                monitoringTimeoutRef = setTimeout(monitorHistory, 5000); // 5 segundos - evitando erro 429
               }
               return prev;
             });

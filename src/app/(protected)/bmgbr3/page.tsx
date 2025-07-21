@@ -11,18 +11,17 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { fetchWithCacheBusting } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Play, Square, RefreshCw, Zap, Key, Settings, BarChart3, Power, Target, TrendingUp, TrendingDown, Shield, Brain, Bot, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Square, RefreshCw, Zap, Key, Settings, Power, Target, Play } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
 import CreditDisplay from '@/components/CreditDisplay';
+import useBmgbr3Api from '@/hooks/useBmgbr3Api';
+import useTimerManager from '@/hooks/useTimerManager';
 
-import OperationsCard from '@/components/OperationsCard';
 
-// import GameStatisticsCard from '@/components/GameStatisticsCard'; // 🛑 DESATIVADO
 
 /**
  * 🔇 SISTEMA DE POLLING ULTRA-SILENCIOSO - Versão 3.0
@@ -49,7 +48,29 @@ import OperationsCard from '@/components/OperationsCard';
  * 🎯 RESULTADO: Sistema ultra-eficiente, polling verdadeiramente silencioso
  */
 
+/**
+ * 🔄 NOVO: Interface para estado consolidado de operação
+ * Substitui todos os estados conflitantes em um único estado coerente
+ */
+interface ConsolidatedOperationState {
+  status: 'idle' | 'loading' | 'connecting' | 'operating' | 'stopping' | 'mission_progress';
+  isActive: boolean;           // Substitui operationActive - se operação está ativa no backend
+  canStop: boolean;           // Substitui canSafelyStop - se é seguro parar
+  forceDisplay: boolean;      // Substitui forceOperatingDisplay - força exibição
+  lastAction?: string;        // Para debug/tracking
+  connectedToBackend?: boolean; // Se está conectado ao backend
+}
+
 export default function BMGBR3() {
+  // 🔄 NOVO: Hook customizado para API
+  const api = useBmgbr3Api();
+
+  // 🕐 NOVO: Gerenciador de timers centralizado (previne memory leaks)
+  const timers = useTimerManager({ 
+    debug: false, // Habilitar para debugging
+    maxTimers: 20 // Limite seguro para esta página
+  });
+
   // Estados básicos
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -97,8 +118,16 @@ export default function BMGBR3() {
     martingaleLevel?: number;
   }>>([]);
 
-  // Estados da operação
-  const [operationActive, setOperationActive] = useState(false);
+  // 🔄 NOVO: Estado consolidado de operação (substitui todos os estados conflitantes)
+  const [operation, setOperation] = useState<ConsolidatedOperationState>({
+    status: 'idle',
+    isActive: false,
+    canStop: true,
+    forceDisplay: false,
+    lastAction: undefined,
+    connectedToBackend: false
+  });
+
   // Atualizar o tipo de operationState para incluir 'mode'
   const [operationState, setOperationState] = useState<{
     mode?: 'real' | 'analysis';
@@ -125,12 +154,56 @@ export default function BMGBR3() {
     cached?: boolean; // Cache para evitar piscar
   }>({ connected: false, lastUpdate: Date.now(), cached: false });
 
-  // Estados para operação
-  const [isOperating, setIsOperating] = useState(false);
-  const [operationLoading, setOperationLoading] = useState(false);
+  // 🔄 NOVO: Estados derivados do estado consolidado para compatibilidade
+  const isOperating = operation.status === 'operating' || operation.isActive;
+  const operationLoading = operation.status === 'loading' || operation.status === 'connecting';
+  const missionInProgress = operation.status === 'mission_progress';
+  const canSafelyStop = operation.canStop;
+  const forceOperatingDisplay = operation.forceDisplay;
+
+  // 🔄 FUNÇÕES AUXILIARES: Para atualizar o estado consolidado
+  const setIsOperating = (value: boolean) => {
+    setOperation(prev => ({
+      ...prev,
+      status: value ? 'operating' : 'idle',
+      isActive: value
+    }));
+  };
+
+  const setOperationLoading = (value: boolean) => {
+    setOperation(prev => ({
+      ...prev,
+      status: value ? 'loading' : 'idle'
+    }));
+  };
+
+  const setMissionInProgress = (value: boolean) => {
+    setOperation(prev => ({
+      ...prev,
+      status: value ? 'mission_progress' : 'idle'
+    }));
+  };
+
+  const setCanSafelyStop = (value: boolean) => {
+    setOperation(prev => ({
+      ...prev,
+      canStop: value
+    }));
+  };
+
+  const setForceOperatingDisplay = (value: boolean) => {
+    setOperation(prev => ({
+      ...prev,
+      forceDisplay: value
+    }));
+  };
+
+  // Estados mantidos (não conflitam)
   const [operationStatus, setOperationStatus] = useState<string>('INATIVO');
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSuccess, setOperationSuccess] = useState<string | null>(null);
+  // 🚫 NOVO: Controle global para exibir mensagens de status de conexão
+  const [allowConnectionStatusMessages, setAllowConnectionStatusMessages] = useState(false);
   
   // Estados para token da Blaze
   const blazeConfigModal = useModal();
@@ -161,10 +234,7 @@ export default function BMGBR3() {
     };
   } | null>(null);
 
-  // Estados para modal de estratégia - REMOVIDOS
-  // const [strategyModalOpen, setStrategyModalOpen] = useState(false);
-  // const [strategyLoading, setStrategyLoading] = useState(false);
-  // const [selectedTipValue, setSelectedTipValue] = useState<number | null>(null);
+  // Estados para modal de estratégia - REMOVIDOS (limpeza concluída)
 
   // NOVO: Estado da janela de apostas
   const [bettingWindow, setBettingWindow] = useState<{
@@ -218,11 +288,15 @@ export default function BMGBR3() {
 
   // 🔇 ESTADO MINIMALISTA: Apenas o essencial para comparação
   const [lastKnownGameId, setLastKnownGameId] = useState<string | null>(null);
+  
+  // 🛡️ PROTEÇÃO CONTRA DUPLICAÇÃO: Cache de gameIds já processados
+  const [processedGameIds, setProcessedGameIds] = useState<Set<string>>(new Set());
+  const [logProcessedGameIds, setLogProcessedGameIds] = useState<Set<string>>(new Set());
 
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [isInsightsActive, setIsInsightsActive] = useState(false);
-  const insightsPollingRef = useRef<NodeJS.Timeout | null>(null);
+  // 🕐 REMOVIDO: insightsPollingRef - agora gerenciado pelo useTimerManager
   
   // 🎯 NOVO: Sistema de polling inteligente
   const [pollingMode, setPollingMode] = useState<'inactive' | 'waiting' | 'normal'>('inactive');
@@ -235,9 +309,6 @@ export default function BMGBR3() {
 
 
 
-  // ✅ NOVO: Estado para controlar quando é seguro parar
-  const [canSafelyStop, setCanSafelyStop] = useState(true);
-  
   // 🛑 NOVO: Estado para controle do botão baseado no modo (análise/real)
   const [stopButtonControl, setStopButtonControl] = useState<{
     canStop: boolean;
@@ -245,41 +316,34 @@ export default function BMGBR3() {
     isBlocked: boolean;
   } | null>(null);
 
-
-
-  // ✅ NOVO: Estado para forçar exibição como operando (evita piscar)
-  const [forceOperatingDisplay, setForceOperatingDisplay] = useState(false);
-
   // Estados para controle de segurança baseado em status foram removidos - apenas M4 Direto
 
   // Removed: Auto Bot and Stop Gain states
   
-  // 🔧 NOVO: Estados para controlar se debug está rodando
-  const [debugRunning, setDebugRunning] = useState<boolean>(false);
-  const [syncRunning, setSyncRunning] = useState<boolean>(false);
-  const [lastDebugAction, setLastDebugAction] = useState<string | null>(null);
-  const [previousWaitingState, setPreviousWaitingState] = useState<boolean>(false);
-  const [debugHidden, setDebugHidden] = useState<boolean>(false);
+  // 🔧 Estados de debug removidos - funcionalidade simplificada
   const [lastProcessedInsightGameId, setLastProcessedInsightGameId] = useState<string | null>(null);
   
-  // 📈 NOVO: Estados para Progressão de Stake por Rodadas
-  const [stakeProgressionEnabled, setStakeProgressionEnabled] = useState(false);
-  const [stakeProgressionRounds, setStakeProgressionRounds] = useState(30);
-  const [stakeProgressionMultiplier, setStakeProgressionMultiplier] = useState(2);
-  const [stakeProgressionMaxMultiplications, setStakeProgressionMaxMultiplications] = useState(3);
-  const [stakeProgressionCurrentMultiplications, setStakeProgressionCurrentMultiplications] = useState(0);
-  const [stakeProgressionRoundCounter, setStakeProgressionRoundCounter] = useState(0);
-  const [stakeProgressionInitialStake, setStakeProgressionInitialStake] = useState(0.50);
-
-  // Removed: Stop Gain states
-
-  // Estado para controlar regra de frequência foi removido - apenas M4 Direto
+  // 📈 Estados para Progressão de Stake removidos - funcionalidade descontinuada
 
   // 🔥 NOVO: Modo M4 direto sempre habilitado nativamente
   const m4DirectModeEnabled = true;
 
   // 🔥 NOVO: Estado para tipo de aposta do modo M4 direto
   const [m4DirectBetType, setM4DirectBetType] = useState<'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high'>('await');
+
+  // 🐛 DEBUG: Monitorar mudanças no tipo de aposta (temporário)
+  useEffect(() => {
+    console.log('🔄 FRONTEND: m4DirectBetType mudou para:', m4DirectBetType);
+  }, [m4DirectBetType]);
+
+  
+
+
+
+
+
+
+
 
   // 🔄 NOVO: Estado para controlar última atualização dos dados históricos
   const [lastHistoryUpdate, setLastHistoryUpdate] = useState<Date | null>(null);
@@ -290,9 +354,7 @@ export default function BMGBR3() {
   // 🔥 NOVO: Timestamp da última verificação de ativação (para throttling)
   const lastActivationCheckRef = useRef<number>(0);
 
-  // Estados removidos - stake agora é aplicada diretamente
-
-  // Função checkFrequencyThresholds removida - não mais necessária no modo M4 direto
+  // Estados removidos - limpeza concluída
 
   // 💰 NOVA LÓGICA: Array dos níveis de stake para 12 níveis - Repetição Inteligente
   const STAKE_LEVELS = [
@@ -354,30 +416,10 @@ export default function BMGBR3() {
     return amountWon - totalSpent;
   };
 
-  // 🚀 NOVA FUNÇÃO: Atualizar multiplicador de stake
+  // 🚀 NOVA FUNÇÃO: Atualizar multiplicador de stake (usando hook customizado)
   const updateStakeMultiplier = async (newMultiplier: number) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        console.error('❌ Usuário não autenticado');
-        return;
-      }
-
-      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          action: 'update-strategy',
-          stakeMultiplier: newMultiplier
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Erro HTTP: ${response.status}`);
-      }
-
-      const result = await response.json();
+      const result = await api.updateStakeMultiplier(newMultiplier);
       
       if (result.success) {
         console.log(`✅ Multiplicador de stake atualizado para ${newMultiplier}x`);
@@ -407,29 +449,12 @@ export default function BMGBR3() {
 
   // 🚀 REMOVIDO: Função de progressão automática não aplicável à nova lógica
 
-  // 🔥 NOVO: Inicializar coleta de insights automaticamente
+  // 🔥 NOVO: Inicializar polling de insights automaticamente (otimizado para evitar erro 429)
   useEffect(() => {
-    const initializeInsights = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        // Verificar se o usuário tem token configurado
-        const { data: userTokens } = await supabase
-          .from('user_tokens')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('casino_code', 'BLAZE');
-        
-        // Se tem token configurado, iniciar coleta automaticamente
-        if (userTokens && userTokens.length > 0 && userTokens.some(token => token.is_active && token.token && token.token.trim() !== '')) {
-          await startInsightsCollection();
-        } else {
-          // Se não tem token, manter polling inativo
-          setPollingMode('inactive');
-        }
-      }
-    };
-
-    initializeInsights();
+    // Sempre iniciar polling de insights com intervalo otimizado
+    updatePollingMode('inactive'); // 3 segundos quando inativo para evitar erro 429
+    startInsightsPolling();
+    setIsInsightsActive(true);
   }, []);
 
   // 🔥 REMOVIDO: Funções para carregar mais resultados - agora fixo em 20 resultados
@@ -441,21 +466,7 @@ export default function BMGBR3() {
   //   setVisibleResultsCount(19);
   // };
 
-  // 🔥 REMOVIDO: Não resetar contador quando novos dados chegam - agora fixo em 20
-  // useEffect(() => {
-  //   // ✅ CORREÇÃO: Verificar insightsData.results em vez de insightsData diretamente
-  //   if (insightsData && insightsData.results && Array.isArray(insightsData.results) && insightsData.results.length > 0) {
-  //     // ✅ Debug: Verificar se dados estão na ordem correta no estado
-  //     console.log('🔄 Dados no estado após atualização:', {
-  //       totalResults: insightsData.results.length,
-  //       primeiros3: insightsData.results.slice(0, 3).map((r: any) => `${r.number} (${r.game_id})`),
-  //       lastGameId: insightsData.lastGameId,
-  //       lastUpdate: new Date(insightsData.lastUpdate).toLocaleTimeString()
-  //     });
-  //     
-  //     setVisibleResultsCount(20); // Mantém fixo em 20
-  //   }
-  // }, [insightsData]);
+  // 🔥 useEffect de visibleResultsCount removido - funcionalidade descontinuada
 
 
 
@@ -503,12 +514,6 @@ export default function BMGBR3() {
     return parseFloat(cleanValue) || 0;
   };
 
-  // 🎯 NOVA FUNÇÃO: Calcular valor alvo do Stop Gain baseado no stake
-  const calculateStopGainTarget = (percentage: number): number => {
-    const baseAmount = totalMartingaleAmount * 3; // 3x o total do martingale como base
-    return (baseAmount * percentage) / 100;
-  };
-
   // 📊 FUNÇÃO SIMPLIFICADA: Agora os dados vêm diretamente da API
   const processMartingaleLogs = (logs: any[]) => {
     // Função mantida para compatibilidade, mas os dados principais vêm da API
@@ -541,50 +546,21 @@ export default function BMGBR3() {
     setOperationState(null);
     setLastTenResults([]);
     
+    // 🧹 NOVO: Resetar cache de logs processados ao resetar operação
+    setLogProcessedGameIds(new Set());
+    
     // Função removida
   };
 
-  // 🚀 NOVA FUNÇÃO: Verificar se progressão pode ser reativada
-  const checkProgressionReactivation = () => {
-    // Função removida - progressão automática removida
-  };
+  // 🚀 Funções de progressão automática removidas - funcionalidade descontinuada
 
-  // 🚀 NOVA FUNÇÃO: Processar aposta para progressão automática
-  const processProgressionBet = async () => {
-    // Função removida - progressão automática removida
-  };
+  // 🚀 useEffects de progressão automática removidos - funcionalidade descontinuada
 
-  // 🚀 NOVA FUNÇÃO: Calcular quantas apostas faltam para próxima progressão
-  const getProgressionStatus = () => {
-    // Função removida - progressão automática removida
-    return null;
-  };
-
-  // 🚀 NOVA FUNÇÃO: Enviar configurações de progressão para o backend
-  const updateProgressionSettings = async () => {
-    // Função removida - progressão automática removida
-  };
-
-  // 🚀 EFEITO: Atualizar configurações no backend quando mudarem
-  useEffect(() => {
-    // Efeito removido - progressão automática removida
-  }, []);
-
-  // 🚀 EFEITO: Processar totalizado do histórico
-  useEffect(() => {
-    // Função removida - progressão automática removida
-  }, []);
-
-  // 🚀 NOVA: Resetar progressão automática
-  const resetProgressionEffect = () => {
-    // Função removida - progressão automática removida
-  };
-
-  // 🚀 REMOVIDO: Efeito de progressão automática não aplicável à nova lógica
+  // 🚀 Funções de reset da progressão automática removidas - funcionalidade descontinuada
 
   // 🎯 FUNÇÃO INTELIGENTE: Determina quando é seguro parar a operação
   const checkCanSafelyStop = () => {
-    if (!isOperating || !operationActive) {
+    if (!isOperating || !operation.isActive) {
       setCanSafelyStop(true);
       return;
     }
@@ -602,7 +578,7 @@ export default function BMGBR3() {
     // - Janela de apostas aberta + bot vai apostar
     if (operationState?.waitingForResult || 
         (operationState && operationState.martingaleLevel > 0) ||
-        (bettingWindow?.isOpen && operationActive)) {
+        (bettingWindow?.isOpen && operation.isActive)) {
       setCanSafelyStop(false);
       return;
     }
@@ -614,10 +590,17 @@ export default function BMGBR3() {
   // 🔄 Executar verificação sempre que estados mudarem
   useEffect(() => {
     checkCanSafelyStop();
-  }, [isOperating, operationActive, operationState, bettingWindow, stopButtonControl]);
+  }, [isOperating, operation.isActive, operationState, bettingWindow, stopButtonControl]);
 
   // 🎯 NOVO: Controlar modo de polling baseado no estado da operação
   useEffect(() => {
+    console.log('🔄 [DEBUG] useEffect polling - Estados:', {
+      waitingForResult: operationState?.waitingForResult,
+      isOperating,
+      operationIsActive: operation.isActive,
+      isInsightsActive
+    });
+    
     if (operationState?.waitingForResult) {
       // Aguardando resultado - polling rápido
       updatePollingMode('waiting');
@@ -627,7 +610,7 @@ export default function BMGBR3() {
         startInsightsPolling();
         setIsInsightsActive(true);
       }
-    } else if (isOperating && operationActive) {
+    } else if (isOperating && operation.isActive) {
       // Operação ativa mas não aguardando resultado - polling normal
       updatePollingMode('normal');
       
@@ -637,22 +620,17 @@ export default function BMGBR3() {
         setIsInsightsActive(true);
       }
     } else {
-      // Operação inativa - manter polling lento se temos tokens
+      // Operação inativa - manter polling ativo sempre para insights
       updatePollingMode('inactive');
       
-      // 🔧 NOVO: Manter polling ativo se temos tokens válidos
-      if (authTokens?.ppToken && !isInsightsActive) {
+      // 🔧 CRÍTICO: SEMPRE manter polling ativo para insights, mesmo após missão cumprida
+      if (!isInsightsActive) {
+        console.log('🔄 [FRONTEND] Reativando polling após operação inativa');
         startInsightsPolling();
         setIsInsightsActive(true);
       }
-      
-      // Só desativar polling se não temos tokens
-      if (!authTokens?.ppToken && isInsightsActive) {
-        stopInsightsPolling();
-        setIsInsightsActive(false);
       }
-    }
-  }, [operationState?.waitingForResult, isOperating, operationActive, isInsightsActive, authTokens?.ppToken]);
+  }, [operationState?.waitingForResult, isOperating, operation.isActive, isInsightsActive]);
 
   // 🚫 CACHE: Atualizar status da conexão apenas quando necessário
   const updateConnectionStatusCached = useCallback((connected: boolean, error?: string) => {
@@ -673,14 +651,16 @@ export default function BMGBR3() {
 
   // 🔄 NOVO: Função para resetar configurações de segurança
   const resetSafetySettings = () => {
-    // Estados de status seguro e frequência removidos - apenas M4 direto
     // 🔥 MODO M4 DIRETO: sempre habilitado nativamente
-    setM4DirectBetType('await'); // 🔥 NOVO: Resetar tipo de aposta para aguardar
+    setM4DirectBetType('await'); // Resetar tipo de aposta para aguardar
     setRealModeActivationAttempted(false);
-    // 🔄 NOVO: Limpar também mensagens de erro/sucesso
+          // 🔄 RESETAR ESTADOS DE OPERAÇÃO
+      setIsOperating(false);
+      // 🎯 RESETAR CONTROLE DE BOTÕES
+      setMissionInProgress(false);
+    // Limpar mensagens de erro/sucesso
     setOperationError(null);
     setOperationSuccess(null);
-    // 🚀 NOVA: Resetar progressão automática - função removida
     console.log('🔄 Configurações resetadas - Bot funcionará em modo aguardar');
   };
 
@@ -723,7 +703,6 @@ export default function BMGBR3() {
     // Se desconectado e ainda operando, forçar parada
     if (!connectionStatus.connected && isOperating) {
       setIsOperating(false);
-      setOperationActive(false);
     }
   }, [connectionStatus.connected, isOperating]);
 
@@ -741,15 +720,7 @@ export default function BMGBR3() {
     }
   }, [fullHistoryRecords]);
 
-  // 🛑 POLLING DESATIVADO: Dados atualizados apenas via insights polling
-  // useEffect(() => {
-  //   if (historyRecords.length > 0) {
-  //     const updateInterval = setInterval(() => {
-  //       loadFullHistoryRecords();
-  //     }, 30000);
-  //     return () => clearInterval(updateInterval);
-  //   }
-  // }, [historyRecords]);
+  // 🛑 useEffect de polling desativado - funcionalidade descontinuada
 
   // 🤖 REMOVIDO: Monitoramento de limiares não é mais necessário - agora é em tempo real via WebSocket
 
@@ -823,25 +794,11 @@ export default function BMGBR3() {
 
   // 🔥 NOVO: Funções para o sistema de insights local
   const startInsightsCollection = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
     try {
       setInsightsLoading(true);
       setInsightsError(null);
 
-      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          user_id: `polling_${user.id}`,
-          action: 'start'
-        })
-      });
-
-      const result = await response.json();
+      const result = await api.startInsights();
 
       if (result.success) {
         setIsInsightsActive(true);
@@ -857,24 +814,10 @@ export default function BMGBR3() {
   };
 
   const stopInsightsCollection = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
     try {
       setInsightsLoading(true);
 
-      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          user_id: `polling_${user.id}`,
-          action: 'stop'
-        })
-      });
-
-      const result = await response.json();
+      const result = await api.stopInsights();
 
       if (result.success) {
         setIsInsightsActive(false);
@@ -891,35 +834,33 @@ export default function BMGBR3() {
   };
 
   const startInsightsPolling = () => {
-    // Limpar polling anterior se existir
-    if (insightsPollingRef.current) {
-      clearInterval(insightsPollingRef.current);
-    }
-
     // Fazer primeira requisição imediatamente
-    pollInsightsData();
+    pollUnifiedData();
 
-    // 🎯 POLLING INTELIGENTE: Adapta baseado no estado da operação
+    // 🎯 POLLING UNIFICADO: Uma única fonte para tudo (logs + card)
     const interval = getPollingInterval();
-    insightsPollingRef.current = setInterval(pollInsightsData, interval);
+    timers.setInterval(
+      pollUnifiedData, 
+      interval, 
+      'unified-polling',
+      'Polling unificado (logs + card)'
+    );
   };
 
   // 🎯 NOVO: Sistema de polling inteligente baseado no estado
   const getPollingInterval = () => {
     const intervals = {
-      waiting: 1000,  // 1s - Polling rápido quando aguardando resultado
-      normal: 1000,   // 1s - Polling normal durante operação
-      inactive: 1000  // 1s - Polling constante
+      waiting: 2000,  // 2s - Polling quando aguardando resultado
+      normal: 2000,   // 2s - Polling normal durante operação
+      inactive: 3000  // 3s - Polling mais lento quando inativo
     };
     
     return intervals[pollingMode] || intervals.inactive;
   };
 
   const stopInsightsPolling = () => {
-    if (insightsPollingRef.current) {
-      clearInterval(insightsPollingRef.current);
-      insightsPollingRef.current = null;
-    }
+    // Limpar timer usando o gerenciador centralizado
+    timers.clearTimer('unified-polling');
   };
 
   // 🎯 NOVO: Atualizar modo de polling e reiniciar com novo intervalo
@@ -934,55 +875,66 @@ export default function BMGBR3() {
     }
   };
 
-  // 🔇 POLLING ULTRA-SILENCIOSO: Zero logs, só dispara quando há mudanças REAIS
-  const pollInsightsData = async () => {
+      // 🔄 POLLING UNIFICADO: Uma única fonte para TUDO (logs + card)
+  const pollUnifiedData = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 🚫 DEBOUNCE: Evita chamadas simultâneas
-    if (insightsLoading) return;
+    // 🔄 DEBOUNCE SUAVIZADO: Permite sobreposição controlada
+    if (insightsLoading) {
+      setTimeout(() => setInsightsLoading(false), 2000);
+      return;
+    }
     setInsightsLoading(true);
 
-    try {
-      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          user_id: `polling_${user.id}`,
-          action: 'get'
-        })
-      });
+    // ⚠️ DELAY RANDÔMICO: Evitar burst de requests simultâneos  
+    const randomDelay = Math.random() * 300; // 0-300ms delay reduzido
+    await new Promise(resolve => setTimeout(resolve, randomDelay));
 
-      const result = await response.json();
+    try {
+      const result = await api.getInsights();
+
+      // ⚠️ TRATAMENTO ERRO 429: Rate limiting detectado
+      if (result.error && result.error.includes('429')) {
+        console.log('⚠️ Rate limit atingido - pausando polling por 5 segundos');
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Reduzido para 5s
+        return;
+      }
       
-      // 🔇 SILENCIOSO TOTAL: Ignorar TODOS os erros sem logs
+      // 🔇 SILENCIOSO: Ignorar erros sem logs  
       if (!result.success) return;
 
       if (result.success && result.data) {
-        // 🚀 HASH ULTRA-RÁPIDO: Apenas gameId do primeiro resultado
+        // 🎯 DETECÇÃO SIMPLES: Apenas gameId diferente
         const latestGameId = result.data.results[0]?.gameId || '';
+                const latestResult = result.data.results[0];
         
-        // ✅ COMPARAÇÃO INSTANTÂNEA: Só gameId mais recente
-        if (latestGameId !== lastKnownGameId && latestGameId !== '') {
+        // ✅ COMPARAÇÃO MELHORADA: gameId diferente + não processado ainda
+        const hasNewGameId = latestGameId !== lastKnownGameId && 
+                           latestGameId !== '' && 
+                           !processedGameIds.has(latestGameId);
+        
+                if (hasNewGameId) {
+          // 🛡️ ATUALIZAR IMEDIATAMENTE para evitar reprocessamento
+          setLastKnownGameId(latestGameId);
+          setProcessedGameIds(prev => new Set(prev).add(latestGameId));
           
-          // 🎯 ATUALIZAÇÃO BATCHED: Processar e atualizar de uma vez
-        const formattedData = result.data.results.map((item: any) => ({
-          id: item.id,
-          game_id: item.gameId,
-          number: item.number,
-          color: item.color,
-          game_result: item.gameResult,
-          timestamp: new Date(item.timestamp).toISOString(),
-          created_at: new Date(item.timestamp).toISOString()
-        }));
-        
-        const sortedData = formattedData.sort((a: any, b: any) => {
-          return parseInt(b.game_id) - parseInt(a.game_id);
-        });
-        
-          // 🔇 ATUALIZAÇÃO INTELIGENTE: Sem dupla verificação desnecessária
+          // 🎯 PROCESSAR dados uma única vez
+          const formattedData = result.data.results.map((item: any) => ({
+            id: item.id,
+            game_id: item.gameId,
+            number: item.number,
+            color: item.color,
+            game_result: item.gameResult,
+            timestamp: new Date(item.timestamp).toISOString(),
+            created_at: new Date(item.timestamp).toISOString()
+          }));
+          
+          const sortedData = formattedData.sort((a: any, b: any) => {
+            return parseInt(b.game_id) - parseInt(a.game_id);
+          });
+          
+          // ✅ ATUALIZAR dados do card
           setInsightsData({
             results: sortedData,
             totalResults: result.data.totalResults || sortedData.length,
@@ -992,19 +944,110 @@ export default function BMGBR3() {
             lastGameId: latestGameId
           });
           
-          setLastKnownGameId(latestGameId);
-          setInsightsError(null);
+          // 🎯 GERAR LOGS unificados (APENAS UMA VEZ por gameId)
+          if (latestResult && latestResult.number !== undefined && !logProcessedGameIds.has(latestGameId)) {
+            // 🛡️ MARCAR COMO PROCESSADO PARA LOGS IMEDIATAMENTE
+            setLogProcessedGameIds(prev => new Set(prev).add(latestGameId));
+            
+            await generateUnifiedLogs(latestResult, user.id);
+            
+            // 🔄 ATUALIZAR LOGS NO FRONTEND: Buscar logs atualizados após processamento
+            try {
+              const logsResult = await api.getWebSocketLogs();
+              if (logsResult.success && logsResult.data?.logs) {
+                setWebsocketLogs(logsResult.data.logs);
+              }
+            } catch (error) {
+              // Silencioso - logs não críticos para operação
+            }
+          }
           
-          // 🎯 SISTEMA AUTOMÁTICO: O backend já processa automaticamente quando gameId corresponde
-          // Não há necessidade de processamento manual no frontend
+
+          
+                    setInsightsError(null);
         }
-        // ✅ DADOS IGUAIS: Retorno silencioso absoluto, zero re-renders
+        // ✅ DADOS IGUAIS: Retorno silencioso absoluto
+      }
+      
+      // 🧹 LIMPEZA AUTOMÁTICA: Manter cache de logs processados controlado
+      if (logProcessedGameIds.size > 50) {
+        const array = Array.from(logProcessedGameIds);
+        const toKeep = array.slice(-30); // Manter apenas os últimos 30
+        setLogProcessedGameIds(new Set(toKeep));
       }
     } catch (error) {
-      // 🔇 SILENCIOSO TOTAL: Zero logs, zero console
+      // ⚠️ TRATAMENTO MELHORADO: Log apenas erros críticos
+      if (error instanceof Error && error.message.includes('429')) {
+        console.log('⚠️ Rate limiting detectado');
+      }
+      setTimeout(() => setInsightsLoading(false), 100);
     } finally {
-      // 🚫 DEBOUNCE: Libera o lock após completar
       setInsightsLoading(false);
+    }
+  };
+
+  // 🎯 FUNÇÃO UNIFICADA: Gerar logs do resultado (substituindo WebSocket)
+  const generateUnifiedLogs = async (latestResult: any, userId: string) => {
+    // 🛡️ VALIDAÇÕES rigorosas para evitar dados corrompidos
+    const number = latestResult.number;
+    const color = latestResult.color;
+    const gameId = latestResult.gameId;
+    
+    // ✅ VALIDAR número da roleta (0-36)
+    if (typeof number !== 'number' || number < 0 || number > 36) {
+      console.warn('⚠️ NÚMERO INVÁLIDO detectado:', number, '- Ignorando processamento');
+      return;
+    }
+    
+    // ✅ VALIDAR gameId (não deve ser um número de resultado)
+    if (!gameId || String(gameId).length < 5) {
+      console.warn('⚠️ GAMEID INVÁLIDO detectado:', gameId, '- Ignorando processamento');
+      return;
+    }
+    
+    // 🛡️ PROTEÇÃO EXTRA: gameId não deve ser igual ao número (dados corrompidos)
+    if (String(gameId) === String(number)) {
+      console.warn('⚠️ DADOS CORROMPIDOS detectados: gameId igual ao número:', gameId, '- Ignorando');
+      return;
+    }
+    
+    // ✅ VALIDAR cor
+    if (!['red', 'black', 'green'].includes(color)) {
+      console.warn('⚠️ COR INVÁLIDA detectada:', color, '- Ignorando processamento');
+      return;
+    }
+    
+    // 🎯 Gerar características do resultado
+    let characteristics = [];
+    
+    if (number === 0) {
+      characteristics.push('Verde');
+    } else {
+      // Cor
+      characteristics.push(color === 'red' ? 'Vermelho' : 'Preto');
+      
+      // Par/Ímpar
+      characteristics.push(number % 2 === 0 ? 'Par' : 'Ímpar');
+      
+      // Baixo/Alto
+      characteristics.push(number <= 18 ? 'Baixo' : 'Alto');
+    }
+    
+    const resultDescription = `${number} - ${characteristics.join(' - ')}`;
+    
+    // 🔄 CHAMAR API para processar resultado (substituindo processamento WebSocket)
+    try {
+      await api.mainApi('process-unified-result', {
+        gameId: gameId,
+        number: number,
+        color: color,
+        timestamp: Date.now(),
+        source: 'unified_polling'
+      });
+      
+      // Log será gerado pelo backend - evitar duplicação
+    } catch (error) {
+      console.error('❌ Erro ao processar resultado unificado:', error);
     }
   };
 
@@ -1637,33 +1680,34 @@ export default function BMGBR3() {
     lastTenResults[0]?.timestamp // Timestamp do mais recente
   ]);
 
-  // ✅ CORREÇÃO: Função getTemperatureStatus memorizada
-  const getTemperatureStatus = useCallback((rounds: number | string) => {
-    if (rounds === '--' || rounds === '') return { text: '', color: 'text-gray-400' };
-    
-    const numRounds = typeof rounds === 'string' ? parseInt(rounds.replace('r', '')) : rounds;
-    
-    if (numRounds < 5) {
-      return { text: 'muito frio', color: 'text-cyan-400' };
-    } else if (numRounds >= 5 && numRounds <= 9) {
-      return { text: 'frio', color: 'text-cyan-400' };
-    } else if (numRounds >= 10 && numRounds <= 14) {
-      return { text: 'morno', color: 'text-yellow-400' };
-    } else if (numRounds >= 15 && numRounds <= 24) {
-      return { text: 'quente', color: 'text-orange-400' };
-    } else {
-      return { text: 'muito quente', color: 'text-red-400' };
+  // ✅ CORREÇÃO: Função getColorInfo memorizada (removida lógica de temperatura)
+  const getColorInfo = useCallback((title: string) => {
+    switch (title) {
+      case 'VERMELHO':
+        return { text: 'vermelho', color: 'text-white' };
+      case 'PRETO':
+        return { text: 'preto', color: 'text-white' };
+      case 'PAR':
+        return { text: 'par', color: 'text-white' };
+      case 'ÍMPAR':
+        return { text: 'ímpar', color: 'text-white' };
+      case 'BAIXAS (1-18)':
+        return { text: 'baixas', color: 'text-white' };
+      case 'ALTAS (19-36)':
+        return { text: 'altas', color: 'text-white' };
+      default:
+        return { text: 'rodadas', color: 'text-white' };
     }
   }, []);
 
   // 🔇 FUNÇÕES REMOVIDAS: getNumberCharacteristics e formatTimestamp 
   // não são mais necessárias - tooltips são pré-calculados!
 
-  // ✅ CORREÇÃO: Componente memorizado para cada tipo de aposta
+  // ✅ CORREÇÃO: Componente memorizado para cada tipo de aposta (removida lógica de temperatura)
   // Este componente resolve o problema do "piscar" durante o polling:
   // 1. React.memo previne re-renders quando props não mudaram
   // 2. Tooltip integrado evita componentes aninhados desnecessários
-  // 3. Usa função getTemperatureStatus memorizada para performance
+  // 3. Usa função getColorInfo memorizada para mostrar informações de cores
   const InsightCard = React.memo<{
     title: string;
     color: string;
@@ -1671,36 +1715,92 @@ export default function BMGBR3() {
     borderColor: string;
     hoverColor: string;
     rounds: string | number;
-    tooltip: string;
-  }>(({ title, color, bgColor, borderColor, hoverColor, rounds, tooltip }) => {
-    const [isVisible, setIsVisible] = useState(false);
-    const temperatureStatus = getTemperatureStatus(rounds);
+  }>(({ title, color, bgColor, borderColor, hoverColor, rounds }) => {
+    const colorInfo = getColorInfo(title);
     const roundsDisplay = rounds.toString().replace('r', '');
+    const roundsNumber = parseInt(roundsDisplay) || 0;
+
+    // 🎨 Lógica de cores baseada no valor
+    const getNumberColor = (value: number) => {
+      if (value >= 15) return 'text-green-400'; // Verde para 15+
+      if (value >= 10 && value <= 14) return 'text-yellow-400'; // Amarelo para 10-14
+      return 'text-white'; // Branco para <10
+    };
+
+    // 🎯 Mapear título para tipo de aposta
+    const getBetType = (title: string): 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | null => {
+      switch (title) {
+        case 'VERMELHO': return 'red';
+        case 'PRETO': return 'black';
+        case 'PAR': return 'even';
+        case 'ÍMPAR': return 'odd';
+        case 'BAIXAS (1-18)': return 'low';
+        case 'ALTAS (19-36)': return 'high';
+        default: return null;
+      }
+    };
+
+    // 🎮 Verificar estados do botão APOSTAR  
+    const betType = getBetType(title);
+    // 🎯 LÓGICA BASEADA EM APOSTAS REAIS: Habilitado quando apostas estão abertas
+    const isButtonEnabled = isOperating && m4DirectBetType === 'await' && bettingWindow.isOpen;
+    const shouldShowButton = betType !== null; // Sempre mostrar se é um tipo válido
+    
+
+    
+
 
     return (
-      <div className="w-full h-full flex flex-col space-y-2">
-        <div className={`text-xs font-mono ${color} font-bold text-center`}>{title}</div>
-        <div className="relative inline-block">
+      <div className="w-full h-full">
+        <div className="w-full">
           <div
-            onMouseEnter={() => setIsVisible(true)}
-            onMouseLeave={() => setIsVisible(false)}
-            className={`w-full h-full px-3 py-4 ${bgColor} border ${borderColor} rounded-lg ${hoverColor} transition-all cursor-help flex flex-col items-center justify-center min-h-[80px]`}
+            className={`w-full h-full px-4 py-3 bg-gray-800/20 border border-gray-600/30 rounded-lg hover:bg-gray-700/30 transition-all flex items-center justify-between min-h-[60px] ${
+              roundsNumber >= 15 ? 'border-green-500/50 bg-green-500/10' : 
+              roundsNumber >= 10 ? 'border-yellow-500/50 bg-yellow-500/10' : ''
+            }`}
           >
-            <div className={`text-2xl font-bold font-mono ${temperatureStatus.color}`}>
+            <div className="flex items-center gap-3">
+              <div className={`text-xl font-bold font-mono ${getNumberColor(roundsNumber)}`}>
               {roundsDisplay}
             </div>
-            <div className={`text-xs font-mono uppercase ${temperatureStatus.color} mt-1`}>
-              {temperatureStatus.text || 'rodadas'}
+              <div className={`text-xs font-mono uppercase text-white`}>
+              {colorInfo.text}
             </div>
           </div>
-          {isVisible && (
-            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 z-50">
-              <div className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-600 w-[150px] text-center break-words">
-                {tooltip}
-                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800"></div>
-              </div>
+            {shouldShowButton && (
+              <div className="flex items-center justify-center">
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isButtonEnabled && betType) {
+                      handleAutoStartBet(betType);
+                    }
+                  }}
+                  disabled={!isButtonEnabled}
+                  variant="outline"
+                  size="sm"
+                  className={`font-mono transition-all duration-300 ${
+                    isButtonEnabled 
+                      ? 'bg-green-500/20 border-green-500/50 text-green-400 hover:bg-green-500/30' 
+                      : 'bg-gray-600/20 border-gray-600/50 text-gray-400 cursor-not-allowed'
+                  }`}
+                  title={
+                    !isButtonEnabled 
+                      ? !isOperating 
+                        ? 'Clique em "COMEÇAR" primeiro para ativar seleção de tipos'
+                        : m4DirectBetType !== 'await'
+                                                      ? 'Operação em andamento - aguarde finalizar para selecionar novo tipo'  
+                            : bettingWindow.isOpen 
+                              ? 'Apostas abertas - Clique para apostar'
+                              : 'Apostas fechadas - Aguarde abertura da próxima rodada'
+                      : `Apostar automaticamente em ${title}`
+                  }
+                >
+                  <Play className="h-3 w-3" />
+                </Button>
             </div>
           )}
+          </div>
         </div>
       </div>
     );
@@ -1756,61 +1856,7 @@ export default function BMGBR3() {
     );
   });
 
-  // 🔇 COMPONENTE ANTI-PISCAR DEFINITIVO: Tooltip completamente estático
-  const SmallResultRouletteSlot = React.memo<{
-    number: number;
-    gameId: string;
-    timestamp: number;
-    autoBotEnabled: boolean;
-    index: number;
-    isRed: boolean;
-    isGreen: boolean;
-    tooltipContent: string;
-  }>(({ number, gameId, timestamp, autoBotEnabled, index, isRed, isGreen, tooltipContent }) => {
-    const [isVisible, setIsVisible] = useState(false);
-
-    // 🔇 TOOLTIP COMPLETAMENTE ESTÁTICO: Nunca muda após renderização inicial
-
-    return (
-      <div className="relative inline-block">
-        <div
-          onMouseEnter={() => setIsVisible(true)}
-          onMouseLeave={() => setIsVisible(false)}
-          className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold relative cursor-pointer transition-all hover:scale-105 ${
-            isRed 
-              ? 'bg-red-500 text-white' 
-              : isGreen
-                ? 'bg-green-500 text-white'
-                : 'bg-gray-800 text-white border border-gray-600'
-          } ${isGreen && autoBotEnabled ? 'ring-2 ring-green-400 ring-opacity-30' : ''}`}
-        >
-          {number}
-          {/* 🤖 NOVO: Indicador de zero (não contabilizado) */}
-          {isGreen && autoBotEnabled && (
-            <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-green-400 rounded-full opacity-70"></div>
-          )}
-        </div>
-        {isVisible && (
-          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 z-50">
-            <div className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-600 w-[160px] text-center break-words">
-              {tooltipContent}
-              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800"></div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }, (prevProps, nextProps) => {
-    // 🔇 COMPARAÇÃO ESPECÍFICA: Só re-renderizar se props essenciais mudaram
-    return (
-      prevProps.number === nextProps.number &&
-      prevProps.gameId === nextProps.gameId &&
-      prevProps.tooltipContent === nextProps.tooltipContent &&
-      prevProps.isRed === nextProps.isRed &&
-      prevProps.isGreen === nextProps.isGreen &&
-      prevProps.autoBotEnabled === nextProps.autoBotEnabled
-    );
-  });
+  // 🔇 Componente SmallResultRouletteSlot removido - não utilizado
 
   const checkBlazeConfiguration = async () => {
     try {
@@ -1885,7 +1931,7 @@ export default function BMGBR3() {
   };
 
   // 💰 NOVA FUNÇÃO: Atualizar função de início de operação para usar a sequência personalizada
-  const startOperation = async (tipValue: number, forcedBetType?: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | 'standby') => {
+  const startOperation = async (tipValue: number, forcedBetType?: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | 'standby', showConnectionStatus: boolean = true) => {
     // 🔧 TIMEOUT: Adicionar timeout geral para evitar travamento
     const operationTimeout = setTimeout(() => {
       setOperationError('Timeout na operação - tente novamente');
@@ -1997,7 +2043,7 @@ export default function BMGBR3() {
       }
       
       // ✅ ETAPA 3: Conectar usando tokens gerados via Edge Function
-      const connectResponse = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
+      const connectResponse = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2027,7 +2073,7 @@ export default function BMGBR3() {
             hardwareConcurrency: navigator.hardwareConcurrency,
             connectionType: (navigator as any).connection?.effectiveType
           },
-          // Removed: stopGainPercentage
+          
           // 🔥 NOVO: Enviar configuração do modo M4 direto
           m4DirectModeEnabled: m4DirectModeEnabled,
           // 🔥 CORREÇÃO: Não enviar tipo de aposta em modo standby
@@ -2060,12 +2106,15 @@ export default function BMGBR3() {
 
       while (!connectionVerified && retryCount < maxRetries) {
         try {
-          // Mostrar feedback visual ao usuário
+          // Mostrar feedback visual apenas se permitido globalmente E solicitado
+          if (allowConnectionStatusMessages && showConnectionStatus) {
           setOperationError(`Verificando conexão... (${retryCount + 1}/${maxRetries})`);
+          }
+
           
           await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Aguardar 1s, 2s, 3s
           
-          const statusResponse = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
+          const statusResponse = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2096,14 +2145,7 @@ export default function BMGBR3() {
         
         // Fazer uma tentativa simples de ping para verificar se a API está respondendo
         try {
-          await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: user.id,
-              action: 'get-websocket-logs'
-            })
-          });
+          await api.getWebSocketLogs();
           console.log('🔧 [RECONEXÃO] API respondendo normalmente');
         } catch (pingError) {
           console.warn('🔧 [RECONEXÃO] API pode estar com problemas:', pingError);
@@ -2116,19 +2158,8 @@ export default function BMGBR3() {
       // ✅ ETAPA 1.7: Aguardar um pouco para garantir que foi salvo
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // ✅ ETAPA 2: Iniciar operação (start-operation)
-      const operationResponse = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          action: 'start-operation'
-        }),
-      });
-
-      const operationResult = await operationResponse.json();
+      // ✅ ETAPA 2: Iniciar operação (start-operation) - usando hook
+      const operationResult = await api.startOperation();
 
       if (!operationResult.success) {
         console.error('🔧 [RECONEXÃO] Erro ao iniciar operação:', operationResult.error);
@@ -2196,6 +2227,8 @@ export default function BMGBR3() {
       // 🔧 TIMEOUT: Limpar timeout
       clearTimeout(operationTimeout);
       setOperationLoading(false);
+      // 🚫 RESETAR: Garantir que não permita mais mensagens de status após finalizar
+      setAllowConnectionStatusMessages(false);
     }
   };
 
@@ -2204,9 +2237,130 @@ export default function BMGBR3() {
   //   // Função removida pois agora usamos diretamente o card de banca
   // };
 
+  // 🎯 FUNÇÃO INTELIGENTE: Aposta imediata ou monitoramento baseado no último resultado
+  const handleAutoStartBet = async (betType: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high') => {
+    if (martingaleSequence.length === 0 || getCurrentStake() < 0.50) {
+      return; // Configuração inválida
+    }
+
+    // 🔍 VERIFICAR ÚLTIMO RESULTADO para decidir: aposta imediata ou monitoramento
+    const lastResult = insightsData?.results?.[0];
+    const shouldBetImmediately = lastResult ? checkIfMatchesLastResult(betType, lastResult) : false;
+
+    try {
+      // ✅ 1. Bloquear todos os botões após seleção
+      setMissionInProgress(true);
+      
+      // ✅ 2. Selecionar o tipo de aposta localmente
+      setM4DirectBetType(betType);
+      
+      // ✅ 3. Atualizar tipo no backend
+      const result = await api.updateBetType(betType);
+      if (result.success) {
+        
+        const betTypeNames = {
+          'red': 'VERMELHO',
+          'black': 'PRETO', 
+          'even': 'PAR',
+          'odd': 'ÍMPAR',
+          'low': 'BAIXAS (1-18)',
+          'high': 'ALTAS (19-36)'
+        };
+        
+        const typeName = betTypeNames[betType];
+        
+        if (shouldBetImmediately) {
+          // 🚀 APOSTA IMEDIATA: Tipo corresponde ao último resultado
+          setOperationSuccess(`⚡ APOSTA IMEDIATA! Último resultado foi ${typeName} - Apostando agora!`);
+          
+          // 🔥 APOSTAR EM MILISEGUNDOS
+          setTimeout(async () => {
+            try {
+              await executeFastBet(betType);
+            } catch (error) {
+              console.error('Erro na aposta imediata:', error);
+              setOperationError('Erro na aposta imediata');
+              setTimeout(() => setOperationError(null), 3000);
+            }
+          }, 100); // 100ms para garantir que a interface atualize
+          
+        } else {
+          // ⏳ MODO MONITORAMENTO: Aguardar próximo resultado do tipo
+          setOperationSuccess(`🔍 MONITORAMENTO ATIVO: Aguardando próximo ${typeName}`);
+        }
+        
+        setTimeout(() => setOperationSuccess(null), 3000);
+      } else {
+        throw new Error(result.error || 'Erro ao atualizar tipo');
+      }
+      
+    } catch (error) {
+      console.error('Erro ao atualizar tipo:', error);
+      setOperationError('Erro ao selecionar tipo de aposta');
+      setTimeout(() => setOperationError(null), 1500);
+      setMissionInProgress(false);
+    }
+  };
+
+  // 🔍 FUNÇÃO: Verificar se o tipo de aposta corresponde ao último resultado
+  const checkIfMatchesLastResult = (betType: string, lastResult: any): boolean => {
+    const number = lastResult.number;
+    const color = lastResult.color;
+    
+    // Mapear propriedades do número
+    const isRed = color === 'red';
+    const isBlack = color === 'black';
+    const isEven = number !== 0 && number % 2 === 0;
+    const isOdd = number !== 0 && number % 2 === 1;
+    const isLow = number >= 1 && number <= 18;
+    const isHigh = number >= 19 && number <= 36;
+    
+    // Verificar correspondência
+    switch (betType) {
+      case 'red': return isRed;
+      case 'black': return isBlack;
+      case 'even': return isEven;
+      case 'odd': return isOdd;
+      case 'low': return isLow;
+      case 'high': return isHigh;
+      default: return false;
+    }
+  };
+
+  // 🔥 FUNÇÃO: Executar aposta rápida (milisegundos)
+  const executeFastBet = async (betType: string) => {
+    try {
+      // 🚀 CHAMAR API DE APOSTA DIRETA DO BACKEND
+      const result = await api.mainApi('execute-immediate-bet', {
+        betType: betType,
+        stake: getCurrentStake(),
+        urgent: true // Flag para prioridade máxima
+      });
+      
+      if (result.success) {
+        setOperationSuccess(`✅ Aposta executada: ${betType.toUpperCase()}`);
+        // 🔧 CORREÇÃO: NÃO voltar para await após aposta imediata
+        // O usuário deve continuar monitorando o tipo selecionado
+        setTimeout(() => {
+          setMissionInProgress(false);
+          // Manter o tipo selecionado para continuar monitoramento
+        }, 2000);
+      } else {
+        throw new Error(result.error || 'Falha na aposta rápida');
+      }
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      setOperationError(`❌ Erro na aposta rápida: ${errorMessage}`);
+      // 🔧 CORREÇÃO: Só voltar para await em caso de erro grave
+      // setM4DirectBetType('await'); // Removido - manter tipo selecionado
+      setMissionInProgress(false);
+    }
+  };
+
   // 💰 NOVA FUNÇÃO: Atualizar função de operar
   const handleOperate = async () => {
-    if (isOperating || forceOperatingDisplay) {
+    if (isOperating || operation.forceDisplay) {
       // Parar operação
       try {
         setOperationLoading(true);
@@ -2218,18 +2372,7 @@ export default function BMGBR3() {
           throw new Error('Usuário não autenticado');
         }
         
-        const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            userId: user.id,
-            action: 'stop-operation'
-          }),
-        });
-                
-        const result = await response.json();
+        const result = await api.stopOperation();
 
         if (!result.success) {
           throw new Error(result.error || 'Erro ao parar operação');
@@ -2238,8 +2381,13 @@ export default function BMGBR3() {
         setOperationSuccess('Operação interrompida com sucesso!');
         setIsOperating(false);
         setForceOperatingDisplay(false); // ✅ NOVO: Liberar exibição forçada
-        setOperationActive(false);
         setOperationState(null);
+        // 🎯 VOLTAR AO MODO AWAIT: Após parar, sempre volta ao wait mode nativo
+        setM4DirectBetType('await');
+        // 🧹 NOVO: Resetar cache de logs processados ao parar operação
+        setLogProcessedGameIds(new Set());
+        // 🚫 RESETAR: Não permitir mais mensagens de status
+        setAllowConnectionStatusMessages(false);
         // Estado de aguardo removido - modo M4 direto
         setRealModeActivationAttempted(false); // 🔥 NOVO: Resetar flag de tentativa de ativação
         // Estados pendentes removidos
@@ -2266,6 +2414,8 @@ export default function BMGBR3() {
         setOperationError(errorMessage);
         // Em caso de erro, também liberar a exibição forçada
         setForceOperatingDisplay(false);
+        // 🚫 RESETAR: Não permitir mais mensagens de status em caso de erro
+        setAllowConnectionStatusMessages(false);
         // Removed: Stop gain error reset
       } finally {
         setOperationLoading(false);
@@ -2284,8 +2434,8 @@ export default function BMGBR3() {
         setOperationError(null);
       setOperationSuccess(null);
 
-      // ✅ NOVO: Limpar logs do WebSocket para evitar confusão com dados antigos
-      setWebsocketLogs([]);
+      // ✅ NOVO: Resetar cache de logs processados ao iniciar nova operação
+      setLogProcessedGameIds(new Set());
       setLastTenResults([]);
 
       // ✅ NOVO: Imediatamente forçar exibição como operando
@@ -2309,41 +2459,71 @@ export default function BMGBR3() {
         setForceOperatingDisplay(false);
       }, 10000);
 
+      // 🎯 NOVO: Sempre iniciar no modo AWAIT (wait mode nativo)
+      setM4DirectBetType('await');
+      
+      // 🔥 ATIVAR: Permitir mensagens de status apenas quando usuário clica manualmente
+      setAllowConnectionStatusMessages(true);
+
       // Usar o primeiro valor da sequência como tipValue e iniciar direto
       const tipValue = martingaleSequence[0];
-      await startOperation(tipValue);
+      await startOperation(tipValue, 'await'); // Iniciar explicitamente em modo await
     }
   };
 
-  // Iniciar monitoramento dos logs
+  // 🔄 MONITORAMENTO SIMPLIFICADO: Apenas para sincronização de estado (não mais logs)
   const startMonitoring = async () => {
-    // 🛑 CONTADOR REMOVIDO: Polling histórico não é mais necessário
-    
     while (monitoringRef.current) {
     try {
-      // 🚀 OTIMIZADO: Agora o backend inclui operation report no get-websocket-logs
-      const response = await fetchWithCacheBusting('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-            action: 'get-websocket-logs'
-        })
-      });
+      // 🎯 SINCRONIZAÇÃO DE ESTADO: Usar intervalos menores, apenas para estado crítico
+      const result = await api.getWebSocketLogs();
 
-      const result = await response.json();
-
-      // ✅ Atualizar todos os dados de uma vez
-        if (result.success && result.data) {
-          const currentLogsCount = result.data.logs?.length || 0;
-          const previousLogsCount = websocketLogs.length;
+      if (result.success && result.data) {
+          // 🆘 VERIFICAÇÃO: Detectar mensagens importantes nos logs
+          const logs = result.data.logs || [];
+          const hasMissionComplete = logs.some((log: any) => log.message?.includes('MISSÃO CUMPRIDA'));
+          const hasBetsClosed = logs.some((log: any) => log.message?.includes('Apostas já fechadas'));
           
-          // 🎯 ATUALIZAÇÃO INTELIGENTE: Só atualizar se realmente houver mudanças
-          if (currentLogsCount !== previousLogsCount) {
-            setWebsocketLogs(result.data.logs || []);
+          if (hasMissionComplete) {
+            // ✅ LIBERAR BOTÕES: Missão cumprida, permitir nova seleção
+            setMissionInProgress(false);
+            // 🔥 CORREÇÃO: NÃO parar operação após missão cumprida - manter ativa para novos triggers
+            // setIsOperating(false); // ❌ REMOVIDO: Isso causava desconexão
+            console.log('🔥 [FRONTEND] Mantendo isOperating=true após missão cumprida para continuar monitoramento');
+            // 🚨 CRÍTICO: Limpar forceDisplay para permitir sincronização
+            setOperation(prev => ({ ...prev, forceDisplay: false }));
+            // 🎯 VOLTAR AO MODO AWAIT: Após missão cumprida, sempre volta ao wait mode nativo
+            setM4DirectBetType('await');
+            // 🔥 CRÍTICO: Garantir que polling continue ativo após missão cumprida
+            // FORÇAR reativação do polling independente do estado atual
+            setIsInsightsActive(true);
+            startInsightsPolling();
+            
+            // 🔍 DEBUG: Verificar status dos timers após reativação
+            setTimeout(() => {
+              const timerStatus = timers.getTimerStatus();
+              console.log('🔍 [DEBUG] Status dos timers após missão cumprida:', {
+                isInsightsActive,
+                activeTimers: timerStatus.count,
+                hasUnifiedPolling: timers.hasTimer('unified-polling')
+              });
+            }, 1000);
+            
+            console.log('🎯 [FRONTEND] Missão cumprida detectada - mantendo operação ativa, voltando ao modo await e mantendo polling ativo');
           }
           
-          // 🔇 ATUALIZAÇÃO SILENCIOSA: Só atualizar lastTenResults se houver mudanças
+          if (hasBetsClosed) {
+            // 🚫 APOSTAS FECHADAS: Voltar ao modo await
+            setMissionInProgress(false);
+            // 🎯 VOLTAR AO MODO AWAIT: Apostas fechadas, voltar ao aguardar
+            setM4DirectBetType('await');
+            // 🔥 CRÍTICO: Garantir que polling continue ativo após apostas fechadas
+            setIsInsightsActive(true);
+            startInsightsPolling();
+            console.log('🚫 [FRONTEND] Apostas fechadas detectadas - voltando ao modo await e mantendo polling ativo');
+          }
+          
+          // 🔇 ATUALIZAÇÃO SILENCIOSA: lastTenResults se necessário
           const newLastTenResults = result.data.lastTenResults || [];
           const lastTenResultsHash = newLastTenResults.map((r: any) => r.gameId).join(',');
           const currentLastTenHash = lastTenResults.map((r: any) => r.gameId).join(',');
@@ -2361,27 +2541,68 @@ export default function BMGBR3() {
             setConnectionStatus(newConnectionStatus);
           }
           
-          if (newOperationActive !== operationActive) {
-            setOperationActive(newOperationActive);
+          if (newOperationActive !== operation.isActive) {
+            console.log('🔧 [FRONTEND] Atualizando operation.isActive:', {
+              anterior: operation.isActive,
+              novo: newOperationActive,
+              timestamp: new Date().toLocaleTimeString()
+            });
+            setOperation(prev => ({ ...prev, isActive: newOperationActive }));
           }
           
           if (JSON.stringify(newOperationState) !== JSON.stringify(operationState)) {
             setOperationState(newOperationState);
+            
+                      // 🔄 NOVO: Sincronizar tipo de aposta com o backend
+          if (newOperationState?.m4DirectBetType && newOperationState.m4DirectBetType !== m4DirectBetType) {
+            console.log('🔄 [FRONTEND] Sincronizando m4DirectBetType:', {
+              frontend: m4DirectBetType,
+              backend: newOperationState.m4DirectBetType,
+              missionCompleted: newOperationState.missionCompleted
+            });
+            setM4DirectBetType(newOperationState.m4DirectBetType);
+          }
+          }
+          
+          // 🆘 CORREÇÃO: Sincronizar m4DirectBetType mesmo se operationState não mudou completamente  
+          if (newOperationState?.m4DirectBetType && newOperationState.m4DirectBetType !== m4DirectBetType) {
+            setM4DirectBetType(newOperationState.m4DirectBetType);
+          }
+          
+          // 🚀 CORREÇÃO AGRESSIVA: Sempre sincronizar m4DirectBetType se existir
+          if (newOperationState?.m4DirectBetType) {
+            const currentBetType = m4DirectBetType;
+            const backendBetType = newOperationState.m4DirectBetType;
+            if (currentBetType !== backendBetType) {
+              console.log('🚀 [FRONTEND] Sincronização agressiva m4DirectBetType:', {
+                frontend: currentBetType,
+                backend: backendBetType,
+                timestamp: new Date().toLocaleTimeString()
+              });
+              setM4DirectBetType(backendBetType);
+            }
           }
           
           // ✅ CORREÇÃO: Sincronizar isOperating com operationActive da API
           const apiOperationActive = result.data.operationActive || false;
           const apiConnected = result.data.connectionStatus?.connected || false;
           
-          // 🔄 Sincronizar estado da operação - APENAS SE NÃO ESTIVER FORÇANDO EXIBIÇÃO
-          if (!forceOperatingDisplay && isOperating !== apiOperationActive) {
+          // 🔄 Sincronizar estado da operação - SEMPRE quando necessário
+          if (isOperating !== apiOperationActive) {
+            console.log('🔄 [FRONTEND] Sincronizando isOperating:', {
+              frontend: isOperating,
+              backend: apiOperationActive,
+              forceDisplay: operation.forceDisplay,
+              timestamp: new Date().toLocaleTimeString()
+            });
             setIsOperating(apiOperationActive);
             
             // Removed: Auto Bot counter reset
           }
           
-          // 🔄 Se desconectado, garantir que isOperating seja false - APENAS SE NÃO ESTIVER FORÇANDO EXIBIÇÃO
-          if (!forceOperatingDisplay && !apiConnected && isOperating) {
+          // 🔄 Se desconectado, garantir que isOperating seja false
+          if (!apiConnected && isOperating) {
+            console.log('🔌 [FRONTEND] Conexão perdida - parando operação');
             setIsOperating(false);
           }
           
@@ -2419,26 +2640,17 @@ export default function BMGBR3() {
 
       // 🛑 POLLING HISTÓRICO REMOVIDO: Dados vêm apenas do insights
 
-        // 🎯 POLLING INTELIGENTE: Reduzido para evitar sobrecarga
-  const pollingInterval = isOperating ? 3000 : 8000; // 3s quando operando, 8s quando inativo
+        // 🎯 POLLING INTELIGENTE: Reduzido para evitar sobrecarga e erro 429
+  const pollingInterval = isOperating ? 5000 : 10000; // 5s quando operando, 10s quando inativo
   await new Promise(resolve => setTimeout(resolve, pollingInterval));
     }
     
   };
 
-  // Buscar relatório
+  // Buscar relatório (usando hook customizado)
   const fetchOperationReport = async () => {
     try {
-      const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-          action: 'get-operation-report'
-        })
-      });
-
-      const result = await response.json();
+      const result = await api.getOperationReport();
 
       if (result.success && result.data) {
         setOperationReport(result.data);
@@ -2448,19 +2660,10 @@ export default function BMGBR3() {
     }
   };
 
-  // Reset relatório
+  // Reset relatório (usando hook customizado)
   const resetOperationReport = async () => {
     try {
-      const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userIdRef.current,
-          action: 'reset-operation-report'
-        })
-      });
-
-      const result = await response.json();
+      const result = await api.resetOperationReport();
 
       if (result.success) {
         await fetchOperationReport();
@@ -2470,20 +2673,13 @@ export default function BMGBR3() {
     }
   };
 
-  // 2. Função para atualizar o backend sempre que o switch mudar
+  // 2. Função para atualizar o backend sempre que o switch mudar (usando hook)
   useEffect(() => {
     if (!userIdRef.current) return;
-          fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId: userIdRef.current,
-        action: 'update-strategy',
-                    // Removed: stopGainPercentage
-        selectedStake: getCurrentStake() // <-- Enviar o stake selecionado
-      })
+    api.mainApi('update-strategy', {
+      selectedStake: getCurrentStake() // <-- Enviar o stake selecionado
     });
-        }, []);
+  }, []);
 
   // 🔥 NOVO: Atualizar tipo de aposta dinamicamente durante operação
   const previousBetTypeRef = useRef<string | null>(null);
@@ -2497,19 +2693,9 @@ export default function BMGBR3() {
     
     previousBetTypeRef.current = m4DirectBetType;
 
-    const updateBetType = async () => {
-      try {
-        const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: userIdRef.current,
-            action: 'update-bet-type',
-            m4DirectBetType: m4DirectBetType === 'await' ? 'await' : m4DirectBetType
-          })
-        });
-
-        const result = await response.json();
+          const updateBetType = async () => {
+        try {
+          const result = await api.updateBetType(m4DirectBetType === 'await' ? 'await' : m4DirectBetType);
         if (result.success) {
           console.log('Tipo de aposta atualizado:', result.message);
           
@@ -2568,115 +2754,72 @@ export default function BMGBR3() {
     };
   }, []);
 
-  // 🛡️ NOVO: Monitoramento automático para ativar modo real quando condições melhorarem
+  // 🛡️ NOVO: Ativação automática simplificada do modo real
   useEffect(() => {
-    // Só executar se bot estiver operando e em modo análise
-    if (!isOperating || !operationState || operationState.mode !== 'analysis') {
-      // Resetar flag quando sair do modo análise
-      if (realModeActivationAttempted) {
-        setRealModeActivationAttempted(false);
-      }
+    // Só executar se bot estiver operando e modo M4 direto ativado
+    if (!isOperating || !operationState || !m4DirectModeEnabled || realModeActivationAttempted) {
       return;
     }
 
-    // Throttling: só verificar a cada 5 segundos para evitar execuções excessivas
+    // Throttling simples: só verificar a cada 5 segundos
     const now = Date.now();
     if (now - lastActivationCheckRef.current < 5000) {
       return;
     }
     lastActivationCheckRef.current = now;
 
-    // Se já tentou ativar modo real nesta sessão, não tentar novamente
-    if (realModeActivationAttempted) {
-      return;
-    }
-
-    // 🔥 NOVO: Se modo M4 direto está ativado, ignora todas as verificações
-    if (m4DirectModeEnabled && !realModeActivationAttempted) {
-      // Marcar que tentou ativar para evitar tentativas repetidas
-      setRealModeActivationAttempted(true);
-      
-      // Estado de aguardo removido - modo M4 direto
-      
-      // Enviar comando para API ativar modo real imediatamente
-      const activateRealMode = async () => {
-        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) return;
-          
-          const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: user.id,
-              action: 'activate-real-mode',
-              m4DirectMode: true,
-              m4DirectBetType: m4DirectBetType // 🔥 NOVO: Enviar tipo de aposta
-            })
-          });
-          
-          const result = await response.json();
-          
-          if (!result.success) {
-            console.error('Erro ao ativar modo real:', result.error);
-            setOperationError('Erro ao ativar modo real automaticamente. Tente novamente.');
-          }
-        } catch (error) {
-          console.error('Erro ao ativar modo real:', error);
+    // Ativar modo real imediatamente no modo M4 direto
+    setRealModeActivationAttempted(true);
+    
+    const activateRealMode = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        const response = await fetch('/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            action: 'activate-real-mode',
+            m4DirectMode: true,
+            m4DirectBetType: m4DirectBetType
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+          console.error('Erro ao ativar modo real:', result.error);
           setOperationError('Erro ao ativar modo real automaticamente. Tente novamente.');
         }
-      };
-      
-      activateRealMode();
-      return; // Sair do useEffect após ativar modo M4 direto
-    }
-
-    // Verificações de status e frequência removidas - modo M4 direto apenas
-  }, [isOperating, operationState, realModeActivationAttempted, m4DirectModeEnabled]);
+      } catch (error) {
+        console.error('Erro ao ativar modo real:', error);
+        setOperationError('Erro ao ativar modo real automaticamente. Tente novamente.');
+      }
+    };
+    
+    activateRealMode();
+  }, [isOperating, operationState, m4DirectModeEnabled, realModeActivationAttempted, m4DirectBetType]);
 
   // Removed: Auto Bot effects
 
   // 🔧 NOVO: Efeito para detectar mudanças no estado de "aguardando resultado"
-  useEffect(() => {
-    const currentWaitingState = operationState?.waitingForResult || false;
-    
-    // Se estava aguardando resultado e agora não está mais
-    if (previousWaitingState && !currentWaitingState && lastDebugAction) {
-      setOperationSuccess('✅ Problema resolvido! O sistema saiu do estado "aguardando resultado" e continuou funcionando normalmente');
-      setLastDebugAction(null);
-      setTimeout(() => {
-        setOperationSuccess(null);
-      }, 8000);
-    }
-    
-    // Se o estado continuar aguardando por mais de 1 minuto, mostrar debug novamente
-    if (currentWaitingState && debugHidden) {
-      setTimeout(() => {
-        if (operationState?.waitingForResult) {
-          setDebugHidden(false); // Mostrar debug novamente após 1 minuto
-        }
-      }, 60000);
-    }
-    
-    setPreviousWaitingState(currentWaitingState);
-  }, [operationState?.waitingForResult, previousWaitingState, lastDebugAction, debugHidden]);
+  // 🔧 Monitoramento de debug removido - funcionalidade simplificada
 
   // 🔧 NOVO: Limpar estado de debug quando operação termina
   useEffect(() => {
-    if (!isOperating && !forceOperatingDisplay) {
-      setLastDebugAction(null);
-      setDebugRunning(false);
-      setSyncRunning(false);
-      setPreviousWaitingState(false);
-      setDebugHidden(false); // Resetar também o estado de oculto
+    if (!isOperating && !operation.forceDisplay) {
       setLastProcessedInsightGameId(null); // Limpar histórico de processamento
       previousBetTypeRef.current = null; // Resetar referência do tipo de aposta
     }
-  }, [isOperating, forceOperatingDisplay]);
+  }, [isOperating, operation.forceDisplay]);
+
+
 
   // NOVO: Controle inteligente do botão baseado no padrão E janela de apostas
       const hasCompletePattern = lastTenResults.length >= 10;
-  const canStartOperation = hasCompletePattern && bettingWindow.isOpen && !operationActive;
+  const canStartOperation = hasCompletePattern && bettingWindow.isOpen && !operation.isActive;
   
   // IMPORTANTE: Verificar se é padrão de repetição válido
   const isValidRepetitionPattern = lastTenResults.length >= 10 &&
@@ -2698,13 +2841,35 @@ export default function BMGBR3() {
 
 
 
-  // 🚀 REMOVIDO: Função startAutoBotOperations não é mais necessária - usamos handleOperate() diretamente
+  
 
 
 
 
          
-         // 🤖 REMOVIDO: Auto Bot não procura oportunidades automaticamente
+         // 🤖 NOVO: Sistema reativado - monitora logs para TRIGGER
+    useEffect(() => {
+      if (!websocketLogs.length) return;
+      
+      // Procurar por TRIGGER nos logs recentes
+      const recentTriggerLog = websocketLogs
+        .slice(-5) // Últimos 5 logs
+        .find(log => log.message?.includes('TRIGGER DETECTADO'));
+      
+      if (recentTriggerLog && m4DirectBetType !== 'await') {
+        console.log(`✅ SISTEMA FUNCIONANDO: ${recentTriggerLog.message}`);
+      }
+      
+      // Procurar por aposta executada
+      const recentBetLog = websocketLogs
+        .slice(-3) // Últimos 3 logs  
+        .find(log => log.message?.includes('APOSTA IMEDIATA') || log.message?.includes('⚡'));
+        
+      if (recentBetLog) {
+        console.log(`💰 APOSTA EXECUTADA: ${recentBetLog.message}`);
+      }
+      
+    }, [websocketLogs, m4DirectBetType]);
   // As oportunidades são detectadas em tempo real quando contadores são atualizados
 
   // ... existing code ...
@@ -2874,178 +3039,277 @@ export default function BMGBR3() {
 
 
 
-          {/* 🛑 GameStatisticsCard DESATIVADO - polling desnecessário, dados vêm do insights */}
-          {/* <GameStatisticsCard refreshInterval={30000} autoRefresh={true} /> */}
+          
 
-          {/* 🔥 NOVO: Card de Insights de Dados - Todos os Tipos de Aposta */}
-                      {insightsData && insightsData.results && Array.isArray(insightsData.results) && insightsData.results.length > 0 && (() => {
-              // ✅ CORREÇÃO: Usar dados já memorizados em vez de recalcular
 
-              // ✅ CORREÇÃO: Usar função getTemperatureStatus memorizada (definida no nível superior)
             
-            return (
-              <Card className="border-purple-500/30 backdrop-blur-sm">
+
+
+          {/* Card Operação */}
+              <Card className="border-gray-700/30 backdrop-blur-sm">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-purple-400 font-mono">
-                    <Target className="h-5 w-5" />
-                    INSIGHTS DE DADOS
+              <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
+                <Power className="h-5 w-5" />
+                CONTROLE_OPERAÇÃO
                   </CardTitle>
                   <CardDescription className="text-gray-400 font-mono text-xs">
-                    // Analise a frequencia dos tipos de aposta e histórico atual (sequências 2+)
+                // Inicie ou pare as operações do bot
                   </CardDescription>
-                  
-                  {/* Referências */}
-                  <div className="px-4 pb-2 text-xs font-mono text-gray-500 space-y-1">
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                
+                {/* Cards de Estatísticas */}
+                <div className="grid grid-cols-3 gap-4">
+                  {/* Card APOSTAS */}
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                    <div className="text-center">
+                      <div className="text-gray-400 text-xs font-mono mb-1">APOSTAS</div>
+                      <div className="text-blue-400 text-lg font-mono font-bold">
+                        {operationReport?.summary.totalBets || 0}
+                      </div>
+                    </div>
                   </div>
-                </CardHeader>
-                <CardContent className="pt-0 pb-4 px-4">
+                  
+                  {/* Card LUCRO */}
+                  <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                    <div className="text-center">
+                      <div className="text-gray-400 text-xs font-mono mb-1">LUCRO</div>
+                      <div className={`text-lg font-mono font-bold ${
+                        (operationReport?.summary.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                      }`}>
+                        R$ {(operationReport?.summary.profit || 0).toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card CONSUMO */}
+                  <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                    <div className="text-center">
+                      <div className="text-gray-400 text-xs font-mono mb-1">CONSUMO</div>
+                      <div className="text-orange-400 text-lg font-mono font-bold">
+                        R$ 0,00
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                
+                {/* 📈 HISTÓRICO: Últimos resultados em tempo real - Grid 10x2 */}
+                {insightsData && insightsData.results && Array.isArray(insightsData.results) && insightsData.results.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="w-full max-w-4xl mx-auto p-4 bg-gray-800/20 border border-gray-600/30 rounded-lg">
+                      <div className="grid grid-cols-10 gap-3 auto-rows-fr">
+                        {/* ✅ CORREÇÃO: Usar dados memorizados com tooltips pré-calculados */}
+                        {memoizedInsightsResults.map((result) => (
+                          <ResultRouletteSlot
+                            key={result.id}
+                            number={result.number}
+                            gameId={result.gameId}
+                            timestamp={result.timestamp}
+                            index={result.index}
+                            isRed={result.isRed}
+                            isGreen={result.isGreen}
+                            tooltipContent={result.tooltipContent}
+                          />
+                        ))}
+                        
+                        {/* Preencher slots vazios para completar o grid 10x2 (agora sem botão '+') */}
+                        {(() => {
+                          const actualResults = memoizedInsightsResults.length;
+                          const totalSlots = 20; // Grid fixo 10x2
+                          const emptySlots = Math.max(0, totalSlots - actualResults);
+                          
+                          return Array.from({ length: emptySlots }).map((_, index) => (
+                            <div
+                              key={`empty-${index}`}
+                              className="aspect-square rounded-lg border-2 border-dashed border-gray-600/50 flex items-center justify-center"
+                            >
+                              <div className="w-2 h-2 bg-gray-600/30 rounded-full"></div>
+                  </div>
+                          ));
+                        })()}
+                      </div>
+                    </div>
+                    
+                    {/* Timestamp da última atualização */}
+                    {insightsData && insightsData.lastUpdate && (
+                      <div className="text-center">
+                        <p className="text-xs font-mono text-gray-500">
+                          Última atualização: {new Date(insightsData.lastUpdate).toLocaleTimeString()}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* 🔥 SEÇÃO: Insights de Dados - Cards de Seleção */}
+                <div className="p-3 rounded-lg bg-gray-800/20 border border-gray-600/30 space-y-3">
+                  <label className="text-sm font-semibold font-mono text-purple-400">
+                    Seleção de Tipo e Início de Operação
+                  </label>
+                  <div className="text-xs text-gray-400 font-mono">
+                    Clique em um tipo para selecionar e iniciar operação
+                  </div>
+                  
+                  {/* 🔥 CARDS DE INSIGHTS - MOVIDOS DO CARD INSIGHTS DE DADOS */}
                   {!insightsComparison.hasData ? (
-                    <div className="text-center py-8">
-                      <div className="text-gray-400 mb-2 font-mono">AGUARDANDO_DADOS</div>
+                    <div className="text-center py-4">
+                      <div className="text-gray-400 mb-2 font-mono text-sm">AGUARDANDO_DADOS</div>
                       <div className="text-xs text-gray-500 font-mono">
                         // Coletando dados em tempo real
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-3 gap-4 w-full">
-                      {/* ✅ CORREÇÃO: Usar componentes memorizados para evitar re-renders */}
+                    <div className="grid grid-cols-2 gap-2 w-full">
+                      {/* ✅ GRID 2x3 COMPACTO: Linha 1 - Vermelho + Preto */}
                       <InsightCard
                         title="VERMELHO"
-                        color="text-red-400"
-                        bgColor="bg-red-500/5"
-                        borderColor="border-red-500/20"
-                        hoverColor="hover:bg-red-500/10"
+                        color=""
+                        bgColor=""
+                        borderColor=""
+                        hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.red || '--'}
-                        tooltip={tooltipContents.red}
                       />
                       
                       <InsightCard
                         title="PRETO"
-                        color="text-gray-300"
-                        bgColor="bg-gray-500/5"
-                        borderColor="border-gray-500/20"
-                        hoverColor="hover:bg-gray-500/10"
+                        color=""
+                        bgColor=""
+                        borderColor=""
+                        hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.black || '--'}
-                        tooltip={tooltipContents.black}
                       />
                       
+                      {/* ✅ GRID 2x3 COMPACTO: Linha 2 - Par + Ímpar */}
                       <InsightCard
                         title="PAR"
-                        color="text-blue-400"
-                        bgColor="bg-blue-500/5"
-                        borderColor="border-blue-500/20"
-                        hoverColor="hover:bg-blue-500/10"
+                        color=""
+                        bgColor=""
+                        borderColor=""
+                        hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.even || '--'}
-                        tooltip={tooltipContents.even}
                       />
                       
                       <InsightCard
                         title="ÍMPAR"
-                        color="text-green-400"
-                        bgColor="bg-green-500/5"
-                        borderColor="border-green-500/20"
-                        hoverColor="hover:bg-green-500/10"
+                        color=""
+                        bgColor=""
+                        borderColor=""
+                        hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.odd || '--'}
-                        tooltip={tooltipContents.odd}
                       />
                       
+                      {/* ✅ GRID 2x3 COMPACTO: Linha 3 - Baixas + Altas */}
                       <InsightCard
                         title="BAIXAS (1-18)"
-                        color="text-yellow-400"
-                        bgColor="bg-yellow-500/5"
-                        borderColor="border-yellow-500/20"
-                        hoverColor="hover:bg-yellow-500/10"
+                        color=""
+                        bgColor=""
+                        borderColor=""
+                        hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.low || '--'}
-                        tooltip={tooltipContents.low}
                       />
                       
                       <InsightCard
                         title="ALTAS (19-36)"
-                        color="text-indigo-400"
-                        bgColor="bg-indigo-500/5"
-                        borderColor="border-indigo-500/20"
-                        hoverColor="hover:bg-indigo-500/10"
+                        color=""
+                        bgColor=""
+                        borderColor=""
+                        hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.high || '--'}
-                        tooltip={tooltipContents.high}
                       />
                           </div>
                                     )}
                   
-                  {/* Últimos resultados em tempo real - Grid 10x2 */}
-                  {insightsData && insightsData.results && Array.isArray(insightsData.results) && insightsData.results.length > 0 && (
-                    <div className="space-y-3 mt-4">
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs font-mono text-gray-400">
-                          Últimos resultados:
-                        </div>
-                      </div>
-                      <div className="w-full max-w-4xl mx-auto p-4 bg-gray-900/30 border border-gray-700/30 rounded-lg">
-                        <div className="grid grid-cols-10 gap-3 auto-rows-fr">
-                          {/* ✅ CORREÇÃO: Usar dados memorizados com tooltips pré-calculados */}
-                          {memoizedInsightsResults.map((result) => (
-                            <ResultRouletteSlot
-                              key={result.id}
-                              number={result.number}
-                              gameId={result.gameId}
-                              timestamp={result.timestamp}
-                              index={result.index}
-                              isRed={result.isRed}
-                              isGreen={result.isGreen}
-                              tooltipContent={result.tooltipContent}
-                            />
-                          ))}
-                          
-                          {/* Preencher slots vazios para completar o grid 10x2 (agora sem botão '+') */}
-                          {(() => {
-                            const actualResults = memoizedInsightsResults.length;
-                            const totalSlots = 20; // Grid fixo 10x2
-                            const emptySlots = Math.max(0, totalSlots - actualResults);
-                            
-                            return Array.from({ length: emptySlots }).map((_, index) => (
-                              <div
-                                key={`empty-${index}`}
-                                className="aspect-square rounded-lg border-2 border-dashed border-gray-600/50 flex items-center justify-center"
-                              >
-                                <div className="w-2 h-2 bg-gray-600/30 rounded-full"></div>
-                              </div>
-                            ));
-                          })()}
-                        </div>
-                      </div>
+                  <div className="mt-2 space-y-1 text-xs font-mono text-center">
+                    <div className="text-gray-500">
+                      <span>Tipo selecionado: <span className="text-purple-400">{
+                        m4DirectBetType === 'await' ? 'AGUARDAR' :
+                        m4DirectBetType === 'red' ? 'VERMELHO' :
+                        m4DirectBetType === 'black' ? 'PRETO' :
+                        m4DirectBetType === 'even' ? 'PAR' :
+                        m4DirectBetType === 'odd' ? 'ÍMPAR' :
+                        m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
+                        'ALTAS (19-36)'
+                      }</span></span>
                     </div>
-                  )}
-                  
-                  {/* Informações da última atualização */}
-                  <div className="p-3 bg-gray-800/30 border border-gray-600/30 rounded-lg mt-4">
-                    <div className="text-xs font-mono text-gray-400">
-                      {insightsData && insightsData.lastUpdate && (
-                        <p>Última atualização: {new Date(insightsData.lastUpdate).toLocaleTimeString()}</p>
+                    
+                    {/* ⏰ INDICADOR JANELA ATIVA */}
+                                          {isOperating && m4DirectBetType === 'await' && (
+                        <div className={`transition-all duration-300 ${
+                          bettingWindow.isOpen 
+                            ? 'text-green-400' 
+                            : 'text-red-400'
+                        }`}>
+                          {bettingWindow.isOpen ? (
+                            <span className="animate-pulse">🟢 Apostas abertas - Botões ativos</span>
+                          ) : (
+                            <span>🔴 Apostas fechadas - Aguardando abertura...</span>
+                          )}
+                        </div>
                       )}
-                    </div>
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })()}
+                        </div>
 
+                {/* Botões de Controle */}
+                <div className="space-y-2">
+                  {/* Botão Principal - Começar/Parar Apostas */}
+                  <Button 
+                    onClick={handleOperate}
+                    disabled={
+                      operationLoading || 
+                      !isConfigured || 
+                      ((isOperating || operation.forceDisplay) && isRealOperation && !canSafelyStop) || // ✅ NOVO: Desabilita quando operando em modo REAL e não é seguro parar
+                      (!(isOperating || operation.forceDisplay) && martingaleSequence.length === 0) // ✅ NOVO: Desabilita se não há sequência válida
+                    }
+                    className={`w-full font-mono ${
+                      (isOperating || operation.forceDisplay)
+                        ? (isAnalysisMode || canSafelyStop) // ✅ NOVO: No modo análise sempre pode parar, no modo real depende do canSafelyStop
+                          ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30' // Pode parar
+                          : 'bg-gray-500/20 border border-gray-500/50 text-gray-400 cursor-not-allowed' // Não pode parar
+                        : martingaleSequence.length === 0
+                          ? 'bg-gray-500/20 border border-gray-500/50 text-gray-400 cursor-not-allowed' // Sem sequência válida
+                          : 'bg-blue-500/20 border border-blue-500/50 text-blue-400 hover:bg-blue-500/30'
+                    } transition-all duration-300`}
+                    variant="outline"
+                  >
+                    {operationLoading ? (
+                      <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                    ) : (isOperating || operation.forceDisplay) ? (
+                      <Square className="h-4 w-4 mr-2" />
+                    ) : (
+                      <Zap className="h-4 w-4 mr-2" />
+                    )}
+                    {operationLoading 
+                      ? operationError?.includes('Verificando') ? operationError : 'CONECTANDO...'
+                      : ((isOperating || operation.forceDisplay) && (connectionStatus.connected || operation.forceDisplay)) 
+                        ? 'PARAR'
+                        : martingaleSequence.length === 0
+                          ? 'CONFIGURE SUA BANCA'
+                          : 'COMEÇAR'
+                    }
+                  </Button>
 
+                  {/* ✅ NOVO: Mostrar informações da estratégia quando não operando */}
 
-                    {/* Card OPERAÇÕES */}
-          <OperationsCard operationReport={operationReport} />
+                  {/* 🔧 NOVO: Botão para forçar regeneração de tokens */}
+                  {!isOperating && !operation.forceDisplay && operationError && !operationLoading && 
+                   (operationError.includes('conexão') || operationError.includes('Timeout') || operationError.includes('Token') || operationError.includes('WebSocket')) && (
+                    <Button 
+                      onClick={forceTokenRegeneration}
+                      className={`w-full font-mono transition-all duration-300 ${
+                        consecutiveErrors > 1
+                          ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30 animate-pulse'
+                          : 'bg-orange-500/20 border border-orange-500/50 text-orange-400 hover:bg-orange-500/30'
+                      }`}
+                      variant="outline"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      {consecutiveErrors > 1 ? 'RECONEXÃO URGENTE' : 'FORÇAR RECONEXÃO'}
+                    </Button>
+                  )}
 
-          {/* Card Operação */}
-          <Card className="border-blue-500/30 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
-                <Power className="h-5 w-5" />
-                CONTROLE_OPERAÇÃO
-              </CardTitle>
-              <CardDescription className="text-gray-400 font-mono text-xs">
-                // Inicie ou pare as operações do bot
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
+                </div>
                 
                 {/* Status */}
                 <div className="space-y-3">
@@ -3085,16 +3349,43 @@ export default function BMGBR3() {
 
                 {/* ✅ SISTEMA AUTOMÁTICO: Debug manual removido - processamento automático via gameId */}
 
-                {/* Logs do WebSocket */}
-                {websocketLogs.length > 0 && (
+                {/* Mensagem quando desconectado mas há logs */}
+                {websocketLogs.length > 0 && !connectionStatus.connected && (
+                  <div className="space-y-2">
+                    <div className="p-3 bg-yellow-900/20 border border-yellow-600/30 rounded-lg">
+                      <div className="text-yellow-400 text-sm font-mono">
+                        🔌 Logs disponíveis mas WebSocket desconectado - Conecte para visualizar
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Logs do WebSocket - Apenas quando conectado */}
+                {websocketLogs.length > 0 && connectionStatus.connected && (
                   <div className="space-y-2">
 
-                    <div className="max-h-64 overflow-y-auto p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1">
+                    <div className="max-h-64 overflow-y-auto p-3 bg-gray-800/20 border border-gray-600/30 rounded-lg space-y-1">
                       {websocketLogs.filter(log => 
                         !log.message.includes('🎰 Janela de apostas') && 
                         !log.message.includes('Apostas abertas') && 
                         !log.message.includes('Apostas fechadas')
-                      ).slice(0, 20).map((log, index) => (
+                      ).filter((log, index, array) => {
+                        // 🛡️ FILTRO DE DUPLICAÇÃO: Para logs de resultado, manter apenas o primeiro de cada gameId
+                        if (log.message.includes('🎯 Resultado:') && log.message.includes('(ID:')) {
+                          const gameIdMatch = log.message.match(/\(ID: (\d+)\)/);
+                          if (gameIdMatch) {
+                            const gameId = gameIdMatch[1];
+                            // Verificar se este é o primeiro log com este gameId
+                            const firstIndex = array.findIndex(l => 
+                              l.message.includes('🎯 Resultado:') && 
+                              l.message.includes(`(ID: ${gameId})`)
+                            );
+                            return index === firstIndex;
+                          }
+                        }
+                        // Para outros tipos de log, manter todos
+                        return true;
+                      }).slice(0, 20).map((log, index) => (
                         <div key={`log-${index}-${log.timestamp}`} className="text-xs font-mono flex items-start gap-2">
                           <span className="text-gray-500 text-xs">
                             {new Date(log.timestamp).toLocaleTimeString('pt-BR')}
@@ -3115,7 +3406,21 @@ export default function BMGBR3() {
                   </div>
                 )}
 
-
+                {/* Informações da Sessão */}
+                {operationReport?.summary.startedAt && (
+                  <div className="text-sm font-mono p-2 bg-gray-800/20 border border-gray-600/30 rounded-lg">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Iniciado:</span>
+                      <span className="text-gray-300">
+                        {new Date(
+                          typeof operationReport.summary.startedAt === 'number' 
+                            ? operationReport.summary.startedAt 
+                            : operationReport.summary.startedAt
+                        ).toLocaleTimeString('pt-BR')}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Erro */}
                 {operationError && (
@@ -3131,127 +3436,39 @@ export default function BMGBR3() {
                   </div>
                 )}
 
-                {/* Botões de Controle */}
-                <div className="space-y-2">
-                  {/* Botão Principal - Começar/Parar Apostas */}
-                  <Button 
-                    onClick={handleOperate}
-                    disabled={
-                      operationLoading || 
-                      !isConfigured || 
-                      ((isOperating || forceOperatingDisplay) && isRealOperation && !canSafelyStop) || // ✅ NOVO: Desabilita quando operando em modo REAL e não é seguro parar
-                      (!(isOperating || forceOperatingDisplay) && martingaleSequence.length === 0) // ✅ NOVO: Desabilita se não há sequência válida
-                    }
-                    className={`w-full font-mono ${
-                      (isOperating || forceOperatingDisplay)
-                        ? (isAnalysisMode || canSafelyStop) // ✅ NOVO: No modo análise sempre pode parar, no modo real depende do canSafelyStop
-                          ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30' // Pode parar
-                          : 'bg-gray-500/20 border border-gray-500/50 text-gray-400 cursor-not-allowed' // Não pode parar
-                        : martingaleSequence.length === 0
-                          ? 'bg-gray-500/20 border border-gray-500/50 text-gray-400 cursor-not-allowed' // Sem sequência válida
-                        : 'bg-blue-500/20 border border-blue-500/50 text-blue-400 hover:bg-blue-500/30'
-                    } transition-all duration-300`}
-                    variant="outline"
-                  >
-                    {operationLoading ? (
-                      <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                    ) : (isOperating || forceOperatingDisplay) ? (
-                      <Square className="h-4 w-4 mr-2" />
-                    ) : (
-                      <Zap className="h-4 w-4 mr-2" />
-                    )}
-                    {operationLoading 
-                      ? operationError?.includes('Verificando') ? operationError : 'CONECTANDO...'
-                      : ((isOperating || forceOperatingDisplay) && (connectionStatus.connected || forceOperatingDisplay)) 
-                        ? 'PARAR'
-                        : martingaleSequence.length === 0
-                          ? 'CONFIGURE SUA BANCA'
-                          : 'COMEÇAR'
-                    }
-                  </Button>
 
-                  {/* ✅ NOVO: Mostrar informações da estratégia quando não operando */}
+                {/* ✅ Seção de stakes movida para card separado CONTROLE_BANCA */}
 
-                  {/* 🔧 NOVO: Botão para forçar regeneração de tokens */}
-                  {!isOperating && !forceOperatingDisplay && operationError && !operationLoading && 
-                   (operationError.includes('conexão') || operationError.includes('Timeout') || operationError.includes('Token') || operationError.includes('WebSocket')) && (
-                    <Button 
-                      onClick={forceTokenRegeneration}
-                      className={`w-full font-mono transition-all duration-300 ${
-                        consecutiveErrors > 1
-                          ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30 animate-pulse'
-                          : 'bg-orange-500/20 border border-orange-500/50 text-orange-400 hover:bg-orange-500/30'
-                      }`}
-                      variant="outline"
-                    >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      {consecutiveErrors > 1 ? 'RECONEXÃO URGENTE' : 'FORÇAR RECONEXÃO'}
-                    </Button>
-                  )}
 
-                </div>
 
-                {/* 🔥 SEÇÃO: Tipo de Aposta */}
-                <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20 space-y-3">
-                  <label className="text-sm font-semibold font-mono text-purple-400">
-                    Tipo de Aposta
-                  </label>
-                  <div className="text-xs text-gray-400 font-mono">
-                    Selecione um tipo de aposta
-                  </div>
-                  
-                  {/* 🔥 SELEÇÃO: Tipo de aposta */}
-                  <div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { value: 'await', label: 'AGUARDAR', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
-                        { value: 'red', label: 'VERMELHO', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
-                        { value: 'black', label: 'PRETO', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30' },
-                        { value: 'even', label: 'PAR', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-                        { value: 'odd', label: 'ÍMPAR', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-                        { value: 'low', label: 'BAIXAS (1-18)', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
-                        { value: 'high', label: 'ALTAS (19-36)', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
-                      ].map((option) => (
-                        <button
-                          key={option.value}
-                          onClick={() => setM4DirectBetType(option.value as typeof m4DirectBetType)}
-                          disabled={false} // Sempre habilitado para permitir troca durante operação
-                          className={`p-2 rounded text-xs font-mono border transition-all ${
-                            m4DirectBetType === option.value
-                              ? option.color
-                              : 'bg-gray-800/50 text-gray-400 border-gray-600/30 hover:bg-gray-700/50'
-                          } cursor-pointer`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
+
+
                     </div>
-                    <div className="mt-2 text-xs text-gray-500 font-mono">
-                      <span>Aposta selecionada: <span className="text-purple-400">{
-                        m4DirectBetType === 'await' ? 'AGUARDAR' :
-                        m4DirectBetType === 'red' ? 'VERMELHO' :
-                        m4DirectBetType === 'black' ? 'PRETO' :
-                        m4DirectBetType === 'even' ? 'PAR' :
-                        m4DirectBetType === 'odd' ? 'ÍMPAR' :
-                        m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
-                        'ALTAS (19-36)'
-                      }</span></span>
-                    </div>
-                  </div>
-                </div>
+            </CardContent>
+          </Card>
 
-                {/* 💰 NOVO: Lógica de Stakes com Multiplicador */}
-                <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-3">
+          {/* 💰 Card Controle de Banca */}
+          <Card className="border-gray-700/30 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
+                <Settings className="h-5 w-5" />
+                CONTROLE_BANCA
+              </CardTitle>
+              <CardDescription className="text-gray-400 font-mono text-xs">
+                // Configure o multiplicador da sua banca
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="p-3 bg-gray-800/20 border border-gray-600/30 rounded-lg space-y-3">
                   <label className="text-sm font-semibold text-blue-400 font-mono">
-                    Lógica de Stakes
+                  Controle de Banca (Multiplicador)
                   </label>
-                  <div className="text-xs text-gray-400 font-mono">
-                                            Sistema de 10 níveis fixos com multiplicador personalizado
-                  </div>
-                  
+                <div className="text-xs text-gray-400 font-mono">
+                  Ajuste o multiplicador da banca (1x a 5x)
+                </div>
+
+                <div className="space-y-3">
                   {/* Multiplicador */}
-                  <div className="space-y-2">
-                    <div className="text-xs text-gray-400 font-mono">Multiplicador</div>
                     <div className="flex items-center gap-2">
                       {/* Botão Menos */}
                       <button
@@ -3266,16 +3483,21 @@ export default function BMGBR3() {
                         -
                       </button>
                       
-                      {/* Input de Valor */}
-                      <div className="flex-1 relative">
+                    {/* Input do Multiplicador */}
                         <input
-                          type="text"
-                          value={`${stakeMultiplier}x`}
-                          readOnly
-                          className="w-full h-10 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center text-white font-mono text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all duration-200"
-                          placeholder="1x"
-                        />
-                      </div>
+                      type="number"
+                      min="1"
+                      max="5"
+                      step="1"
+                      value={stakeMultiplier}
+                      onChange={(e) => {
+                        const value = Math.max(1, Math.min(5, parseInt(e.target.value) || 1));
+                        setStakeMultiplier(value);
+                        updateStakeMultiplier(value);
+                      }}
+                      className="w-full h-10 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center text-white font-mono text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      placeholder="1-5x"
+                    />
                       
                       {/* Botão Mais */}
                       <button
@@ -3292,26 +3514,8 @@ export default function BMGBR3() {
                     </div>
                   </div>
                   
-
-                  
-                  {/* Informações da Nova Estratégia */}
-                  <div className="mt-3 pt-3 border-t border-blue-500/10">
-                    <div className="text-xs text-gray-400 font-mono">
-                      <div className="mb-2">
-                        <span className="text-purple-400">NOVA ESTRATÉGIA:</span> Repetição Inteligente
-                      </div>
-                      <div className="mb-1">
-                        <span className="text-blue-400">1. Monitora:</span> Aguarda resultado desejado aparecer
-                      </div>
-                      <div className="mb-1">
-                        <span className="text-green-400">2. Aposta:</span> Para repetir o resultado detectado
-                      </div>
-
-                    </div>
-                  </div>
-                  
                   {/* Tabela de Todos os Níveis */}
-                  <div className="mt-4 pt-4 border-t border-blue-500/10">
+                  <div className="mt-4 pt-4 border-t border-gray-600/30">
                     <div className="text-xs text-blue-400 font-mono font-semibold mb-3">
                       TABELA COMPLETA - 12 NÍVEIS (Multiplicador: {stakeMultiplier}x)
                     </div>
@@ -3344,23 +3548,11 @@ export default function BMGBR3() {
                         </tbody>
                       </table>
                     </div>
-                    
 
                   </div>
-                </div>
-
-
               </div>
             </CardContent>
           </Card>
-
-
-
-
-
-
-
-          
 
         </div>
       </div>
@@ -3417,7 +3609,7 @@ export default function BMGBR3() {
             </p>
           </div>
 
-          <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+          <div className="p-4 bg-gray-800/20 border border-gray-600/30 rounded-lg">
             <div className="flex items-center gap-2 mb-2">
               <Settings className="h-4 w-4 text-blue-400" />
               <span className="text-sm font-semibold text-blue-400 font-mono">COMO_OBTER_TOKEN</span>

@@ -21,7 +21,7 @@ interface OperationsCardProps {
 export default function OperationsCard({ operationReport }: OperationsCardProps) {
   if (!operationReport) {
     return (
-      <Card className="border-blue-500/30 backdrop-blur-sm">
+      <Card className="border-gray-700/30 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
             <Zap className="h-5 w-5" />
@@ -76,7 +76,7 @@ export default function OperationsCard({ operationReport }: OperationsCardProps)
   }
 
   return (
-    <Card className="border-blue-500/30 backdrop-blur-sm">
+    <Card className="border-gray-700/30 backdrop-blur-sm">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
           <Zap className="h-5 w-5" />

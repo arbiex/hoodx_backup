@@ -48,17 +48,15 @@ export async function POST(request: NextRequest) {
       const sessionInstanceId = cookies.match(/fly-instance-id=([^;]+)/)?.[1];
       
       if (sessionInstanceId) {
-        console.log(`🔄 [SESSION-AFFINITY-BMGBR3-BET] Redirecionando para instância: ${sessionInstanceId}`);
-        return new Response(
-          JSON.stringify({ message: 'Redirecionando para instância correta' }),
-          { 
-            status: 409,
-            headers: { 
-              'Content-Type': 'application/json',
-              'fly-replay': `instance=${sessionInstanceId}`
-            }
-          }
-        );
+        // 🛡️ PROTEÇÃO: Verificar se há loop de redirecionamentos
+        const loopCheck = SimpleSessionAffinity.checkForLoop(request);
+        if (loopCheck.hasLoop) {
+          console.error(`❌ [SESSION-AFFINITY-BMGBR3-BET] LOOP detectado! Forçando aceitação.`);
+          // Continuar processamento na instância atual
+        } else {
+          console.log(`🔄 [SESSION-AFFINITY-BMGBR3-BET] Redirecionando para instância: ${sessionInstanceId} (tentativa ${loopCheck.redirectCount + 1})`);
+          return SimpleSessionAffinity.createReplayResponse(sessionInstanceId, request);
+        }
       }
     }
 

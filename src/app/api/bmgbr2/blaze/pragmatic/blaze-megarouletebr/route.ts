@@ -8,6 +8,7 @@ import {
   debugAuth
 } from '../auth';
 import { getBaseUrl } from '@/lib/utils';
+import { SimpleSessionAffinity } from '@/lib/simple-session-affinity';
 
 interface MegaRouletteConfig {
   userId: string;
@@ -235,6 +236,29 @@ const STAKE_LEVELS = [
 // Função principal POST
 export async function POST(request: NextRequest) {
   try {
+    // 🔗 AFINIDADE DE SESSÃO: Verificar se deve processar nesta instância
+    // 🆔 BYPASS: Permitir chamadas internas sem afinidade
+    const isInternalCall = request.headers.get('x-internal-call') === 'true';
+    
+    if (!isInternalCall && !SimpleSessionAffinity.shouldServeUser(request)) {
+      const cookies = request.headers.get('cookie') || '';
+      const sessionInstanceId = cookies.match(/fly-instance-id=([^;]+)/)?.[1];
+      
+      if (sessionInstanceId) {
+        console.log(`🔄 [SESSION-AFFINITY-BMGBR2] Redirecionando para instância: ${sessionInstanceId}`);
+        return new Response(
+          JSON.stringify({ message: 'Redirecionando para instância correta' }),
+          { 
+            status: 409,
+            headers: { 
+              'Content-Type': 'application/json',
+              'fly-replay': `instance=${sessionInstanceId}`
+            }
+          }
+        );
+      }
+    }
+
     // 💾 LIMPEZA: Limpar backups expirados periodicamente
     // Removido: limpeza simplificada
 
@@ -312,7 +336,7 @@ export async function POST(request: NextRequest) {
     // Ações disponíveis
     switch (action) {
       case 'bet-connect':
-        return await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
+        return createBMGBR2SessionResponse(await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
           userAgent: userFingerprint?.userAgent || clientUserAgent,
           language: clientLanguage,
           accept: clientAccept,
@@ -326,16 +350,16 @@ export async function POST(request: NextRequest) {
           pixelRatio: userFingerprint?.pixelRatio,
           hardwareConcurrency: userFingerprint?.hardwareConcurrency,
           connectionType: userFingerprint?.connectionType
-        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased, m4DirectBetType, isStandbyMode);
+        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased, m4DirectBetType, isStandbyMode));
       
       case 'start-operation':
-        return await startSimpleOperation(userId);
+        return createBMGBR2SessionResponse(await startSimpleOperation(userId));
       
       case 'stop-operation':
-        return await stopSimpleOperation(userId);
+        return createBMGBR2SessionResponse(await stopSimpleOperation(userId));
       
       case 'get-websocket-logs':
-      return await getWebSocketLogs(userId);
+      return createBMGBR2SessionResponse(await getWebSocketLogs(userId));
       
             case 'get-operation-report':
         return await getOperationReport(userId);
@@ -928,7 +952,8 @@ async function checkForNewResults(userId: string): Promise<void> {
     const response = await fetch(`${getBaseUrl()}/api/bmgbr2/blaze/pragmatic/blaze-megarouletebr/insights`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-internal-call': 'true' // 🆔 BYPASS: Identificar como chamada interna
       },
       body: JSON.stringify({
         user_id: `polling_${userId}`,
@@ -3572,5 +3597,15 @@ function clearAutoRenewal(userId: string) {
 // 💰 NOVA LÓGICA: Sistema de stakes fixas por nível
 // Funções antigas removidas - agora usa STAKE_LEVELS diretamente
 
-
+// 🔗 HELPER: Wrapper para adicionar cookie de afinidade de sessão
+function createBMGBR2SessionResponse(response: NextResponse): NextResponse {
+  const instanceId = SimpleSessionAffinity.getCurrentInstanceId();
+  
+  // Adicionar cookie de afinidade de sessão
+  response.headers.set('Set-Cookie', 
+    `fly-instance-id=${instanceId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
+  );
+  
+  return response;
+}
 

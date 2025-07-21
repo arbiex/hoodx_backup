@@ -8,6 +8,7 @@ import {
   debugAuth
 } from '../auth';
 import { getBaseUrl } from '@/lib/utils';
+import { SimpleSessionAffinity } from '@/lib/simple-session-affinity';
 
 interface MegaRouletteConfig {
   userId: string;
@@ -212,6 +213,29 @@ const MARTINGALE_SEQUENCES = [20.00, 20.00, 21.00, 4.00, 2.50, 2.50, 2.00, 1.50,
 // Função principal POST
 export async function POST(request: NextRequest) {
   try {
+    // 🔗 AFINIDADE DE SESSÃO: Verificar se deve processar nesta instância
+    // 🆔 BYPASS: Permitir chamadas internas sem afinidade
+    const isInternalCall = request.headers.get('x-internal-call') === 'true';
+    
+    if (!isInternalCall && !SimpleSessionAffinity.shouldServeUser(request)) {
+      const cookies = request.headers.get('cookie') || '';
+      const sessionInstanceId = cookies.match(/fly-instance-id=([^;]+)/)?.[1];
+      
+      if (sessionInstanceId) {
+        console.log(`🔄 [SESSION-AFFINITY-BMGBR1] Redirecionando para instância: ${sessionInstanceId}`);
+        return new Response(
+          JSON.stringify({ message: 'Redirecionando para instância correta' }),
+          { 
+            status: 409,
+            headers: { 
+              'Content-Type': 'application/json',
+              'fly-replay': `instance=${sessionInstanceId}`
+            }
+          }
+        );
+      }
+    }
+
     // 💾 LIMPEZA: Limpar backups expirados periodicamente
     // Removido: limpeza simplificada
 
@@ -234,10 +258,10 @@ export async function POST(request: NextRequest) {
     try {
       requestBody = await request.json();
     } catch (jsonError) {
-      return NextResponse.json({
+      return createBMGBR1SessionResponse(NextResponse.json({
         success: false,
         error: 'Dados da requisição inválidos - JSON malformado'
-      }, { status: 400 });
+      }, { status: 400 }));
     }
 
     const { 
@@ -289,7 +313,7 @@ export async function POST(request: NextRequest) {
     // Ações disponíveis
     switch (action) {
       case 'bet-connect':
-        return await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
+        return createBMGBR1SessionResponse(await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
           userAgent: userFingerprint?.userAgent || clientUserAgent,
           language: clientLanguage,
           accept: clientAccept,
@@ -303,25 +327,25 @@ export async function POST(request: NextRequest) {
           pixelRatio: userFingerprint?.pixelRatio,
           hardwareConcurrency: userFingerprint?.hardwareConcurrency,
           connectionType: userFingerprint?.connectionType
-        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased, m4DirectBetType, isStandbyMode);
+        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased, m4DirectBetType, isStandbyMode));
       
       case 'start-operation':
-        return await startSimpleOperation(userId);
+        return createBMGBR1SessionResponse(await startSimpleOperation(userId));
       
       case 'stop-operation':
-        return await stopSimpleOperation(userId);
+        return createBMGBR1SessionResponse(await stopSimpleOperation(userId));
       
       case 'get-websocket-logs':
-      return await getWebSocketLogs(userId);
+      return createBMGBR1SessionResponse(await getWebSocketLogs(userId));
       
             case 'get-operation-report':
-        return await getOperationReport(userId);
+        return createBMGBR1SessionResponse(await getOperationReport(userId));
       
       case 'reset-operation-report':
-        return await resetOperationReport(userId);
+        return createBMGBR1SessionResponse(await resetOperationReport(userId));
       
       case 'get-connection-status':
-        return await getConnectionStatus(userId);
+        return createBMGBR1SessionResponse(await getConnectionStatus(userId));
       
       
       
@@ -557,7 +581,7 @@ export async function POST(request: NextRequest) {
           addWebSocketLog(userId, `💰 Stake atualizada: R$ ${selectedStake.toFixed(2)}`, 'success');
         }
         
-        return NextResponse.json({ success: true });
+        return createBMGBR1SessionResponse(NextResponse.json({ success: true }));
       
       case 'set-pending-stake':
         const { newStake: pendingStake } = requestBody;
@@ -568,7 +592,7 @@ export async function POST(request: NextRequest) {
           
           addWebSocketLog(userId, `⏳ Stake pendente: R$ ${pendingStake.toFixed(2)} - Será aplicada após próxima derrota`, 'info');
         }
-        return NextResponse.json({ success: true });
+        return createBMGBR1SessionResponse(NextResponse.json({ success: true }));
       
       case 'update-stake':
         const { newStake } = requestBody;
@@ -914,7 +938,8 @@ async function checkForNewResults(userId: string): Promise<void> {
     const response = await fetch(`${getBaseUrl()}/api/bmgbr/blaze/pragmatic/blaze-megarouletebr/insights`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-internal-call': 'true' // 🆔 BYPASS: Identificar como chamada interna
       },
       body: JSON.stringify({
         user_id: `polling_${userId}`,
@@ -3652,5 +3677,14 @@ function getProgressionStatus(userId: string): string {
   return ` - ${state.currentCounter}/${state.interval}`;
 }
 
-
-
+// 🔗 HELPER: Wrapper para adicionar cookie de afinidade de sessão
+function createBMGBR1SessionResponse(response: NextResponse): NextResponse {
+  const instanceId = SimpleSessionAffinity.getCurrentInstanceId();
+  
+  // Adicionar cookie de afinidade de sessão
+  response.headers.set('Set-Cookie', 
+    `fly-instance-id=${instanceId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
+  );
+  
+  return response;
+}

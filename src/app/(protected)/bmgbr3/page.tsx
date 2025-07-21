@@ -18,8 +18,10 @@ import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
 import CreditDisplay from '@/components/CreditDisplay';
+import { SessionControlModal } from '@/components/SessionControlModal';
 import useBmgbr3Api from '@/hooks/useBmgbr3Api';
 import useTimerManager from '@/hooks/useTimerManager';
+import { useSessionControl } from '@/hooks/useSessionControl';
 
 
 
@@ -64,6 +66,18 @@ interface ConsolidatedOperationState {
 export default function BMGBR3() {
   // 🔄 NOVO: Hook customizado para API
   const api = useBmgbr3Api();
+
+  // 🔒 SISTEMA DE CONTROLE DE SESSÃO MÚLTIPLA
+  const { 
+    isSessionActive, 
+    isMultipleSession, 
+    showSessionModal, 
+    activeSessionInfo, 
+    takeControl, 
+    stayInactive, 
+    sessionStatus,
+    wasControlTaken 
+  } = useSessionControl();
 
   // 🕐 NOVO: Gerenciador de timers centralizado (previne memory leaks)
   const timers = useTimerManager({ 
@@ -304,8 +318,10 @@ export default function BMGBR3() {
   // 🔧 NOVO: Estado para rastrear erros consecutivos
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
 
-  // 🔥 NOVO: Estado para controlar quantos resultados mostrar
-  const [visibleResultsCount, setVisibleResultsCount] = useState(20); // 20 resultados fixos
+  // 📱 RESPONSIVO: Estado para controlar quantos resultados mostrar
+  const [visibleResultsCount, setVisibleResultsCount] = useState(10); // 10 desktop, 5 mobile
+
+
 
 
 
@@ -331,10 +347,7 @@ export default function BMGBR3() {
   // 🔥 NOVO: Estado para tipo de aposta do modo M4 direto
   const [m4DirectBetType, setM4DirectBetType] = useState<'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high'>('await');
 
-  // 🐛 DEBUG: Monitorar mudanças no tipo de aposta (temporário)
-  useEffect(() => {
-    console.log('🔄 FRONTEND: m4DirectBetType mudou para:', m4DirectBetType);
-  }, [m4DirectBetType]);
+  // Debug removido - sistema funcionando
 
   
 
@@ -449,12 +462,83 @@ export default function BMGBR3() {
 
   // 🚀 REMOVIDO: Função de progressão automática não aplicável à nova lógica
 
-  // 🔥 NOVO: Inicializar polling de insights automaticamente (otimizado para evitar erro 429)
+    // 📱 RESPONSIVO: Detectar mobile e ajustar número de resultados
   useEffect(() => {
-    // Sempre iniciar polling de insights com intervalo otimizado
+    const updateResultsCount = () => {
+      const isMobile = window.matchMedia('(max-width: 640px)').matches;
+      setVisibleResultsCount(isMobile ? 5 : 10);
+    };
+
+    // Definir inicial
+    updateResultsCount();
+
+    // Escutar mudanças de tamanho
+    const mediaQuery = window.matchMedia('(max-width: 640px)');
+    mediaQuery.addEventListener('change', updateResultsCount);
+
+    return () => mediaQuery.removeEventListener('change', updateResultsCount);
+  }, []);
+
+
+
+  // 🚀 ULTRA-ROBUSTO: Inicializar polling de insights com heartbeat (otimizado para evitar erro 429)
+  useEffect(() => {
+    console.log('🚀 [CÉREBRO] Inicializando sistema ultra-robusto...');
+    setIsInsightsActive(true);
     updatePollingMode('inactive'); // 3 segundos quando inativo para evitar erro 429
     startInsightsPolling();
-    setIsInsightsActive(true);
+    
+    // 🔍 PAGE VISIBILITY: Detectar quando tela volta de background
+    let wasHidden = false;
+    let graceEndTime = 0;
+    
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        wasHidden = true;
+        console.log('📱 [CÉREBRO] Tela desligada - polling continua em background');
+      } else {
+        if (wasHidden) {
+          // Dar 60 segundos de tolerância após voltar da tela desligada
+          graceEndTime = Date.now() + 60000;
+          console.log('📱 [CÉREBRO] Tela desbloqueada - dando 60s de tolerância ao recovery');
+          wasHidden = false;
+          
+          // Forçar atualização do heartbeat
+          (window as any).lastPollingTimestamp = Date.now();
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // 🛡️ SISTEMA DE RECOVERY INTELIGENTE: Verificar a cada 30s se polling ainda está ativo
+    const recoveryInterval = setInterval(() => {
+      // Usar heartbeat como indicador de vida do polling
+      const timeSinceLastPoll = (window as any).lastPollingTimestamp ? 
+        Date.now() - (window as any).lastPollingTimestamp : 999999;
+      
+      // 🔍 VERIFICAR: Se está dentro do período de tolerância
+      const isInGracePeriod = Date.now() < graceEndTime;
+      
+      if (timeSinceLastPoll > 45000 && !isInGracePeriod) { // Se não pollar por 45s E não está em tolerância
+        console.error('🚨 [RECOVERY] Polling morto detectado! Reiniciando...');
+        try {
+          startInsightsPolling();
+          console.log('✅ [RECOVERY] Polling reiniciado automaticamente');
+        } catch (error) {
+          console.error('❌ [RECOVERY] Falha ao reiniciar:', error);
+        }
+      } else if (timeSinceLastPoll > 45000 && isInGracePeriod) {
+        console.log('📱 [RECOVERY] Polling parece morto mas em período de tolerância pós-desbloqueio');
+      }
+    }, 30000);
+    
+    // Cleanup no unmount
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(recoveryInterval);
+      stopInsightsPolling();
+    };
   }, []);
 
   // 🔥 REMOVIDO: Funções para carregar mais resultados - agora fixo em 20 resultados
@@ -549,6 +633,35 @@ export default function BMGBR3() {
     // 🧹 NOVO: Resetar cache de logs processados ao resetar operação
     setLogProcessedGameIds(new Set());
     
+    // 🔄 NOVO: Forçar carregamento inicial dos logs após reset
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        console.log('🔄 [RESET] Forçando carregamento inicial dos logs...');
+        setTimeout(async () => {
+          try {
+            const logsResult = await api.getWebSocketLogs();
+            if (logsResult.success && logsResult.data?.logs) {
+              setWebsocketLogs(logsResult.data.logs);
+              console.log('✅ [RESET] Logs carregados com sucesso:', logsResult.data.logs.length);
+            }
+          } catch (error) {
+            console.warn('⚠️ [RESET] Erro ao carregar logs iniciais:', error);
+          }
+          
+          // 🔄 GARANTIR: Reiniciar polling após reset
+          console.log('🔄 [RESET] Reiniciando polling de insights...');
+          stopInsightsPolling(); // Parar primeiro para evitar duplicações
+          setTimeout(() => {
+            startInsightsPolling(); // Reiniciar após pequena pausa
+            console.log('✅ [RESET] Polling reiniciado com sucesso');
+          }, 500);
+        }, 1000); // Aguardar 1s para o backend processar o reset
+      }
+    } catch (error) {
+      console.warn('⚠️ [RESET] Erro na verificação de usuário:', error);
+    }
+    
     // Função removida
   };
 
@@ -594,12 +707,7 @@ export default function BMGBR3() {
 
   // 🎯 NOVO: Controlar modo de polling baseado no estado da operação
   useEffect(() => {
-    console.log('🔄 [DEBUG] useEffect polling - Estados:', {
-      waitingForResult: operationState?.waitingForResult,
-      isOperating,
-      operationIsActive: operation.isActive,
-      isInsightsActive
-    });
+    // Debug removido - sistema funcionando
     
     if (operationState?.waitingForResult) {
       // Aguardando resultado - polling rápido
@@ -625,7 +733,7 @@ export default function BMGBR3() {
       
       // 🔧 CRÍTICO: SEMPRE manter polling ativo para insights, mesmo após missão cumprida
       if (!isInsightsActive) {
-        console.log('🔄 [FRONTEND] Reativando polling após operação inativa');
+        // Log de debug removido - sistema funcionando
         startInsightsPolling();
         setIsInsightsActive(true);
       }
@@ -834,6 +942,8 @@ export default function BMGBR3() {
   };
 
   const startInsightsPolling = () => {
+    console.log('🚀 [CÉREBRO] Iniciando polling ULTRA-ROBUSTO...');
+    
     // Fazer primeira requisição imediatamente
     pollUnifiedData();
 
@@ -845,6 +955,9 @@ export default function BMGBR3() {
       'unified-polling',
       'Polling unificado (logs + card)'
     );
+    
+    // 🛡️ ADICIONAR: Heartbeat de segurança
+    startPollingHeartbeat();
   };
 
   // 🎯 NOVO: Sistema de polling inteligente baseado no estado
@@ -859,8 +972,66 @@ export default function BMGBR3() {
   };
 
   const stopInsightsPolling = () => {
+    console.log('🛑 [CÉREBRO] Parando polling (só deve acontecer em reset)...');
     // Limpar timer usando o gerenciador centralizado
     timers.clearTimer('unified-polling');
+    // Parar heartbeat também
+    timers.clearTimer('polling-heartbeat');
+  };
+
+  // 🛡️ SISTEMA HEARTBEAT: Monitor que garante que polling nunca morre
+  const startPollingHeartbeat = () => {
+    console.log('💓 [CÉREBRO] Iniciando heartbeat de monitoramento...');
+    
+    let lastPollingTime = Date.now();
+    let missedBeats = 0;
+    
+    // Atualizar timestamp a cada polling bem-sucedido
+    const updateHeartbeat = () => {
+      lastPollingTime = Date.now();
+      missedBeats = 0;
+    };
+    
+    // Monitor que verifica se polling está vivo (com detecção de background)
+    timers.setInterval(() => {
+      const timeSinceLastPoll = Date.now() - lastPollingTime;
+      const maxInterval = getPollingInterval() * 3; // 3x o intervalo normal
+      
+      // 🔍 VERIFICAR: Se página está em background (tolerância)
+      const isInBackground = document.hidden;
+      
+      if (timeSinceLastPoll > maxInterval && !isInBackground) {
+        missedBeats++;
+        console.warn(`💓 [CÉREBRO] Heartbeat perdido! Tempo: ${timeSinceLastPoll}ms, Missed: ${missedBeats}`);
+        
+        // Após 3 batidas perdidas, forçar restart (aumentado tolerância)
+        if (missedBeats >= 3) {
+          console.error('🚨 [CÉREBRO] POLLING MORTO DETECTADO! Forçando restart...');
+          try {
+            stopInsightsPolling();
+            setTimeout(() => {
+              startInsightsPolling();
+              console.log('✅ [CÉREBRO] Polling ressuscitado pelo heartbeat!');
+            }, 1000);
+          } catch (error) {
+            console.error('❌ [CÉREBRO] Erro ao ressuscitar polling:', error);
+          }
+          missedBeats = 0;
+        }
+      } else if (timeSinceLastPoll > maxInterval && isInBackground) {
+        // Em background - não contar como miss beat
+        console.log(`📱 [CÉREBRO] Heartbeat pausado em background (${timeSinceLastPoll}ms) - normal`);
+      } else {
+        // Polling está vivo
+        if (missedBeats > 0) {
+          console.log(`💚 [CÉREBRO] Polling voltou ao normal após ${missedBeats} missed beats`);
+          missedBeats = 0;
+        }
+      }
+    }, 10000, 'polling-heartbeat', 'Monitor heartbeat do cérebro');
+    
+    // Função para ser chamada quando polling funciona
+    (window as any).updatePollingHeartbeat = updateHeartbeat;
   };
 
   // 🎯 NOVO: Atualizar modo de polling e reiniciar com novo intervalo
@@ -880,11 +1051,8 @@ export default function BMGBR3() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 🔄 DEBOUNCE SUAVIZADO: Permite sobreposição controlada
-    if (insightsLoading) {
-      setTimeout(() => setInsightsLoading(false), 2000);
-      return;
-    }
+    // 🛡️ REMOVIDO: Debounce que podia parar o polling
+    // O cérebro NUNCA pode parar - permite sobreposição se necessário
     setInsightsLoading(true);
 
     // ⚠️ DELAY RANDÔMICO: Evitar burst de requests simultâneos  
@@ -894,15 +1062,19 @@ export default function BMGBR3() {
     try {
       const result = await api.getInsights();
 
-      // ⚠️ TRATAMENTO ERRO 429: Rate limiting detectado
+      // 🚀 TRATAMENTO ERRO 429: Rate limiting com RETRY AUTOMÁTICO
       if (result.error && result.error.includes('429')) {
-        console.log('⚠️ Rate limit atingido - pausando polling por 5 segundos');
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Reduzido para 5s
-        return;
+        console.log('⚠️ Rate limit atingido - aguardando e CONTINUANDO automaticamente...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        // 🛡️ NÃO retorna - continua o polling após pausa
+        console.log('🔄 Continuando polling após rate limit...');
       }
       
-      // 🔇 SILENCIOSO: Ignorar erros sem logs  
-      if (!result.success) return;
+      // 🛡️ ERRORS NÃO PARAM O CÉREBRO: Log mas continua tentando
+      if (!result.success && !result.error?.includes('429')) {
+        console.warn('⚠️ [CÉREBRO] Erro no polling mas CONTINUANDO:', result.error);
+        // NÃO retorna - continua processamento para manter polling vivo
+      }
 
       if (result.success && result.data) {
         // 🎯 DETECÇÃO SIMPLES: Apenas gameId diferente
@@ -969,6 +1141,12 @@ export default function BMGBR3() {
         // ✅ DADOS IGUAIS: Retorno silencioso absoluto
       }
       
+      // 🛡️ HEARTBEAT: Sinalizar que polling está funcionando
+      (window as any).lastPollingTimestamp = Date.now();
+      if ((window as any).updatePollingHeartbeat) {
+        (window as any).updatePollingHeartbeat();
+      }
+      
       // 🧹 LIMPEZA AUTOMÁTICA: Manter cache de logs processados controlado
       if (logProcessedGameIds.size > 50) {
         const array = Array.from(logProcessedGameIds);
@@ -976,12 +1154,19 @@ export default function BMGBR3() {
         setLogProcessedGameIds(new Set(toKeep));
       }
     } catch (error) {
-      // ⚠️ TRATAMENTO MELHORADO: Log apenas erros críticos
+      // 🚀 TRATAMENTO ULTRA-ROBUSTO: NUNCA mata o cérebro por erro
+      console.warn('⚠️ [CÉREBRO] Erro no polling mas MANTENDO VIVO:', error);
+      
+      // 🛡️ Retry com backoff para rate limiting
       if (error instanceof Error && error.message.includes('429')) {
-        console.log('⚠️ Rate limiting detectado');
+        console.log('🔄 [CÉREBRO] Rate limit - fazendo backoff mas CONTINUANDO...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
+      
+      // 🔄 CRÍTICO: Sempre libera loading para próximo ciclo
       setTimeout(() => setInsightsLoading(false), 100);
     } finally {
+      // 🛡️ SEMPRE limpa loading - cérebro nunca pode travar
       setInsightsLoading(false);
     }
   };
@@ -1513,35 +1698,9 @@ export default function BMGBR3() {
     insightsData?.lastUpdate
   ]);
 
-  // 🔧 CORREÇÃO ANTI-PISCAR: Memorizar tooltips baseado em valores específicos, não na referência do objeto
-  const tooltipContents = useMemo(() => {
-    // Extrair valores específicos para evitar dependência de referência de objeto
-    const redValue = insightsComparison.roundsSinceLastSequence?.red;
-    const blackValue = insightsComparison.roundsSinceLastSequence?.black;
-    const evenValue = insightsComparison.roundsSinceLastSequence?.even;
-    const oddValue = insightsComparison.roundsSinceLastSequence?.odd;
-    const lowValue = insightsComparison.roundsSinceLastSequence?.low;
-    const highValue = insightsComparison.roundsSinceLastSequence?.high;
-    
-    return {
-      red: `${(redValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
-      black: `${(blackValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
-      even: `${(evenValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
-      odd: `${(oddValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
-      low: `${(lowValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`,
-      high: `${(highValue || '--').toString().replace('r', '')} rodadas desde a última ocorrência`
-    };
-  }, [
-    // Dependências específicas por valor, não por referência de objeto
-    insightsComparison.roundsSinceLastSequence?.red,
-    insightsComparison.roundsSinceLastSequence?.black,
-    insightsComparison.roundsSinceLastSequence?.even,
-    insightsComparison.roundsSinceLastSequence?.odd,
-    insightsComparison.roundsSinceLastSequence?.low,
-    insightsComparison.roundsSinceLastSequence?.high
-  ]);
 
-  // ✅ CORREÇÃO DEFINITIVA: PRÉ-CALCULAR TOOLTIPS IMUTÁVEIS (ANTI-PISCAR)
+
+  // ✅ RESULTADOS SIMPLIFICADOS (SEM TOOLTIPS)
   const memoizedInsightsResults = useMemo(() => {
     if (!insightsData || !insightsData.results || !Array.isArray(insightsData.results)) {
       return [];
@@ -1551,48 +1710,6 @@ export default function BMGBR3() {
       const isRed = result.color === 'red' || result.color === 'R';
       const isGreen = result.color === 'green' || result.color === 'G' || result.number === 0;
       
-      // 🔇 PRÉ-CALCULAR TOOLTIP FIXO: Evita recálculos desnecessários
-      const characteristics = (() => {
-        const number = result.number;
-        const color = isRed ? 'red' : (isGreen ? 'green' : 'black');
-        const characteristics = [];
-        
-        if (isGreen) {
-          characteristics.push('verde');
-        } else if (isRed) {
-          characteristics.push('vermelho');
-        } else {
-          characteristics.push('preto');
-        }
-        
-        if (number === 0) {
-          characteristics.push('zero');
-        } else {
-          const isEven = number % 2 === 0;
-          const isLow = number >= 1 && number <= 18;
-          
-          if (isEven) {
-            characteristics.push('par');
-          } else {
-            characteristics.push('ímpar');
-          }
-          
-          if (isLow) {
-            characteristics.push('baixa (1-18)');
-          } else {
-            characteristics.push('alta (19-36)');
-          }
-        }
-        
-        return characteristics.join(', ');
-      })();
-      
-      const timeFormatted = new Date(result.timestamp).toLocaleTimeString('pt-BR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-      
       return {
         id: `insight-${index}-${result.game_id}`,
         number: result.number,
@@ -1601,9 +1718,7 @@ export default function BMGBR3() {
         timestamp: result.timestamp,
         index: index,
         isRed,
-        isGreen,
-        // 🔇 TOOLTIP FIXO PRÉ-CALCULADO: Nunca mais recalcula!
-        tooltipContent: `${timeFormatted} | ${characteristics}`
+        isGreen
       };
     });
   }, [
@@ -1613,52 +1728,11 @@ export default function BMGBR3() {
     visibleResultsCount
   ]);
 
-  // ✅ CORREÇÃO DEFINITIVA: PRÉ-CALCULAR TOOLTIPS IMUTÁVEIS PARA SMALL RESULTS
+  // ✅ RESULTADOS PEQUENOS SIMPLIFICADOS (SEM TOOLTIPS)
   const memoizedSmallResults = useMemo(() => {
     return lastTenResults.map((result: any, index: number) => {
       const isRed = result.color === 'R';
       const isGreen = result.color === 'green' || result.color === 'G' || result.number === 0;
-      
-      // 🔇 PRÉ-CALCULAR TOOLTIP FIXO: Evita recálculos desnecessários
-      const characteristics = (() => {
-        const number = result.number;
-    const characteristics = [];
-    
-    if (isGreen) {
-      characteristics.push('verde');
-    } else if (isRed) {
-      characteristics.push('vermelho');
-        } else {
-      characteristics.push('preto');
-    }
-    
-    if (number === 0) {
-      characteristics.push('zero');
-    } else {
-          const isEven = number % 2 === 0;
-          const isLow = number >= 1 && number <= 18;
-          
-      if (isEven) {
-        characteristics.push('par');
-          } else {
-        characteristics.push('ímpar');
-      }
-      
-      if (isLow) {
-        characteristics.push('baixa (1-18)');
-          } else {
-        characteristics.push('alta (19-36)');
-      }
-    }
-    
-    return characteristics.join(', ');
-      })();
-
-      const timeFormatted = new Date(result.timestamp).toLocaleTimeString('pt-BR', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
       
       return {
         id: `result-${index}-${result.gameId}`,
@@ -1668,9 +1742,7 @@ export default function BMGBR3() {
         timestamp: result.timestamp,
         index: index,
         isRed,
-        isGreen,
-        // 🔇 TOOLTIP FIXO PRÉ-CALCULADO: Nunca mais recalcula!
-        tooltipContent: `${timeFormatted} | ${characteristics}`
+        isGreen
       };
     });
   }, [
@@ -1701,13 +1773,12 @@ export default function BMGBR3() {
   }, []);
 
   // 🔇 FUNÇÕES REMOVIDAS: getNumberCharacteristics e formatTimestamp 
-  // não são mais necessárias - tooltips são pré-calculados!
+  // não são mais necessárias - tooltips foram removidos!
 
   // ✅ CORREÇÃO: Componente memorizado para cada tipo de aposta (removida lógica de temperatura)
   // Este componente resolve o problema do "piscar" durante o polling:
   // 1. React.memo previne re-renders quando props não mudaram
-  // 2. Tooltip integrado evita componentes aninhados desnecessários
-  // 3. Usa função getColorInfo memorizada para mostrar informações de cores
+  // 2. Usa função getColorInfo memorizada para mostrar informações de cores
   const InsightCard = React.memo<{
     title: string;
     color: string;
@@ -1715,7 +1786,8 @@ export default function BMGBR3() {
     borderColor: string;
     hoverColor: string;
     rounds: string | number;
-  }>(({ title, color, bgColor, borderColor, hoverColor, rounds }) => {
+    selectedBetType: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
+  }>(({ title, color, bgColor, borderColor, hoverColor, rounds, selectedBetType }) => {
     const colorInfo = getColorInfo(title);
     const roundsDisplay = rounds.toString().replace('r', '');
     const roundsNumber = parseInt(roundsDisplay) || 0;
@@ -1746,6 +1818,24 @@ export default function BMGBR3() {
     const isButtonEnabled = isOperating && m4DirectBetType === 'await' && bettingWindow.isOpen;
     const shouldShowButton = betType !== null; // Sempre mostrar se é um tipo válido
     
+    // 🎨 LÓGICA DE SELEÇÃO VISUAL: Verificar se este card está selecionado
+    const isSelected = selectedBetType !== 'await' && betType === selectedBetType;
+    const isOtherSelected = selectedBetType !== 'await' && betType !== selectedBetType;
+    
+    // 🚨 LÓGICA DE HABILITAÇÃO: Só permite clicar quando apostas abertas
+    const isCardEnabled = bettingWindow.isOpen && isOperating;
+    
+    // 🎨 LÓGICA DE OPACIDADE CORRETA: 
+    // - Apostas fechadas E não é o selecionado = 50%
+    // - Apostas abertas E outros selecionados = 50%
+    // - Caso contrário = 100%
+    const cardOpacity = (!isCardEnabled && !isSelected) || (isCardEnabled && isOtherSelected) 
+      ? 'opacity-50' 
+      : 'opacity-100';
+      
+    // 🖱️ CURSOR CORRETO: Baseado no estado de habilitação
+    const cardCursor = isCardEnabled ? 'cursor-pointer' : 'cursor-not-allowed';
+    
 
     
 
@@ -1754,13 +1844,21 @@ export default function BMGBR3() {
       <div className="w-full h-full">
         <div className="w-full">
           <div
-            className={`w-full h-full px-4 py-3 bg-gray-800/20 border border-gray-600/30 rounded-lg hover:bg-gray-700/30 transition-all flex items-center justify-between min-h-[60px] ${
+            onClick={() => {
+              // 🚨 CORREÇÃO CRÍTICA: Só permitir clique quando apostas abertas
+              if (betType && isCardEnabled) {
+                handleAutoStartBet(betType);
+              }
+            }}
+            className={`w-full h-full px-4 py-3 bg-gray-800/20 border border-gray-600/30 rounded-lg transition-all flex items-center justify-between min-h-[60px] ${cardCursor} ${cardOpacity} ${
+              isCardEnabled ? 'hover:bg-gray-700/30 hover:border-gray-500/50 hover:scale-[1.02]' : ''
+            } ${
               roundsNumber >= 15 ? 'border-green-500/50 bg-green-500/10' : 
               roundsNumber >= 10 ? 'border-yellow-500/50 bg-yellow-500/10' : ''
             }`}
           >
             <div className="flex items-center gap-3">
-              <div className={`text-xl font-bold font-mono ${getNumberColor(roundsNumber)}`}>
+              <div className={`text-lg sm:text-xl font-bold font-mono ${getNumberColor(roundsNumber)}`}>
               {roundsDisplay}
             </div>
               <div className={`text-xs font-mono uppercase text-white`}>
@@ -1768,7 +1866,7 @@ export default function BMGBR3() {
             </div>
           </div>
             {shouldShowButton && (
-              <div className="flex items-center justify-center">
+              <div className="hidden sm:flex items-center justify-center">
                 <Button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1806,7 +1904,7 @@ export default function BMGBR3() {
     );
   });
 
-  // 🔇 COMPONENTE ANTI-PISCAR DEFINITIVO: Tooltip completamente estático
+  // 🔇 COMPONENTE DE RESULTADO SIMPLIFICADO: Sem tooltip
   const ResultRouletteSlot = React.memo<{
     number: number;
     gameId: string;
@@ -1814,18 +1912,11 @@ export default function BMGBR3() {
     index: number;
     isRed: boolean;
     isGreen: boolean;
-    tooltipContent: string;
-  }>(({ number, gameId, timestamp, index, isRed, isGreen, tooltipContent }) => {
-    const [isVisible, setIsVisible] = useState(false);
-
-    // 🔇 TOOLTIP COMPLETAMENTE ESTÁTICO: Nunca muda após renderização inicial
-
+  }>(({ number, gameId, timestamp, index, isRed, isGreen }) => {
     return (
       <div className="relative inline-block">
         <div
-          onMouseEnter={() => setIsVisible(true)}
-          onMouseLeave={() => setIsVisible(false)}
-          className={`aspect-square rounded-lg flex items-center justify-center text-sm font-bold transition-all hover:scale-105 cursor-pointer relative ${
+          className={`aspect-square rounded-md sm:rounded-lg flex items-center justify-center text-xs sm:text-sm font-bold transition-all hover:scale-105 cursor-pointer relative ${
             isRed 
               ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' 
               : isGreen
@@ -1835,22 +1926,13 @@ export default function BMGBR3() {
         >
           {number}
         </div>
-        {isVisible && (
-          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 z-50">
-            <div className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-600 w-[160px] text-center break-words">
-              {tooltipContent}
-              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800"></div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }, (prevProps, nextProps) => {
+    </div>
+  );
+}, (prevProps, nextProps) => {
     // 🔇 COMPARAÇÃO ESPECÍFICA: Só re-renderizar se props essenciais mudaram
     return (
       prevProps.number === nextProps.number &&
       prevProps.gameId === nextProps.gameId &&
-      prevProps.tooltipContent === nextProps.tooltipContent &&
       prevProps.isRed === nextProps.isRed &&
       prevProps.isGreen === nextProps.isGreen
     );
@@ -1942,6 +2024,8 @@ export default function BMGBR3() {
     setOperationLoading(true);
     setOperationError(null);
       setOperationSuccess(null);
+      
+      console.log('🚀 [START-OPERATION] Iniciando nova operação...');
     
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -1955,7 +2039,9 @@ export default function BMGBR3() {
       // 🤖 REMOVIDO: Lógica de monitoramento de oportunidades não é mais necessária - usa foto inicial e tempo real
 
       // 🔄 Resetar gráficos para nova sessão
+      console.log('🧹 [START-OPERATION] Resetando todos os gráficos e logs...');
       await resetAllGraphs();
+      console.log('✅ [START-OPERATION] Reset completo - logs e polling reiniciados');
 
       // 🔥 NOVO: Resetar flag de tentativa de ativação do modo real
       setRealModeActivationAttempted(false);
@@ -2499,17 +2585,7 @@ export default function BMGBR3() {
             setIsInsightsActive(true);
             startInsightsPolling();
             
-            // 🔍 DEBUG: Verificar status dos timers após reativação
-            setTimeout(() => {
-              const timerStatus = timers.getTimerStatus();
-              console.log('🔍 [DEBUG] Status dos timers após missão cumprida:', {
-                isInsightsActive,
-                activeTimers: timerStatus.count,
-                hasUnifiedPolling: timers.hasTimer('unified-polling')
-              });
-            }, 1000);
-            
-            console.log('🎯 [FRONTEND] Missão cumprida detectada - mantendo operação ativa, voltando ao modo await e mantendo polling ativo');
+            // Debug removido - sistema funcionando
           }
           
           if (hasBetsClosed) {
@@ -2555,11 +2631,7 @@ export default function BMGBR3() {
             
                       // 🔄 NOVO: Sincronizar tipo de aposta com o backend
           if (newOperationState?.m4DirectBetType && newOperationState.m4DirectBetType !== m4DirectBetType) {
-            console.log('🔄 [FRONTEND] Sincronizando m4DirectBetType:', {
-              frontend: m4DirectBetType,
-              backend: newOperationState.m4DirectBetType,
-              missionCompleted: newOperationState.missionCompleted
-            });
+            // Log de debug removido - sistema funcionando
             setM4DirectBetType(newOperationState.m4DirectBetType);
           }
           }
@@ -2589,12 +2661,7 @@ export default function BMGBR3() {
           
           // 🔄 Sincronizar estado da operação - SEMPRE quando necessário
           if (isOperating !== apiOperationActive) {
-            console.log('🔄 [FRONTEND] Sincronizando isOperating:', {
-              frontend: isOperating,
-              backend: apiOperationActive,
-              forceDisplay: operation.forceDisplay,
-              timestamp: new Date().toLocaleTimeString()
-            });
+            // Log de debug removido - sistema funcionando
             setIsOperating(apiOperationActive);
             
             // Removed: Auto Bot counter reset
@@ -2973,8 +3040,25 @@ export default function BMGBR3() {
       {/* Matrix Rain Background */}
       <MatrixRain />
       
-      <div className="relative z-10 p-8">
-        <div className="max-w-4xl mx-auto space-y-6">
+      {/* 🔒 INDICADOR DE SESSÃO INATIVA */}
+      {!isSessionActive && (
+        <div className="fixed top-0 left-0 right-0 bg-red-900/90 border-b border-red-600 z-40">
+          <div className="text-center py-2 px-4">
+            <p className="text-red-200 text-sm font-semibold font-mono">
+              🔒 SESSAO_INATIVA - {wasControlTaken ? 'Controle transferido' : 'Aguardando assumir controle'}
+            </p>
+            <p className="text-red-300 text-xs font-mono">
+              {wasControlTaken ? 
+                'Outra aba assumiu controle - Use "ASSUMIR_CONTROLE" para retomar' : 
+                'Use "ASSUMIR_CONTROLE" no modal para ativar esta sessão'
+              }
+            </p>
+          </div>
+        </div>
+      )}
+      
+      <div className="relative z-10 p-4 sm:p-6 lg:p-8">
+        <div className="w-full max-w-sm sm:max-w-2xl lg:max-w-4xl xl:max-w-6xl mx-auto space-y-4 sm:space-y-6">
           
 
 
@@ -2989,7 +3073,7 @@ export default function BMGBR3() {
           <button
             onClick={handleOpenModal}
             className={`
-              w-full p-4 rounded-2xl border backdrop-blur-sm transition-all duration-300 hover:scale-[1.02]
+              w-full p-3 sm:p-4 rounded-xl sm:rounded-2xl border backdrop-blur-sm transition-all duration-300 hover:scale-[1.02]
               ${isConfigured 
                 ? 'bg-green-500/5 border-green-500/30 shadow-lg shadow-green-500/20' 
                 : 'bg-red-500/5 border-red-500/30 shadow-lg shadow-red-500/20'
@@ -3060,22 +3144,22 @@ export default function BMGBR3() {
               <div className="space-y-4">
                 
                 {/* Cards de Estatísticas */}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
                   {/* Card APOSTAS */}
-                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                  <div className="p-2 sm:p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
                     <div className="text-center">
                       <div className="text-gray-400 text-xs font-mono mb-1">APOSTAS</div>
-                      <div className="text-blue-400 text-lg font-mono font-bold">
+                      <div className="text-blue-400 text-sm sm:text-lg font-mono font-bold">
                         {operationReport?.summary.totalBets || 0}
                       </div>
                     </div>
                   </div>
                   
                   {/* Card LUCRO */}
-                  <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                  <div className="p-2 sm:p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
                     <div className="text-center">
                       <div className="text-gray-400 text-xs font-mono mb-1">LUCRO</div>
-                      <div className={`text-lg font-mono font-bold ${
+                      <div className={`text-sm sm:text-lg font-mono font-bold ${
                         (operationReport?.summary.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'
                       }`}>
                         R$ {(operationReport?.summary.profit || 0).toFixed(2)}
@@ -3084,10 +3168,10 @@ export default function BMGBR3() {
                   </div>
 
                   {/* Card CONSUMO */}
-                  <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                  <div className="p-2 sm:p-3 bg-orange-500/10 border border-orange-500/20 rounded-lg">
                     <div className="text-center">
                       <div className="text-gray-400 text-xs font-mono mb-1">CONSUMO</div>
-                      <div className="text-orange-400 text-lg font-mono font-bold">
+                      <div className="text-orange-400 text-sm sm:text-lg font-mono font-bold">
                         R$ 0,00
                       </div>
                     </div>
@@ -3095,12 +3179,16 @@ export default function BMGBR3() {
                 </div>
 
                 
-                {/* 📈 HISTÓRICO: Últimos resultados em tempo real - Grid 10x2 */}
+                                {/* 📈 HISTÓRICO: Últimos resultados responsivo (10 desktop / 5 mobile) */}
                 {insightsData && insightsData.results && Array.isArray(insightsData.results) && insightsData.results.length > 0 && (
                   <div className="space-y-3">
-                    <div className="w-full max-w-4xl mx-auto p-4 bg-gray-800/20 border border-gray-600/30 rounded-lg">
-                      <div className="grid grid-cols-10 gap-3 auto-rows-fr">
-                        {/* ✅ CORREÇÃO: Usar dados memorizados com tooltips pré-calculados */}
+                    <div className="w-full mx-auto p-2 sm:p-4 bg-gray-800/20 border border-gray-600/30 rounded-lg">
+                        <div className={`grid gap-1 sm:gap-2 lg:gap-3 auto-rows-fr ${
+                          visibleResultsCount === 5 
+                            ? 'grid-cols-5' // Mobile: 5 resultados em 1 linha
+                            : 'grid-cols-5 sm:grid-cols-10' // Desktop: 10 resultados em 2 linhas no mobile, 1 linha no desktop
+                        }`}>
+                        {/* ✅ CORREÇÃO: Usar dados memorizados sem tooltips */}
                         {memoizedInsightsResults.map((result) => (
                           <ResultRouletteSlot
                             key={result.id}
@@ -3110,47 +3198,36 @@ export default function BMGBR3() {
                             index={result.index}
                             isRed={result.isRed}
                             isGreen={result.isGreen}
-                            tooltipContent={result.tooltipContent}
                           />
                         ))}
                         
-                        {/* Preencher slots vazios para completar o grid 10x2 (agora sem botão '+') */}
-                        {(() => {
-                          const actualResults = memoizedInsightsResults.length;
-                          const totalSlots = 20; // Grid fixo 10x2
-                          const emptySlots = Math.max(0, totalSlots - actualResults);
-                          
-                          return Array.from({ length: emptySlots }).map((_, index) => (
-                            <div
-                              key={`empty-${index}`}
-                              className="aspect-square rounded-lg border-2 border-dashed border-gray-600/50 flex items-center justify-center"
-                            >
-                              <div className="w-2 h-2 bg-gray-600/30 rounded-full"></div>
-                  </div>
-                          ));
-                        })()}
+
                       </div>
                     </div>
                     
-                    {/* Timestamp da última atualização */}
+                    {/* 🕐 TIMESTAMP CRÍTICO: Para monitorar se polling está funcionando */}
                     {insightsData && insightsData.lastUpdate && (
-                      <div className="text-center">
-                        <p className="text-xs font-mono text-gray-500">
-                          Última atualização: {new Date(insightsData.lastUpdate).toLocaleTimeString()}
+                      <div className="text-center mt-2">
+                        <p className="text-xs font-mono flex items-center justify-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${
+                            Date.now() - insightsData.lastUpdate < 10000 
+                              ? 'bg-green-400 animate-pulse' // Verde pulsando se atualizado nos últimos 10s
+                              : Date.now() - insightsData.lastUpdate < 30000
+                                ? 'bg-yellow-400' // Amarelo se entre 10-30s
+                                : 'bg-red-400' // Vermelho se mais de 30s
+                          }`}></span>
+                                                    <span className="text-gray-500">
+                            Última atualização: {new Date(insightsData.lastUpdate).toLocaleTimeString()}
+                          </span>
                         </p>
                       </div>
                     )}
+
                   </div>
                 )}
                 
                 {/* 🔥 SEÇÃO: Insights de Dados - Cards de Seleção */}
-                <div className="p-3 rounded-lg bg-gray-800/20 border border-gray-600/30 space-y-3">
-                  <label className="text-sm font-semibold font-mono text-purple-400">
-                    Seleção de Tipo e Início de Operação
-                  </label>
-                  <div className="text-xs text-gray-400 font-mono">
-                    Clique em um tipo para selecionar e iniciar operação
-                  </div>
+                <div className="p-2 sm:p-3 rounded-lg bg-gray-800/20 border border-gray-600/30 space-y-2 sm:space-y-3">
                   
                   {/* 🔥 CARDS DE INSIGHTS - MOVIDOS DO CARD INSIGHTS DE DADOS */}
                   {!insightsComparison.hasData ? (
@@ -3161,7 +3238,7 @@ export default function BMGBR3() {
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-2 w-full">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-2 w-full">
                       {/* ✅ GRID 2x3 COMPACTO: Linha 1 - Vermelho + Preto */}
                       <InsightCard
                         title="VERMELHO"
@@ -3170,6 +3247,7 @@ export default function BMGBR3() {
                         borderColor=""
                         hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.red || '--'}
+                        selectedBetType={m4DirectBetType}
                       />
                       
                       <InsightCard
@@ -3179,6 +3257,7 @@ export default function BMGBR3() {
                         borderColor=""
                         hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.black || '--'}
+                        selectedBetType={m4DirectBetType}
                       />
                       
                       {/* ✅ GRID 2x3 COMPACTO: Linha 2 - Par + Ímpar */}
@@ -3189,6 +3268,7 @@ export default function BMGBR3() {
                         borderColor=""
                         hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.even || '--'}
+                        selectedBetType={m4DirectBetType}
                       />
                       
                       <InsightCard
@@ -3198,6 +3278,7 @@ export default function BMGBR3() {
                         borderColor=""
                         hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.odd || '--'}
+                        selectedBetType={m4DirectBetType}
                       />
                       
                       {/* ✅ GRID 2x3 COMPACTO: Linha 3 - Baixas + Altas */}
@@ -3208,6 +3289,7 @@ export default function BMGBR3() {
                         borderColor=""
                         hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.low || '--'}
+                        selectedBetType={m4DirectBetType}
                       />
                       
                       <InsightCard
@@ -3217,6 +3299,7 @@ export default function BMGBR3() {
                         borderColor=""
                         hoverColor=""
                         rounds={insightsComparison.roundsSinceLastSequence?.high || '--'}
+                        selectedBetType={m4DirectBetType}
                       />
                           </div>
                                     )}
@@ -3349,19 +3432,10 @@ export default function BMGBR3() {
 
                 {/* ✅ SISTEMA AUTOMÁTICO: Debug manual removido - processamento automático via gameId */}
 
-                {/* Mensagem quando desconectado mas há logs */}
-                {websocketLogs.length > 0 && !connectionStatus.connected && (
-                  <div className="space-y-2">
-                    <div className="p-3 bg-yellow-900/20 border border-yellow-600/30 rounded-lg">
-                      <div className="text-yellow-400 text-sm font-mono">
-                        🔌 Logs disponíveis mas WebSocket desconectado - Conecte para visualizar
-                      </div>
-                    </div>
-                  </div>
-                )}
+
                 
-                {/* Logs do WebSocket - Apenas quando conectado */}
-                {websocketLogs.length > 0 && connectionStatus.connected && (
+                {/* Logs do WebSocket - Sempre que houver logs */}
+                {websocketLogs.length > 0 && (
                   <div className="space-y-2">
 
                     <div className="max-h-64 overflow-y-auto p-3 bg-gray-800/20 border border-gray-600/30 rounded-lg space-y-1">
@@ -3385,7 +3459,7 @@ export default function BMGBR3() {
                         }
                         // Para outros tipos de log, manter todos
                         return true;
-                      }).slice(0, 20).map((log, index) => (
+                      }).slice(0, visibleResultsCount * 2).map((log, index) => (
                         <div key={`log-${index}-${log.timestamp}`} className="text-xs font-mono flex items-start gap-2">
                           <span className="text-gray-500 text-xs">
                             {new Date(log.timestamp).toLocaleTimeString('pt-BR')}
@@ -3459,7 +3533,7 @@ export default function BMGBR3() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-                <div className="p-3 bg-gray-800/20 border border-gray-600/30 rounded-lg space-y-3">
+                <div className="p-2 sm:p-3 bg-gray-800/20 border border-gray-600/30 rounded-lg space-y-2 sm:space-y-3">
                   <label className="text-sm font-semibold text-blue-400 font-mono">
                   Controle de Banca (Multiplicador)
                   </label>
@@ -3478,7 +3552,7 @@ export default function BMGBR3() {
     updateStakeMultiplier(newMultiplier);
                         }}
                         disabled={stakeMultiplier <= 1}
-                        className="w-10 h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                        className="w-8 h-8 sm:w-10 sm:h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                       >
                         -
                       </button>
@@ -3495,7 +3569,7 @@ export default function BMGBR3() {
                         setStakeMultiplier(value);
                         updateStakeMultiplier(value);
                       }}
-                      className="w-full h-10 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center text-white font-mono text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      className="w-full h-8 sm:h-10 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center text-white font-mono text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                       placeholder="1-5x"
                     />
                       
@@ -3507,7 +3581,7 @@ export default function BMGBR3() {
     updateStakeMultiplier(newMultiplier);
                         }}
                         disabled={stakeMultiplier >= 5}
-                        className="w-10 h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                        className="w-8 h-8 sm:w-10 sm:h-10 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 font-bold text-sm hover:bg-gray-600/50 hover:border-gray-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                       >
                         +
                       </button>
@@ -3520,8 +3594,8 @@ export default function BMGBR3() {
                       TABELA COMPLETA - 12 NÍVEIS (Multiplicador: {stakeMultiplier}x)
                     </div>
                     
-                    <div className="max-h-48 overflow-y-auto border border-gray-600/30 rounded-lg bg-gray-900/30">
-                      <table className="w-full text-xs font-mono">
+                    <div className="max-h-48 overflow-y-auto overflow-x-auto border border-gray-600/30 rounded-lg bg-gray-900/30">
+                      <table className="w-full text-xs font-mono min-w-[300px]">
                         <thead className="sticky top-0 bg-gray-800/80 border-b border-gray-600/30">
                           <tr>
                             <th className="px-2 py-1 text-left text-gray-400">Nível</th>
@@ -3602,14 +3676,14 @@ export default function BMGBR3() {
               value={blazeToken}
               onChange={(e) => setBlazeToken(e.target.value)}
               placeholder="Cole seu token Blaze aqui..."
-              className="w-full p-3 bg-gray-800/50 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+              className="w-full p-2 sm:p-3 bg-gray-800/50 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
             />
             <p className="text-xs text-gray-400 font-mono">
               {`// Token será criptografado e armazenado com segurança`}
             </p>
           </div>
 
-          <div className="p-4 bg-gray-800/20 border border-gray-600/30 rounded-lg">
+          <div className="p-3 sm:p-4 bg-gray-800/20 border border-gray-600/30 rounded-lg">
             <div className="flex items-center gap-2 mb-2">
               <Settings className="h-4 w-4 text-blue-400" />
               <span className="text-sm font-semibold text-blue-400 font-mono">COMO_OBTER_TOKEN</span>
@@ -3625,6 +3699,15 @@ export default function BMGBR3() {
           </div>
         </div>
       </Modal>
+
+      {/* Modal de Controle de Sessão */}
+      <SessionControlModal
+        isOpen={showSessionModal}
+        onTakeControl={takeControl}
+        onStayInactive={stayInactive}
+        activeSessionInfo={activeSessionInfo}
+        wasControlTaken={wasControlTaken}
+      />
 
       {/* Modal de Estratégia Removido - Agora usamos diretamente o card CONFIGURAR_BANCA */}
     </div>

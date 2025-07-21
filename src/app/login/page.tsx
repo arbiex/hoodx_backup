@@ -1,20 +1,20 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   // Redirecionar para a rota raiz
   useEffect(() => {
     // Preservar quaisquer parâmetros de query
-    const searchParams = new URLSearchParams(window.location.search)
     const queryString = searchParams.toString()
     const newUrl = queryString ? `/?${queryString}` : '/'
     
     router.replace(newUrl)
-  }, [router])
+  }, [router, searchParams])
 
   // Mostrar carregamento durante o redirecionamento
   return (

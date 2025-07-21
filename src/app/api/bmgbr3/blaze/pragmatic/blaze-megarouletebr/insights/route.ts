@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getUserBlazeToken } from '../../auth';
+import { SimpleSessionAffinity } from '@/lib/simple-session-affinity';
 
 // Interfaces TypeScript
 interface AuthResult {
@@ -374,14 +375,37 @@ async function fetchGameData(userId: string, forceAuth = false) {
 // Handler para requisições POST
 export async function POST(request: NextRequest) {
   try {
+    // 🔗 AFINIDADE DE SESSÃO: Verificar se deve processar nesta instância
+    // 🆔 BYPASS: Permitir chamadas internas sem afinidade
+    const isInternalCall = request.headers.get('x-internal-call') === 'true';
+    
+    if (!isInternalCall && !SimpleSessionAffinity.shouldServeUser(request)) {
+      const cookies = request.headers.get('cookie') || '';
+      const sessionInstanceId = cookies.match(/fly-instance-id=([^;]+)/)?.[1];
+      
+      if (sessionInstanceId) {
+        console.log(`🔄 [SESSION-AFFINITY-INSIGHTS] Redirecionando para instância: ${sessionInstanceId}`);
+        return new Response(
+          JSON.stringify({ message: 'Redirecionando para instância correta' }),
+          { 
+            status: 409,
+            headers: { 
+              'Content-Type': 'application/json',
+              'fly-replay': `instance=${sessionInstanceId}`
+            }
+          }
+        );
+      }
+    }
+
     const body = await request.json();
     const { user_id, action } = body;
 
     if (!user_id) {
-      return NextResponse.json(
+      return createInsightsSessionResponse(NextResponse.json(
         { error: 'User ID é obrigatório' },
         { status: 400 }
-      );
+      ));
     }
 
     // Log removido: verbose demais no terminal
@@ -389,40 +413,40 @@ export async function POST(request: NextRequest) {
     // Processar diferentes ações
     switch (action) {
       case 'start':
-        return NextResponse.json({
+        return createInsightsSessionResponse(NextResponse.json({
           success: true,
           message: 'Coleta de insights iniciada com sucesso'
-        });
+        }));
 
       case 'stop':
         // Limpar token do usuário
         userTokens.delete(user_id);
         console.log(`🗑️ [INSIGHTS-CACHE] Cache limpo para usuário: ${user_id}`);
-        return NextResponse.json({
+        return createInsightsSessionResponse(NextResponse.json({
           success: true,
           message: 'Coleta de insights parada e cache limpo com sucesso'
-        });
+        }));
 
       case 'get':
       case 'get-full':
         const result = await fetchGameData(user_id);
-        return NextResponse.json(result);
+        return createInsightsSessionResponse(NextResponse.json(result));
 
       default:
-        return NextResponse.json(
+        return createInsightsSessionResponse(NextResponse.json(
           { error: 'Ação não reconhecida' },
           { status: 400 }
-        );
+        ));
     }
   } catch (error) {
     console.error('❌ [INSIGHTS-API] Erro no processamento:', error);
-    return NextResponse.json(
+    return createInsightsSessionResponse(NextResponse.json(
       { 
         error: 'Erro interno do servidor',
         details: error instanceof Error ? error.message : 'Erro desconhecido'
       },
       { status: 500 }
-    );
+    ));
   }
 }
 
@@ -466,4 +490,16 @@ export async function GET() {
       { status: 500 }
     );
   }
+}
+
+// 🔗 HELPER: Wrapper para adicionar cookie de afinidade de sessão no insights
+function createInsightsSessionResponse(response: NextResponse): NextResponse {
+  const instanceId = SimpleSessionAffinity.getCurrentInstanceId();
+  
+  // Adicionar cookie de afinidade de sessão
+  response.headers.set('Set-Cookie', 
+    `fly-instance-id=${instanceId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
+  );
+  
+  return response;
 } 

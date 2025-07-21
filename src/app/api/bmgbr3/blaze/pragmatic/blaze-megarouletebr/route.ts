@@ -8,6 +8,7 @@ import {
   debugAuth
 } from '../auth';
 import { getBaseUrl } from '@/lib/utils';
+import { SimpleSessionAffinity } from '@/lib/simple-session-affinity';
 
 interface MegaRouletteConfig {
   userId: string;
@@ -96,6 +97,9 @@ const reconnectionControl: { [userId: string]: {
   maxAttempts: number;
   backoffDelay: number;
 } } = {};
+
+// 🛡️ MONITORAMENTO: Contador de erros de rede consecutivos por usuário
+const networkErrorCount: { [userId: string]: { count: number; lastReset: number } } = {};
 
 const isFirstConnection: { [userId: string]: boolean } = {};
 
@@ -493,6 +497,29 @@ const STAKE_LEVELS = [
 // Função principal POST
 export async function POST(request: NextRequest) {
   try {
+    // 🔗 AFINIDADE DE SESSÃO: Verificar se deve processar nesta instância
+    // 🆔 BYPASS: Permitir chamadas internas sem afinidade
+    const isInternalCall = request.headers.get('x-internal-call') === 'true';
+    
+    if (!isInternalCall && !SimpleSessionAffinity.shouldServeUser(request)) {
+      const cookies = request.headers.get('cookie') || '';
+      const sessionInstanceId = cookies.match(/fly-instance-id=([^;]+)/)?.[1];
+      
+      if (sessionInstanceId) {
+        console.log(`🔄 [SESSION-AFFINITY] Redirecionando para instância: ${sessionInstanceId}`);
+        return new Response(
+          JSON.stringify({ message: 'Redirecionando para instância correta' }),
+          { 
+            status: 409,
+            headers: { 
+              'Content-Type': 'application/json',
+              'fly-replay': `instance=${sessionInstanceId}`
+            }
+          }
+        );
+      }
+    }
+
     // 💾 LIMPEZA: Limpar backups expirados periodicamente
     // Removido: limpeza simplificada
 
@@ -571,7 +598,7 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case 'bet-connect':
       case 'connect':
-        return await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
+        return createSessionResponse(await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
           userAgent: userFingerprint?.userAgent || clientUserAgent,
           language: clientLanguage,
           accept: clientAccept,
@@ -585,25 +612,25 @@ export async function POST(request: NextRequest) {
           pixelRatio: userFingerprint?.pixelRatio,
           hardwareConcurrency: userFingerprint?.hardwareConcurrency,
           connectionType: userFingerprint?.connectionType
-        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased, m4DirectBetType, isStandbyMode);
+        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased, m4DirectBetType, isStandbyMode));
       
       case 'start-operation':
-        return await startSimpleOperation(userId);
+        return createSessionResponse(await startSimpleOperation(userId));
       
       case 'stop-operation':
-        return await stopSimpleOperation(userId);
+        return createSessionResponse(await stopSimpleOperation(userId));
       
       case 'get-websocket-logs':
-      return await getWebSocketLogs(userId);
+      return createSessionResponse(await getWebSocketLogs(userId));
       
             case 'get-operation-report':
-        return await getOperationReport(userId);
+        return createSessionResponse(await getOperationReport(userId));
       
       case 'reset-operation-report':
-        return await resetOperationReport(userId);
+        return createSessionResponse(await resetOperationReport(userId));
       
       case 'get-connection-status':
-        return await getConnectionStatus(userId);
+        return createSessionResponse(await getConnectionStatus(userId));
       
       
       
@@ -1289,18 +1316,30 @@ export async function POST(request: NextRequest) {
         }
       
       default:
-      return NextResponse.json({
+      return createSessionResponse(NextResponse.json({
         success: false,
           error: `Ação "${action}" não implementada`
-    }, { status: 400 });
+    }, { status: 400 }));
     }
 
   } catch (error) {
-    return NextResponse.json({
+    return createSessionResponse(NextResponse.json({
       success: false,
       error: 'Erro interno do servidor'
-    }, { status: 500 });
+    }, { status: 500 }));
   }
+}
+
+// 🔗 HELPER: Wrapper para adicionar cookie de afinidade de sessão
+function createSessionResponse(response: NextResponse): NextResponse {
+  const instanceId = SimpleSessionAffinity.getCurrentInstanceId();
+  
+  // Adicionar cookie de afinidade de sessão
+  response.headers.set('Set-Cookie', 
+    `fly-instance-id=${instanceId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
+  );
+  
+  return response;
 }
 
 // Funções de token removidas (usamos Edge Function)
@@ -1505,8 +1544,23 @@ async function startApiPolling(userId: string): Promise<void> {
   operation.apiPollingInterval = setInterval(async () => {
     try {
       await checkForNewResults(userId);
-    } catch (error) {
-      console.warn(`Erro no polling da URL/API para usuário ${userId}:`, error);
+    } catch (error: any) {
+      // 🛡️ POLLING RESILIENTE: Tratar erros sem parar o polling
+      const isNetworkError = error.code === 'ECONNRESET' || 
+                            error.code === 'ECONNREFUSED' || 
+                            error.code === 'ETIMEDOUT' ||
+                            error.message?.includes('fetch failed') ||
+                            error.message?.includes('network');
+      
+      if (isNetworkError) {
+        console.warn(`🔄 [POLLING-INTERVAL] Erro de rede temporário para usuário ${userId}: ${error.message}`);
+        // 🎯 Continua polling - erros de rede são temporários
+      } else {
+        console.warn(`⚠️ [POLLING-INTERVAL] Erro no polling para usuário ${userId}:`, error);
+        // 🎯 Continua polling - sistema resiliente
+      }
+      
+      // 🛡️ NUNCA parar o polling por erro - sistema deve ser auto-recuperável
     }
   }, 2000);
 }
@@ -1536,20 +1590,75 @@ async function checkForNewResults(userId: string): Promise<void> {
 
   
   try {
-
+    // 🛡️ SISTEMA RETRY ULTRA-ROBUSTO: Combater ECONNRESET e erros de rede
+    const maxRetries = 3;
+    let lastError: any = null;
+    let response: any = null;
     
-    // 🎯 SOLUÇÃO: Usar getBaseUrl() para funcionar tanto no localhost quanto em produção
-    const response = await fetch(`${getBaseUrl()}/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        user_id: `polling_${userId}`,
-        action: 'get',
-        limit: 3 // Buscar apenas os últimos 3 resultados
-      })
-    });
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 [RETRY ${attempt}/${maxRetries}] Tentando buscar insights para usuário ${userId}`);
+        
+        // 🎯 SOLUÇÃO: Usar getBaseUrl() para funcionar tanto no localhost quanto em produção
+        response = await fetch(`${getBaseUrl()}/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-internal-call': 'true' // 🆔 BYPASS: Identificar como chamada interna
+          },
+          body: JSON.stringify({
+            user_id: `polling_${userId}`,
+            action: 'get',
+            limit: 3 // Buscar apenas os últimos 3 resultados
+          }),
+          // 🛡️ TIMEOUTS AGRESSIVOS para evitar hang
+          signal: AbortSignal.timeout(15000) // 15 segundos timeout
+        });
+        
+        // ✅ Sucesso - sair do loop
+                 console.log(`✅ [RETRY] Sucesso na tentativa ${attempt} para usuário ${userId}`);
+         
+         // 🎯 SUCESSO: Resetar contador de erros de rede
+         if (networkErrorCount[userId]) {
+           networkErrorCount[userId] = { count: 0, lastReset: Date.now() };
+         }
+         
+         break;
+        
+      } catch (error: any) {
+        lastError = error;
+        
+        // 🔍 DIAGNÓSTICO: Tipos específicos de erro
+        const isNetworkError = error.code === 'ECONNRESET' || 
+                              error.code === 'ECONNREFUSED' || 
+                              error.code === 'ETIMEDOUT' ||
+                              error.message?.includes('fetch failed') ||
+                              error.message?.includes('network');
+        
+        const isTimeoutError = error.name === 'TimeoutError' || 
+                              error.message?.includes('timeout');
+        
+        console.warn(`⚠️ [RETRY ${attempt}/${maxRetries}] Erro ${isNetworkError ? 'REDE' : isTimeoutError ? 'TIMEOUT' : 'DESCONHECIDO'}: ${error.message}`);
+        
+        // 🚨 Se não é erro de rede/timeout, não tentar retry
+        if (!isNetworkError && !isTimeoutError && attempt === 1) {
+          console.error(`❌ [RETRY] Erro não relacionado à rede - não fazendo retry: ${error.message}`);
+          throw error;
+        }
+        
+        // 🔄 Se não é a última tentativa, aguardar com exponential backoff
+        if (attempt < maxRetries) {
+          const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // 1s, 2s, 4s (max 5s)
+          console.log(`⏳ [RETRY] Aguardando ${waitTime}ms antes da próxima tentativa...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+      }
+    }
+    
+    // 🚨 Se chegou aqui sem response, todas as tentativas falharam
+    if (!response) {
+      throw lastError || new Error('Todas as tentativas de retry falharam');
+    }
     
 
     
@@ -1650,9 +1759,43 @@ async function checkForNewResults(userId: string): Promise<void> {
     } else {
 
     }
-  } catch (error) {
-    console.warn(`Erro ao verificar novos resultados para usuário ${userId}:`, error);
-    // Log de erro silencioso - evitar poluição do console
+  } catch (error: any) {
+    // 🛡️ TRATAMENTO ROBUSTO: Não parar polling por erros de rede
+    const isNetworkError = error.code === 'ECONNRESET' || 
+                          error.code === 'ECONNREFUSED' || 
+                          error.code === 'ETIMEDOUT' ||
+                          error.message?.includes('fetch failed') ||
+                          error.message?.includes('network') ||
+                          error.message?.includes('timeout');
+    
+    if (isNetworkError) {
+      // 🛡️ MONITORAMENTO: Rastrear erros de rede consecutivos
+      if (!networkErrorCount[userId]) {
+        networkErrorCount[userId] = { count: 0, lastReset: Date.now() };
+      }
+      
+      networkErrorCount[userId].count++;
+      
+      // 🚨 ALERTA: Se muitos erros consecutivos em pouco tempo
+      const timeSinceReset = Date.now() - networkErrorCount[userId].lastReset;
+      if (networkErrorCount[userId].count >= 5 && timeSinceReset < 60000) {
+        console.error(`🚨 [REDE] ${networkErrorCount[userId].count} erros de rede consecutivos para usuário ${userId} em ${Math.floor(timeSinceReset/1000)}s - possível problema de conectividade`);
+        // Reset contador para evitar spam de logs
+        networkErrorCount[userId] = { count: 0, lastReset: Date.now() };
+      } else {
+        console.warn(`🔄 [POLLING] Erro de rede ${networkErrorCount[userId].count} para usuário ${userId} - continuando polling: ${error.message}`);
+      }
+      // 🛡️ Para erros de rede, apenas log de aviso - polling continua
+    } else {
+      // 🎯 RESET: Erro não é de rede, resetar contador
+      if (networkErrorCount[userId]) {
+        networkErrorCount[userId] = { count: 0, lastReset: Date.now() };
+      }
+      console.warn(`⚠️ [POLLING] Erro ao verificar resultados para usuário ${userId}:`, error);
+      // 🚨 Para outros erros, log mais detalhado mas também continua
+    }
+    
+    // 🎯 CRÍTICO: Nunca parar o polling por causa de erros - sistema deve ser resiliente
   }
 }
 
@@ -1701,10 +1844,10 @@ async function processGameResult(userId: string, gameId: string, number: number,
     
     // 🚨 EXCEÇÃO: Se há aposta pendente para este gameId, processar mesmo assim
     if (operation.waitingForResult && operation.lastGameId === gameId) {
-      addWebSocketLog(userId, `🔥 [DEBUG] MAS há aposta pendente para este gameId - processando mesmo assim!`, 'info');
+      // Log de debug removido - sistema funcionando
     } else if (operation.waitingForTrigger && !operation.triggerDetected) {
       // 🎯 EXCEÇÃO: Se aguardando trigger, processar para verificar trigger
-      addWebSocketLog(userId, `🎯 [DEBUG] MAS aguardando trigger - processando para verificar trigger mesmo com duplicação!`, 'info');
+      // Log de debug removido - sistema funcionando
     } else {
       // Log de ignorar duplicação removido
       return; // Ignorar resultado duplicado
@@ -1798,13 +1941,32 @@ async function processGameResult(userId: string, gameId: string, number: number,
   if (operationState[userId]?.active) {
     // Log de operação ativa removido
     
-    // 🎯 PRIMEIRA PRIORIDADE: Detectar trigger quando estiver monitorando
-    // const operation = operationState[userId]; // Já declarado no início da função
-          if (operation && operation.waitingForTrigger && !operation.triggerDetected) {
-                  // Logs de trigger removidos - sistema estabilizado
-        const betType = operation.m4DirectBetType || 'await';
-        const shouldTrigger = checkTriggerMatch(betType, colorCode, number);
-                  // Logs de trigger removidos - sistema estabilizado
+    // 🎯 PRIMEIRA PRIORIDADE: Verificar se há aposta pendente para processar resultado
+    // Se há aposta pendente, processar resultado ANTES de verificar trigger
+    
+    // ✅ VERIFICAR: Se há aposta pendente para este gameId
+    const hasActiveBet = operation && operation.waitingForResult && operation.lastGameId === gameId;
+    
+    if (hasActiveBet) {
+      // 🎯 HÁ APOSTA PENDENTE: Processar resultado da aposta
+      addWebSocketLog(userId, `🎯 Processando resultado da aposta: ${number} (${colorCode.toUpperCase()}) para gameId ${gameId}`, 'info');
+      
+      // 🚨 CORREÇÃO: Se acabou de fazer aposta imediata, resetar flag
+      if (operation.justMadeImmediateBet) {
+        operation.justMadeImmediateBet = false;
+      }
+      
+      // Log de chamada processOperationResult removido
+      await processOperationResult(userId, colorCode, number);
+      return; // IMPORTANTE: Sair após processar aposta para não verificar trigger
+    }
+    
+    // 🎯 SEGUNDA PRIORIDADE: Se não há aposta pendente, verificar se é trigger
+    if (operation && operation.waitingForTrigger && !operation.triggerDetected) {
+      // Logs de trigger removidos - sistema estabilizado
+      const betType = operation.m4DirectBetType || 'await';
+      const shouldTrigger = checkTriggerMatch(betType, colorCode, number);
+      // Logs de trigger removidos - sistema estabilizado
       
       // 🔍 DEBUG: Logs removidos após correção do bug
       
@@ -1819,53 +1981,27 @@ async function processGameResult(userId: string, gameId: string, number: number,
         // 🚨 CORREÇÃO CRÍTICA: Resultado que detecta trigger NÃO é usado como resultado da aposta
         // O sistema deve aguardar o PRÓXIMO resultado para processar a aposta
         addWebSocketLog(userId, `⏳ Resultado atual usado para trigger - aguardando próximo resultado para aposta`, 'info');
-        addWebSocketLog(userId, `🔍 [DEBUG] RETORNANDO após detecção de trigger - não processará como resultado de aposta`, 'info');
         return; // Sair sem processar como resultado da aposta
-              } else {
-          // 🔍 LOG: Trigger não detectado 
-          // Logs de trigger removidos - sistema estabilizado
-        }
       } else {
-        // 🔍 LOG: Não está aguardando trigger
-        if (operation) {
-          // Logs de trigger removidos - sistema estabilizado
-        }
-    }
-    
-    // 🎯 SEGUNDA PRIORIDADE: Processar resultado de aposta (se houver)
-    // Este resultado só será processado se NÃO foi usado para detectar trigger
-    
-    // 🚨 CORREÇÃO: Se acabou de fazer aposta imediata, verificar se é o resultado da aposta
-    if (operation && operation.justMadeImmediateBet) {
-      addWebSocketLog(userId, `🔍 [DEBUG] justMadeImmediateBet detectado - waitingForResult: ${operation.waitingForResult}`, 'info');
-      
-              // 🛡️ PROTEÇÃO: Se waitingForResult = false, significa que aposta foi cancelada (ex: erro 1007)
-        if (!operation.waitingForResult) {
-          addWebSocketLog(userId, `🚫 Aposta foi cancelada - ignorando resultado ${gameId}`, 'info');
-          operation.justMadeImmediateBet = false; // Resetar flag
-          addWebSocketLog(userId, `🔍 [DEBUG] RETORNANDO após aposta cancelada`, 'info');
-          return; // Ignorar este resultado
-        }
-        
-        // Verificação de correspondência - debug concluído
-      
-      // ✅ VERIFICAR: Se este resultado corresponde à aposta feita
-      if (operation.waitingForResult && operation.lastGameId === gameId) {
-        // 🎯 Este É o resultado da aposta - processar normalmente
-        addWebSocketLog(userId, `🎯 Processando resultado da aposta imediata: ${number} (${colorCode.toUpperCase()})`, 'info');
-        operation.justMadeImmediateBet = false; // Resetar flag
-        // Continuar processamento normal
-      } else {
-        // 🔄 Este NÃO é o resultado da aposta - ignorar
-        addWebSocketLog(userId, `⏳ Resultado ${gameId} não corresponde à aposta ${operation.lastGameId} - ignorando`, 'info');
-        operation.justMadeImmediateBet = false; // Resetar flag
-        addWebSocketLog(userId, `🔍 [DEBUG] RETORNANDO - gameId não corresponde`, 'info');
-        return; // Ignorar este resultado
+        // 🔍 LOG: Trigger não detectado 
+        // Logs de trigger removidos - sistema estabilizado
       }
     }
     
-      // Log de chamada processOperationResult removido
-    await processOperationResult(userId, colorCode, number);
+    // 🚨 VERIFICAÇÃO ESPECIAL: Se havia justMadeImmediateBet mas não há aposta pendente
+    if (operation && operation.justMadeImmediateBet) {
+      // 🛡️ PROTEÇÃO: Se waitingForResult = false, significa que aposta foi cancelada (ex: erro 1007)
+      if (!operation.waitingForResult) {
+        addWebSocketLog(userId, `🚫 Aposta foi cancelada - ignorando resultado ${gameId}`, 'info');
+        operation.justMadeImmediateBet = false; // Resetar flag
+        return; // Ignorar este resultado
+      }
+      
+      // 🔄 Este resultado não corresponde à aposta - ignorar
+      addWebSocketLog(userId, `⏳ Resultado ${gameId} não corresponde à aposta ${operation.lastGameId} - ignorando`, 'info');
+      operation.justMadeImmediateBet = false; // Resetar flag
+      return; // Ignorar este resultado
+    }
   } else {
     // Log de operação inativa removido
   }
@@ -2047,6 +2183,11 @@ async function processOperationResult(userId: string, resultColor: string, resul
     
     // 🤖 NOVO: Retornar automaticamente ao modo aguardar para próximo candidato
     operation.m4DirectBetType = 'await';
+    
+    // 🔥 CRÍTICO: Definir waitingForTrigger = false para modo await (polling continua com isOperationActive)
+    operation.waitingForTrigger = false;
+    operation.triggerDetected = false;
+    
     // ✅ RESETAR: Permitir log "Modo aguardar ativo" após missão cumprida
     awaitModeLogShown[userId] = false;
     console.log('🎯 [BACKEND] Missão cumprida - m4DirectBetType definido como await, operation.active=true (mantida ativa para monitoramento)');
@@ -2099,7 +2240,7 @@ async function processOperationResult(userId: string, resultColor: string, resul
       operation.m4DirectBetType = 'await';
       // ✅ RESETAR: Permitir log "Modo aguardar ativo" após finalização
       awaitModeLogShown[userId] = false;
-      console.log('🎯 DEBUG BACKEND: Operação finalizada - setando modo await');
+      // Debug removido - sistema funcionando
       
       return;
     }
@@ -3175,6 +3316,10 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
                 operationState[userId].justMadeImmediateBet = false;
                 operationState[userId].m4DirectBetType = 'await';
                 
+                // 🔥 CRÍTICO: Definir waitingForTrigger = false para modo await (polling continua com isOperationActive)
+                operationState[userId].waitingForTrigger = false;
+                operationState[userId].triggerDetected = false;
+                
                 addWebSocketLog(userId, `🛡️ Operação cancelada devido ao erro ${errorCode}`, 'info');
               }
               
@@ -3461,7 +3606,7 @@ async function executeSimpleBet(userId: string, gameId: string, ws: any) {
   if (betColor === 'AWAIT') {
     // Só mostrar log uma vez para evitar repetição
     if (!awaitModeLogShown[userId]) {
-      console.log('⏳ DEBUG: Mostrando log modo aguardar ativo');
+      // Debug removido - sistema funcionando
       addWebSocketLog(userId, '⏳ Modo aguardar ativo - Conectado mas não apostando', 'info');
       awaitModeLogShown[userId] = true;
     }

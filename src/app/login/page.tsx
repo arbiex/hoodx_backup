@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function LoginPage() {
+function LoginRedirect() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -16,10 +16,17 @@ export default function LoginPage() {
     router.replace(newUrl)
   }, [router, searchParams])
 
-  // Mostrar carregamento durante o redirecionamento
+  return (
+    <div className="text-green-400 font-mono">Redirecionando...</div>
+  )
+}
+
+export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="text-green-400 font-mono">Redirecionando...</div>
+      <Suspense fallback={<div className="text-green-400 font-mono">Carregando...</div>}>
+        <LoginRedirect />
+      </Suspense>
     </div>
   )
 } 

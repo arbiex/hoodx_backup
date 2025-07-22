@@ -179,11 +179,20 @@ export default function BotsMonitoringPage() {
     {
       id: 'bmgbr2-copy',
       name: 'BMGBR2',
-              endpoint: '/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr',
+      endpoint: '/api/bmgbr2-old/blaze/pragmatic/blaze-megarouletebr',
       sourcePage: '/bmgbr2-old',
       description: 'Cópia teste independente - /bmgbr2',
       category: 'testing',
       icon: '🧪'
+    },
+    {
+      id: 'bmgbr3-copy',
+      name: 'BMGBR3',
+      endpoint: '/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr',
+      sourcePage: '/bmgbr3',
+      description: 'Versão de testes - /bmgbr3',
+      category: 'testing',
+      icon: '🔬'
     }
   ];
 

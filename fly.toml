@@ -1,4 +1,4 @@
-app = "hoodx"
+app = "roleta-bot"
 primary_region = "gru"
 
 [build]

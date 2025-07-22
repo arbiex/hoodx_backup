@@ -226,6 +226,25 @@ async function fetchGameData(userId: string, forceAuth = false) {
       }
     }
 
+    // 🔥 DETECÇÃO DE 403 FORBIDDEN: Tokens expirados ou inválidos
+    if (response.status === 403) {
+      console.warn('⚠️ [INSIGHTS-DATA] Erro 403 Forbidden - tokens podem estar expirados, renovando...');
+      
+      // Remover token inválido
+      userTokens.delete(userId);
+      
+      // Tentar novamente com autenticação forçada (só uma vez para evitar loop)
+      if (!forceAuth) {
+        return await fetchGameData(userId, true);
+      } else {
+        return {
+          success: false,
+          error: 'Erro 403 persistente - tokens podem estar bloqueados temporariamente',
+          needsAuth: true
+        };
+      }
+    }
+
     if (!response.ok) {
       console.error('❌ [INSIGHTS-DATA] Erro HTTP:', response.status, response.statusText);
       return {

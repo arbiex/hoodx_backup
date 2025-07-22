@@ -1830,10 +1830,14 @@ export default function BMGBR2() {
         })
       });
 
-      if (!authResponse.ok) {
-        const errorText = await authResponse.text();
-        throw new Error(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
-      }
+              if (!authResponse.ok) {
+          const errorText = await authResponse.text();
+          // 🔧 Simplificar erro de saldo insuficiente
+          if (authResponse.status === 422 && errorText.includes('You currently do not have any balance')) {
+            throw new Error('saldo insuficiente para ativar o bot');
+          }
+          throw new Error(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
+        }
 
       const authResult = await authResponse.json();
       

@@ -697,9 +697,13 @@ export async function POST(request: NextRequest) {
           if (!blazeResponse.ok) {
             const errorText = await blazeResponse.text();
             console.error('❌ [PROXY] Erro na Blaze após tentativas:', blazeResponse.status, errorText);
+            
+            // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+            const simplifiedError = simplifyBlazeError(errorText, blazeResponse.status);
+            
             return NextResponse.json({
               success: false,
-              error: `Erro da Blaze: ${blazeResponse.status} - ${errorText}`
+              error: simplifiedError
             }, { status: blazeResponse.status });
           }
 
@@ -2404,7 +2408,9 @@ async function renewSession(userId: string): Promise<boolean> {
 
       if (!authResponse.ok) {
         const errorText = await authResponse.text();
-        addWebSocketLog(userId, `❌ Edge Function falhou: ${authResponse.status} - ${errorText}`, 'error');
+        // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+        const simplifiedError = simplifyBlazeError(errorText, authResponse.status);
+        addWebSocketLog(userId, `❌ ${simplifiedError}`, 'error');
         
         // 🔧 NOVO: Verificar se é erro de bloqueio geográfico ou rate limit
         if (authResponse.status === 451) {
@@ -2422,7 +2428,10 @@ async function renewSession(userId: string): Promise<boolean> {
       // addWebSocketLog(userId, `📋 Edge Function retornou: ${authResult.success ? 'SUCCESS' : 'FAILED'}`, 'info');
       
       if (!authResult.success || !authResult.data) {
-        addWebSocketLog(userId, `❌ Edge Function falhou: ${authResult.error || 'Resposta inválida'}`, 'error');
+        // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+        const rawError = authResult.error || 'Resposta inválida';
+        const simplifiedError = simplifyBlazeError(rawError, 422);
+        addWebSocketLog(userId, `❌ ${simplifiedError}`, 'error');
         return false;
       }
 
@@ -2479,7 +2488,9 @@ async function renewSession(userId: string): Promise<boolean> {
 
     } catch (edgeFunctionError) {
       const errorMessage = edgeFunctionError instanceof Error ? edgeFunctionError.message : 'Erro desconhecido';
-      addWebSocketLog(userId, `❌ Erro na Edge Function: ${errorMessage}`, 'error');
+      // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente  
+      const simplifiedError = simplifyBlazeError(errorMessage, 422);
+      addWebSocketLog(userId, `❌ ${simplifiedError}`, 'error');
       return false;
     }
 
@@ -2854,7 +2865,9 @@ async function reconnectWithNewTokens(userId: string, userIP?: string, userFinge
 
     if (!authResponse.ok) {
       const errorText = await authResponse.text();
-      addWebSocketLog(userId, `❌ Erro na Edge Function: ${authResponse.status} - ${errorText}`, 'error');
+      // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+      const simplifiedError = simplifyBlazeError(errorText, authResponse.status);
+      addWebSocketLog(userId, `❌ ${simplifiedError}`, 'error');
       updateConnectionStatus(userId, false, 'Erro na Edge Function');
       return;
     }
@@ -3164,7 +3177,9 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
 
                 if (!authResponse.ok) {
                   const errorText = await authResponse.text();
-                  addWebSocketLog(userId, `❌ Erro na Edge Function: ${authResponse.status} - ${errorText}`, 'error');
+                  // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+                  const simplifiedError = simplifyBlazeError(errorText, authResponse.status);
+                  addWebSocketLog(userId, `❌ ${simplifiedError}`, 'error');
                   updateConnectionStatus(userId, false, 'Erro na Edge Function');
                   return;
                 }
@@ -3379,13 +3394,18 @@ function startWebSocketConnection(userId: string, config: { jsessionId: string; 
           return;
         }
 
-        // ⏰ Verificação de renovação automática - OTIMIZADA
-        // 🔧 CORREÇÃO: Só verificar renovação se não há uma renovação em andamento
-        if (!renewalInProgress[userId] && shouldRenewAutomatically(userId)) {
+        // ⏰ Verificação de renovação automática - COM RATE LIMITING
+        // 🔧 CORREÇÃO: Só verificar renovação se não há uma renovação em andamento E respeitar rate limiting
+        if (!renewalInProgress[userId] && shouldRenewAutomatically(userId) && canAttemptRenewal(userId)) {
           renewalInProgress[userId] = true;
+          addWebSocketLog(userId, '🔄 Iniciando renovação automática programada...', 'info');
           
           setTimeout(async () => {
             const renewed = await renewSession(userId);
+            
+            // 🔧 NOVO: Registrar resultado da renovação
+            recordRenewalResult(userId, renewed);
+            
             if (renewed) {
               // Reativar operação se estava pausada
               if (operationState[userId] && !operationState[userId].active) {
@@ -4478,6 +4498,15 @@ interface SimpleRenewalState {
   lastRenewalTime: number;
 }
 
+// 🔧 NOVO: Sistema de controle de renovação para evitar rate limiting
+interface RenewalControlState {
+  lastRenewalAttempt: number;
+  renewalCooldown: number; // Tempo em ms para aguardar entre renovações
+  consecutiveFailures: number;
+  blocked: boolean;
+  blockedUntil: number;
+}
+
 // Mapa para controlar renovações automáticas por usuário
 const autoRenewal: { [userId: string]: SimpleRenewalState } = {};
 
@@ -4494,8 +4523,10 @@ function initializeAutoRenewal(userId: string) {
     nextRenewalTime: now + (10 * 60 * 1000), // 10 minutos
     lastRenewalTime: now
   };
-  
+  addWebSocketLog(userId, '⏰ Renovação automática iniciada - próxima em 10 minutos', 'info');
 }
+
+// (Funções removidas - duplicatas removidas)
 
 // 🎯 NOVA FUNÇÃO: Forçar renovação imediata após resultado
 // 🎯 NOVA FUNÇÃO: Verificar se precisa renovar e aproveitar momento pós-aposta
@@ -4681,6 +4712,30 @@ if (!maintenanceSystemInitialized) {
     console.log(`🚀 [STARTUP] Limpeza concluída: ${timersCleaned} timers, ${inactiveRemoved} usuários inativos removidos`);
     console.log(`📊 [STARTUP] Status da memória: ${memoryStats.totalUsers} usuários, score ${memoryStats.memoryScore}/100`);
   }, 5 * 60 * 1000); // 5 minutos
+}
+
+// 🔧 NOVA FUNÇÃO: Detectar e simplificar erros de saldo insuficiente
+function simplifyBlazeError(errorText: string, statusCode: number): string {
+  try {
+    // Tentar parsear como JSON para verificar se é um erro estruturado
+    const errorData = JSON.parse(errorText);
+    
+    // Verificar se é erro de saldo insuficiente
+    if (statusCode === 422 && 
+        errorData.error && 
+        (errorData.error.message?.includes('You currently do not have any balance') ||
+         errorData.error.message?.includes('Please deposit funds') ||
+         errorData.error.code === 'gameProvider.NoBalance')) {
+      return 'saldo insuficiente para ativar o bot';
+    }
+    
+    // Se não é erro de saldo, retornar erro original para outros casos
+    return `Erro da Blaze: ${statusCode} - ${errorText}`;
+    
+  } catch (parseError) {
+    // Se não conseguir parsear como JSON, retornar erro original
+    return `Erro da Blaze: ${statusCode} - ${errorText}`;
+  }
 }
 
 

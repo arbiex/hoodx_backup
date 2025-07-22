@@ -18,10 +18,8 @@ import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
 import CreditDisplay from '@/components/CreditDisplay';
-import { SessionControlModal } from '@/components/SessionControlModal';
 import useBmgbr3Api from '@/hooks/useBmgbr3Api';
 import useTimerManager from '@/hooks/useTimerManager';
-import { useSessionControl } from '@/hooks/useSessionControl';
 
 
 
@@ -67,17 +65,7 @@ export default function BMGBR3() {
   // 🔄 NOVO: Hook customizado para API
   const api = useBmgbr3Api();
 
-  // 🔒 SISTEMA DE CONTROLE DE SESSÃO MÚLTIPLA
-  const { 
-    isSessionActive, 
-    isMultipleSession, 
-    showSessionModal, 
-    activeSessionInfo, 
-    takeControl, 
-    stayInactive, 
-    sessionStatus,
-    wasControlTaken 
-  } = useSessionControl();
+  // 🗑️ REMOVIDO: Sistema de controle de sessão múltipla
 
   // 🕐 NOVO: Gerenciador de timers centralizado (previne memory leaks)
   const timers = useTimerManager({ 
@@ -174,6 +162,38 @@ export default function BMGBR3() {
   const missionInProgress = operation.status === 'mission_progress';
   const canSafelyStop = operation.canStop;
   const forceOperatingDisplay = operation.forceDisplay;
+
+  // 🔧 NOVA FUNÇÃO: Detectar e simplificar erros de saldo insuficiente
+  const simplifyEdgeFunctionError = (errorText: string, statusCode?: number): string => {
+    try {
+      // Tentar parsear como JSON para verificar se é um erro estruturado
+      const errorData = JSON.parse(errorText);
+      
+      // Verificar se é erro de saldo insuficiente
+      if ((statusCode === 422 || errorText.includes('422')) && 
+          errorData.error && 
+          (errorData.error.message?.includes('You currently do not have any balance') ||
+           errorData.error.message?.includes('Please deposit funds') ||
+           errorData.error.code === 'gameProvider.NoBalance')) {
+        return 'saldo insuficiente para ativar o bot';
+      }
+      
+      // Se não é erro de saldo, retornar erro original para outros casos
+      return `Erro na Edge Function: ${statusCode || 'unknown'} - ${errorText}`;
+      
+    } catch (parseError) {
+      // Tentar detectar no texto simples se não conseguir parsear JSON
+      if ((errorText.includes('You currently do not have any balance') ||
+           errorText.includes('Please deposit funds') ||
+           errorText.includes('gameProvider.NoBalance')) &&
+          (statusCode === 422 || errorText.includes('422'))) {
+        return 'saldo insuficiente para ativar o bot';
+      }
+      
+      // Se não conseguir parsear como JSON, retornar erro original
+      return `Erro na Edge Function: ${statusCode || 'unknown'} - ${errorText}`;
+    }
+  };
 
   // 🔄 FUNÇÕES AUXILIARES: Para atualizar o estado consolidado
   const setIsOperating = (value: boolean) => {
@@ -2111,13 +2131,18 @@ export default function BMGBR3() {
 
         if (!authResponse.ok) {
           const errorText = await authResponse.text();
-          throw new Error(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
+          // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+          const simplifiedError = simplifyEdgeFunctionError(errorText, authResponse.status);
+          throw new Error(simplifiedError);
         }
 
         const authResult = await authResponse.json();
         
         if (!authResult.success || !authResult.data) {
-          throw new Error(authResult.error || 'Falha na geração de tokens via Edge Function');
+          // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+          const rawError = authResult.error || 'Falha na geração de tokens via Edge Function';
+          const simplifiedError = simplifyEdgeFunctionError(rawError);
+          throw new Error(simplifiedError);
         }
 
         // Preparar dados de autenticação
@@ -2174,7 +2199,15 @@ export default function BMGBR3() {
       const connectResult = await connectResponse.json();
 
       if (!connectResult.success) {
-        console.error('🔧 [RECONEXÃO] Erro na resposta de conexão:', connectResult.error);
+        // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente  
+        const simplifiedConnectLogError = simplifyEdgeFunctionError(connectResult.error || 'Erro na conexão');
+        
+        // 🔧 NOVO: Não logar erros de saldo insuficiente como erro técnico
+        if (simplifiedConnectLogError === 'saldo insuficiente para ativar o bot') {
+          console.log('💰 [INFO] Saldo insuficiente na Blaze detectado na conexão');
+        } else {
+          console.error('🔧 [RECONEXÃO] Erro na resposta de conexão:', simplifiedConnectLogError);
+        }
         
         // Se o erro é relacionado a tokens, limpar para forçar regeneração
         if (connectResult.error?.includes('Token') || connectResult.error?.includes('auth')) {
@@ -2182,7 +2215,10 @@ export default function BMGBR3() {
           console.log('🔧 [RECONEXÃO] Tokens limpos devido ao erro de conexão');
         }
         
-        throw new Error(connectResult.error || 'Erro ao conectar');
+        // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+        const rawConnectError = connectResult.error || 'Erro ao conectar';  
+        const simplifiedConnectError = simplifyEdgeFunctionError(rawConnectError);
+        throw new Error(simplifiedConnectError);
       }
 
       console.log('🔧 [RECONEXÃO] Conexão estabelecida com sucesso');
@@ -2250,7 +2286,15 @@ export default function BMGBR3() {
       const operationResult = await api.startOperation();
 
       if (!operationResult.success) {
-        console.error('🔧 [RECONEXÃO] Erro ao iniciar operação:', operationResult.error);
+                // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+        const simplifiedOperationError = simplifyEdgeFunctionError(operationResult.error || 'Erro ao iniciar operação');
+        
+        // 🔧 NOVO: Não logar erros de saldo insuficiente como erro técnico
+        if (simplifiedOperationError === 'saldo insuficiente para ativar o bot') {
+          console.log('💰 [INFO] Saldo insuficiente na Blaze detectado ao iniciar operação');
+        } else {
+          console.error('🔧 [RECONEXÃO] Erro ao iniciar operação:', simplifiedOperationError);
+        }
         
         // Se o erro é relacionado a conexão, tentar limpar tokens
         if (operationResult.error?.includes('conexão') || operationResult.error?.includes('WebSocket')) {
@@ -2258,7 +2302,10 @@ export default function BMGBR3() {
           console.log('🔧 [RECONEXÃO] Tokens limpos devido ao erro de operação');
         }
         
-        throw new Error(operationResult.error || 'Erro ao iniciar operação');
+        // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente
+        const rawOperationError = operationResult.error || 'Erro ao iniciar operação';
+        const simplifiedOperationThrowError = simplifyEdgeFunctionError(rawOperationError);
+        throw new Error(simplifiedOperationThrowError);
       }
       
       setIsOperating(true);
@@ -2278,24 +2325,37 @@ export default function BMGBR3() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       
-              // Melhorar mensagem de erro para o usuário
-        let userFriendlyMessage = errorMessage;
-        if (errorMessage.includes('Token')) {
-          userFriendlyMessage = 'Erro de autenticação. Acesse /config para reconfigurar seu token.';
-        } else if (errorMessage.includes('conexão')) {
-          userFriendlyMessage = 'Erro de conexão. Tente novamente ou use o botão "Forçar Reconexão".';
-        } else if (errorMessage.includes('Timeout')) {
-          userFriendlyMessage = 'Operação demorou muito para responder. Tente novamente ou use "Forçar Reconexão".';
-        }
+                    // 🔧 USAR NOVA FUNÇÃO para simplificar erro de saldo insuficiente primeiro
+      const simplifiedErrorMessage = simplifyEdgeFunctionError(errorMessage);
+      
+      // Melhorar mensagem de erro para o usuário
+      let userFriendlyMessage = simplifiedErrorMessage;
+      if (simplifiedErrorMessage === 'saldo insuficiente para ativar o bot') {
+        userFriendlyMessage = 'Saldo insuficiente na Blaze. Deposite fundos para ativar o bot.';
+      } else if (errorMessage.includes('Token')) {
+        userFriendlyMessage = 'Erro de autenticação. Acesse /config para reconfigurar seu token.';
+      } else if (errorMessage.includes('conexão')) {
+        userFriendlyMessage = 'Erro de conexão. Tente novamente ou use o botão "Forçar Reconexão".';
+      } else if (errorMessage.includes('Timeout')) {
+        userFriendlyMessage = 'Operação demorou muito para responder. Tente novamente ou use "Forçar Reconexão".';
+      }
       
       setOperationError(userFriendlyMessage);
-      console.error('🔧 [RECONEXÃO] Erro na operação:', errorMessage);
+      
+      // 🔧 NOVO: Não logar erros de saldo insuficiente como erro técnico
+      if (simplifiedErrorMessage === 'saldo insuficiente para ativar o bot') {
+        console.log('💰 [INFO] Saldo insuficiente na Blaze detectado');
+      } else {
+        console.error('🔧 [RECONEXÃO] Erro na operação:', simplifiedErrorMessage);
+      }
       
       // Em caso de erro, limpar tokens para forçar regeneração na próxima tentativa
-      if (errorMessage.includes('Token') || errorMessage.includes('auth')) {
-        setAuthTokens(null);
-        console.log('🔧 [RECONEXÃO] Tokens limpos devido ao erro de autenticação');
-      } else if (errorMessage.includes('conexão') || errorMessage.includes('WebSocket')) {
+      // 🔧 NOVO: Não limpar tokens para erro de saldo insuficiente
+      if (simplifiedErrorMessage !== 'saldo insuficiente para ativar o bot') {
+        if (errorMessage.includes('Token') || errorMessage.includes('auth')) {
+          setAuthTokens(null);
+          console.log('🔧 [RECONEXÃO] Tokens limpos devido ao erro de autenticação');
+        } else if (errorMessage.includes('conexão') || errorMessage.includes('WebSocket')) {
         // Para erros de conexão, só limpar tokens se for persistente
         const errorCount = parseInt(localStorage.getItem('bmgbr3_error_count') || '0');
         const newErrorCount = errorCount + 1;
@@ -2309,6 +2369,7 @@ export default function BMGBR3() {
           localStorage.setItem('bmgbr3_error_count', newErrorCount.toString());
           setConsecutiveErrors(newErrorCount);
           console.log('🔧 [RECONEXÃO] Erro de conexão registrado, tentativas:', newErrorCount);
+        }
         }
       }
     } finally {
@@ -3042,22 +3103,7 @@ export default function BMGBR3() {
       {/* Matrix Rain Background */}
       <MatrixRain />
       
-      {/* 🔒 INDICADOR DE SESSÃO INATIVA */}
-      {!isSessionActive && (
-        <div className="fixed top-0 left-0 right-0 bg-red-900/90 border-b border-red-600 z-40">
-          <div className="text-center py-2 px-4">
-            <p className="text-red-200 text-sm font-semibold font-mono">
-              🔒 SESSAO_INATIVA - {wasControlTaken ? 'Controle transferido' : 'Aguardando assumir controle'}
-            </p>
-            <p className="text-red-300 text-xs font-mono">
-              {wasControlTaken ? 
-                'Outra aba assumiu controle - Use "ASSUMIR_CONTROLE" para retomar' : 
-                'Use "ASSUMIR_CONTROLE" no modal para ativar esta sessão'
-              }
-            </p>
-          </div>
-        </div>
-      )}
+      {/* 🗑️ REMOVIDO: Indicador de sessão inativa */}
       
       <div className="relative z-10 p-4 sm:p-6 lg:p-8">
         <div className="w-full max-w-sm sm:max-w-2xl lg:max-w-4xl xl:max-w-6xl mx-auto space-y-4 sm:space-y-6">
@@ -3714,14 +3760,7 @@ export default function BMGBR3() {
         </div>
       </Modal>
 
-      {/* Modal de Controle de Sessão */}
-            <SessionControlModal 
-        isOpen={showSessionModal}
-        onTakeControl={takeControl}
-        onStayInactive={stayInactive}
-        activeSessionInfo={activeSessionInfo}
-        wasControlTaken={wasControlTaken}
-      />
+      {/* 🗑️ REMOVIDO: Modal de Controle de Sessão */}
 
       
 

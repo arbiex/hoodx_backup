@@ -35,12 +35,7 @@ export default function AdminHeader({ currentUser, additionalActions }: AdminHea
       href: '/matrixx',
       description: 'Gerenciamento de usuários e sistema'
     },
-    {
-      id: 'bots',
-      label: 'Bots',
-      href: '/bots',
-      description: 'Monitoramento de bots em tempo real'
-    },
+
     {
       id: 'agents',
       label: 'Agents',

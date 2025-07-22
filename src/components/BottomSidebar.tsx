@@ -4,8 +4,6 @@ import { usePathname } from 'next/navigation'
 import { OptimizedLink } from '@/components/ui/optimized-link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
 import { 
   LayoutDashboard, 
   DollarSign, 
@@ -24,53 +22,15 @@ interface NavigationItem {
 
 export default function BottomSidebar() {
   const pathname = usePathname()
-  const [isAgent, setIsAgent] = useState<boolean>(false)
-  const [agentLoading, setAgentLoading] = useState(true)
   
-  // Verificar se deve ocultar sidebar (DEPOIS dos hooks para evitar erro de hooks)
+  // Verificar se deve ocultar sidebar
   const shouldHide = pathname === '/bmgbr3' || pathname === '/bmgbr' || pathname === '/bmgbr2-old'
 
-  // Verificar se o usuário é um agente (ativo ou inativo)
-  useEffect(() => {
-    const checkAgentStatus = async () => {
-      try {
-        setAgentLoading(true)
-        const { data: { user } } = await supabase.auth.getUser()
-        
-        if (!user) {
-          setIsAgent(false)
-          return
-        }
-
-        const { data, error } = await supabase
-          .from('agents')
-          .select('is_active')
-          .eq('user_id', user.id)
-          .single()
-
-        if (error && error.code !== 'PGRST116') {
-          console.error('Erro ao verificar status de agente:', error)
-          setIsAgent(false)
-          return
-        }
-
-        setIsAgent(!!data) // Se encontrou um agente, independente do status
-      } catch (error) {
-        console.error('Erro inesperado:', error)
-        setIsAgent(false)
-      } finally {
-        setAgentLoading(false)
-      }
-    }
-
-    checkAgentStatus()
-  }, [])
-
-  // 🚨 CORREÇÃO: Return condicional DEPOIS dos hooks para evitar erro "fewer hooks than expected"
   if (shouldHide) {
     return null
   }
 
+  // ✅ TODOS OS USUÁRIOS SÃO AGENTES - Sempre mostrar Network
   const navigationItems: NavigationItem[] = [
     {
       name: 'Dashboard',
@@ -78,13 +38,12 @@ export default function BottomSidebar() {
       icon: LayoutDashboard,
       description: 'Main dashboard'
     },
-    // Adicionar Network para todos os agentes (ativos e inativos)
-    ...(isAgent ? [{
+    {
       name: 'Network',
       href: '/network',
       icon: Network,
       description: 'Network dashboard'
-    }] : []),
+    },
     {
       name: 'Config',
       href: '/config',
@@ -93,14 +52,9 @@ export default function BottomSidebar() {
     }
   ]
 
-  // Não renderizar durante carregamento
-  if (agentLoading) {
-    return null
-  }
-
   return (
     <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50">
-            <div className="backdrop-blur-lg border border-green-500/30 rounded-2xl shadow-2xl shadow-green-500/20 p-2" style={{ backgroundColor: '#131619' }}>
+      <div className="backdrop-blur-lg border border-green-500/30 rounded-2xl shadow-2xl shadow-green-500/20 p-2" style={{ backgroundColor: '#131619' }}>
         <nav className="flex items-center justify-center gap-2">
           {navigationItems.map((item) => {
             const isActive = pathname === item.href

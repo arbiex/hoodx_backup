@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Bot, RefreshCw, Play, Square, Trash2, Settings } from 'lucide-react'
+import { Bot, RefreshCw, Play, Square, Trash2, Settings, Coins } from 'lucide-react'
 import MatrixRain from '@/components/MatrixRain'
 import Modal, { useModal } from '@/components/ui/modal'
 import InlineAlert from '@/components/ui/inline-alert'
@@ -12,6 +12,7 @@ import { useState, useEffect, memo, useCallback, useMemo } from 'react'
 import { useCredits } from '@/hooks/useCredits'
 import { useNetwork } from '@/hooks/useNetwork'
 import { useRouter } from 'next/navigation'
+import CreditPurchaseModal from '@/components/CreditPurchaseModal'
 
 // Sistema de áudio removido - funcionalidade não utilizada
 import StrategyModal from '@/components/StrategyModal'
@@ -108,11 +109,18 @@ export default function Dashboard() {
   }>>([]);
   const [alertMessage, setAlertMessage] = useState<{ type: 'success' | 'error' | 'warning' | 'info', message: string } | null>(null)
   
-  // Usar hook de créditos para dados reais de saldo
-  const { credits, loading: creditsLoading } = useCredits()
+  // Estados do modal de compra de créditos
+  const [creditModalOpen, setCreditModalOpen] = useState(false)
+  
+  // Usar hook de créditos para dados reais de saldo  
+  const { balance: creditsBalance, isLoading: creditsLoading } = useCredits()
   
   // Usar hook de rede para dados de comissão
-  const { agentData, networkData, generateReferralLink, loading: networkLoading } = useNetwork()
+  const { networkStats, referralInfo, commissionBalance, loading: networkLoading } = useNetwork()
+  
+  // Hook para créditos - precisa do userId
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const { balance: creditsBalanceNew, isLoading: creditsLoadingNew } = useCredits(currentUserId || undefined)
   const router = useRouter()
   
   // Hook de alertas sonoros removido - funcionalidade não utilizada
@@ -209,7 +217,23 @@ export default function Dashboard() {
   });
   
   // Estado de carregamento combinado para evitar flash
-  const isDataLoading = creditsLoading || networkLoading
+  const isDataLoading = creditsLoadingNew || networkLoading
+
+  // Buscar userId do usuário autenticado
+  useEffect(() => {
+    const fetchUserId = async () => {
+      try {
+        const { supabase } = await import('@/lib/supabase')
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          setCurrentUserId(user.id)
+        }
+      } catch (error) {
+        console.error('Erro ao buscar userId:', error)
+      }
+    }
+    fetchUserId()
+  }, [])
 
   // Callbacks otimizados para evitar re-renders
   const handleNewResult = useCallback((result: any) => {
@@ -276,7 +300,7 @@ export default function Dashboard() {
     if (!isActive || !botData?.auth?.jsessionId || !botData?.auth?.originalUserId) return
 
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -339,7 +363,7 @@ export default function Dashboard() {
 
     const updateWebSocketStatus = async () => {
       try {
-                 const response = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+                 const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
            method: 'POST',
            headers: { 'Content-Type': 'application/json' },
            body: JSON.stringify({ 
@@ -386,7 +410,7 @@ export default function Dashboard() {
   // Função para testar conexão WebSocket
   const testWebSocketConnection = async (userId: string) => {
     try {
-      const response = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -436,7 +460,7 @@ export default function Dashboard() {
         
         if (user?.email) {
           // Limpar sessões via API
-          const response = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+          const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -533,7 +557,7 @@ export default function Dashboard() {
       }
 
       // Primeiro ativar o bot
-      const response = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -546,7 +570,7 @@ export default function Dashboard() {
 
       if (data.success) {
         // Depois ativar apostas automáticas com a estratégia selecionada
-        const autoBetResponse = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+        const autoBetResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -668,7 +692,7 @@ export default function Dashboard() {
           
           if (user?.email) {
             // Parar bot e limpar sessões
-            await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+            await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -767,7 +791,7 @@ export default function Dashboard() {
       if (!user?.email) return
 
 
-      const response = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -875,9 +899,49 @@ export default function Dashboard() {
 
           {/* Cards só aparecem quando dados estão carregados - sem flash visual */}
 
-          {/* Card 1 - Credits - Always show when data is loaded */}
-          {!isDataLoading && credits && (
-            <CreditDisplay />
+          {/* Card de Créditos - Mostrar quando dados carregados */}
+          {!isDataLoading && (
+            <div className="mb-4">
+              {/* Card CRÉDITOS - Design centralizado igual ao TOKENS_FXA */}
+              <Card className="border-gray-700/30 backdrop-blur-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
+                    <Coins className="h-5 w-5" />
+                    CRÉDITOS
+                  </CardTitle>
+                  <CardDescription className="text-gray-400 font-mono text-xs">
+                    {`// Saldo para operações`}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {/* Saldo Créditos */}
+                    <div className="text-center py-4">
+                      <div className="flex items-center justify-center gap-3 mb-2">
+                        <Coins className="h-8 w-8 text-green-400" />
+                        <div className="text-3xl font-bold text-green-400 font-mono">
+                          {creditsLoadingNew ? '...' : `${creditsBalanceNew?.toFixed(2) || '0.00'}`}
+                        </div>
+
+                      </div>
+                      <div className="text-sm text-gray-400 font-mono">
+                        DISPONÍVEL
+                      </div>
+                    </div>
+                    
+                    {/* Botão Comprar Créditos */}
+                    <Button
+                      onClick={() => setCreditModalOpen(true)}
+                      className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono text-sm"
+                      variant="outline"
+                    >
+                      <Coins className="h-4 w-4 mr-2" />
+                      COMPRAR_CRÉDITOS
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           )}
 
           {/* Card de Controles de Áudio removido - funcionalidade não utilizada */}
@@ -894,6 +958,25 @@ export default function Dashboard() {
           }}
           onConfirm={handleStrategyConfirm}
           loading={botLoading}
+        />
+
+        {/* Credit Purchase Modal */}
+        <CreditPurchaseModal
+          isOpen={creditModalOpen}
+          onClose={() => setCreditModalOpen(false)}
+          onSuccess={(amount, transactionId) => {
+            console.log('✅ Compra de créditos concluída:', { amount, transactionId })
+            // Atualizar saldo de créditos
+            if (currentUserId) {
+              // O hook useCredits já vai atualizar automaticamente via refresh()
+            }
+            setCreditModalOpen(false)
+            setAlertMessage({
+              type: 'success',
+              message: `Créditos adicionados com sucesso! +${amount.toFixed(2)} créditos`
+            })
+          }}
+          userId={currentUserId || ''}
         />
       </div>
     </div>

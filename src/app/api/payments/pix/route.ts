@@ -278,7 +278,7 @@ async function createXGatePixDeposit(amount: number, userId: string, description
 // POST - Criar cobrança PIX
 export async function POST(request: NextRequest) {
   try {
-    const { amount, userId, description } = await request.json()
+    const { amount, userId, description, type = 'fxa_tokens' } = await request.json()
 
     console.log('🎯 Iniciando criação de cobrança PIX via XGATE')
     console.log('👤 Usuário identificado:', userId)
@@ -302,8 +302,12 @@ export async function POST(request: NextRequest) {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
     
     console.log('🔍 Verificando transações pendentes recentes...')
+    
+    // Escolher tabela baseada no tipo
+    const tableName = type === 'credits' ? 'credit_transactions' : 'fxa_token_transactions'
+    
     const { data: recentTransactions, error: checkError } = await supabase
-      .from('fxa_token_transactions')
+      .from(tableName)
       .select('id, payment_reference, amount, status, created_at')
       .eq('user_id', userId)
       .eq('status', 'pending')
@@ -358,7 +362,19 @@ export async function POST(request: NextRequest) {
 
     console.log('✅ Verificação anti-duplicação aprovada - Prosseguindo...')
 
-    const finalDescription = description || `Compra de créditos - R$ ${amount.toFixed(2)} / Preço por token - R$ 0.25`
+    // Preparar dados baseado no tipo
+    let finalAmount: number
+    let finalDescription: string
+    
+    if (type === 'credits') {
+      // R$ 1,00 = 1,00 crédito
+      finalAmount = amount
+      finalDescription = description || `Compra de créditos - R$ ${amount.toFixed(2)}`
+    } else {
+      // Tokens FXA: R$ 0,25 = 1 token
+      finalAmount = Math.floor(amount / 0.25)
+      finalDescription = description || `Compra de tokens FXA - R$ ${amount.toFixed(2)} / Preço por token - R$ 0.25`
+    }
 
     // Verificar se ambiente está configurado
     if (!XGATE_CONFIG.email || !XGATE_CONFIG.password) {
@@ -377,22 +393,22 @@ export async function POST(request: NextRequest) {
     }
 
     // Salvar intent de pagamento (pending) para rastreamento
-    const tokensEquivalent = Math.floor(amount / 0.25) // Converter BRL para tokens (1 token = R$ 0,25)
     
     const { data: transaction, error: dbError } = await supabase
-      .from('fxa_token_transactions')
+      .from(tableName)
       .insert({
         user_id: userId,
         transaction_type: 'credit',
-        amount: tokensEquivalent, // Tokens que serão adicionados
+        amount: finalAmount,
         amount_brl: amount, // Valor pago em BRL  
         payment_reference: xgateResult.transactionId,
-        payment_method: 'PIX',
+        payment_method: type === 'credits' ? 'pix' : 'PIX',
         status: 'pending',
         description: finalDescription,
         metadata: {
           xgate_transaction_id: xgateResult.transactionId,
-          created_via: 'api_payment_pix'
+          created_via: 'api_payment_pix',
+          transaction_type: type
         }
       })
       .select()
@@ -443,21 +459,42 @@ export async function GET(request: NextRequest) {
 
     console.log('🔍 Verificando status do pagamento XGATE:', transactionId)
 
-    // 1. Verificar se já foi processado (buscar por payment_reference)
+    // 1. Verificar se já foi processado (buscar por payment_reference em ambas as tabelas)
     const supabase = getSupabaseClient()
-    const { data: existingTransaction, error: dbError } = await supabase
+    
+    // Tentar primeiro em fxa_token_transactions
+    let existingTransaction = null
+    let transactionType = 'fxa_tokens'
+    
+    const { data: fxaTransaction, error: fxaError } = await supabase
       .from('fxa_token_transactions')
       .select('*')
       .eq('payment_reference', transactionId)
       .single()
 
-    if (dbError && dbError.code !== 'PGRST116') {
-      console.error('❌ Erro ao consultar banco local:', dbError)
+    if (fxaTransaction) {
+      existingTransaction = fxaTransaction
+      transactionType = 'fxa_tokens'
+    } else {
+      // Se não encontrou em fxa_token_transactions, buscar em credit_transactions
+      const { data: creditTransaction, error: creditError } = await supabase
+        .from('credit_transactions')
+        .select('*')
+        .eq('payment_reference', transactionId)
+        .single()
+        
+      if (creditTransaction) {
+        existingTransaction = creditTransaction
+        transactionType = 'credits'
+      }
+    }
+
+    if (!existingTransaction) {
       return NextResponse.json({
         success: false,
-        status: 'error',
-        message: 'Erro ao consultar banco de dados'
-      }, { status: 500 })
+        status: 'not_found',
+        message: 'Transação não encontrada'
+      }, { status: 404 })
     }
 
     // Se já foi processado como completed, retornar success e parar verificações
@@ -500,9 +537,10 @@ export async function GET(request: NextRequest) {
           // Se temos a transação local pendente, processá-la
           if (existingTransaction && existingTransaction.status !== 'completed') {
             try {
-              // Atualizar apenas o status para completed
+              // Atualizar apenas o status para completed na tabela correta
+              const tableName = transactionType === 'credits' ? 'credit_transactions' : 'fxa_token_transactions'
               const { error: updateError } = await supabase
-                .from('fxa_token_transactions')
+                .from(tableName)
                 .update({ 
                   status: 'completed',
                   updated_at: new Date().toISOString()
@@ -514,7 +552,8 @@ export async function GET(request: NextRequest) {
                 throw new Error(`Erro ao atualizar transação: ${updateError.message}`)
               }
 
-              console.log(`✅ Transação processada: ${existingTransaction.amount} tokens FXA para usuário ${existingTransaction.user_id}`)
+              const unit = transactionType === 'credits' ? 'créditos' : 'tokens FXA'
+              console.log(`✅ Transação processada: ${existingTransaction.amount} ${unit} para usuário ${existingTransaction.user_id}`)
 
               return NextResponse.json({
                 success: true,
@@ -524,10 +563,12 @@ export async function GET(request: NextRequest) {
                   ...existingTransaction,
                   status: 'completed'
                 },
-                tokensAdded: existingTransaction.amount,
+                tokensAdded: transactionType === 'fxa_tokens' ? existingTransaction.amount : 0,
+                creditsAdded: transactionType === 'credits' ? existingTransaction.amount : 0,
+                transactionType: transactionType,
                 amountBrl: existingTransaction.amount_brl,
                 xgateStatus: paymentStatus,
-                message: 'Pagamento confirmado e tokens adicionados!'
+                message: `Pagamento confirmado e ${unit} adicionados!`
               })
 
             } catch (processError) {
@@ -553,13 +594,69 @@ export async function GET(request: NextRequest) {
           const paymentStatus = depositData.status || depositData.currency?.status
           console.log('⏳ Pagamento ainda pendente no XGATE:', paymentStatus)
           
-          return NextResponse.json({
-            success: true,
-            status: 'pending',
-            xgateStatus: paymentStatus,
-            transaction: existingTransaction,
-            message: 'Pagamento ainda pendente'
-          })
+          // ✅ INCLUIR DADOS DO PIX NA RESPOSTA (QR CODE, COPIA E COLA)
+          try {
+            // Buscar dados do PIX no XGATE se não temos na transação local
+            let pixData = {
+              pixQrCode: null,
+              pixCopyPaste: null,
+              expiresAt: null
+            }
+            
+            // Tentar buscar detalhes do PIX diretamente do XGATE
+            if (depositData.currency?.code) {
+              pixData.pixQrCode = depositData.currency.code
+              pixData.pixCopyPaste = depositData.currency.code
+            }
+            
+            // Se não conseguiu do depositData, tentar buscar do PIX endpoint
+            if (!pixData.pixQrCode) {
+              try {
+                const pixResponse = await fetch(`${XGATE_CONFIG.baseUrl}/pix/${transactionId}`, {
+                  method: 'GET',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                })
+                
+                if (pixResponse.ok) {
+                  const pixInfo = await pixResponse.json()
+                  pixData.pixQrCode = pixInfo.qr_code || pixInfo.code
+                  pixData.pixCopyPaste = pixInfo.pix_code || pixInfo.code
+                  pixData.expiresAt = pixInfo.expires_at
+                }
+              } catch (pixError) {
+                console.log('⚠️ Erro ao buscar dados PIX específicos:', pixError)
+              }
+            }
+            
+            return NextResponse.json({
+              success: true,
+              status: 'pending',
+              xgateStatus: paymentStatus,
+              transaction: {
+                ...existingTransaction,
+                ...pixData
+              },
+              pixQrCode: pixData.pixQrCode,
+              pixCopyPaste: pixData.pixCopyPaste,
+              expiresAt: pixData.expiresAt,
+              message: 'Pagamento ainda pendente'
+            })
+            
+          } catch (pixError) {
+            console.error('❌ Erro ao buscar dados PIX:', pixError)
+            
+            // Fallback sem dados PIX
+            return NextResponse.json({
+              success: true,
+              status: 'pending',
+              xgateStatus: paymentStatus,
+              transaction: existingTransaction,
+              message: 'Pagamento ainda pendente'
+            })
+          }
         }
 
       } else {

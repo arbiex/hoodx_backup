@@ -24,8 +24,8 @@ export default function HackerNetworkPage() {
   
   const { isOpen: isFiltersModalOpen, openModal: openFiltersModal, closeModal: closeFiltersModal } = useModal()
   
-  // Estados para proteção por senha
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  // Estados para proteção por senha - DESABILITADO para desenvolvimento
+  const [isAuthenticated, setIsAuthenticated] = useState(true)
   const [password, setPassword] = useState('')
   const [passwordError, setPasswordError] = useState('')
   const [filters, setFilters] = useState({

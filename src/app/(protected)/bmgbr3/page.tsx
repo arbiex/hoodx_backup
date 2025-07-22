@@ -13,12 +13,14 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Square, RefreshCw, Zap, Key, Settings, Power, Target, Play } from 'lucide-react';
+import { Square, RefreshCw, Zap, Key, Settings, Power, Target, Play, Coins } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
-import CreditDisplay from '@/components/CreditDisplay';
 import useBmgbr3Api from '@/hooks/useBmgbr3Api';
+import { useCredits } from '@/hooks/useCredits';
+import { useAuth } from '@/hooks/useAuth';
+import CreditPurchaseModal from '@/components/CreditPurchaseModal';
 import useTimerManager from '@/hooks/useTimerManager';
 
 
@@ -65,6 +67,10 @@ export default function BMGBR3() {
   // 🔄 NOVO: Hook customizado para API
   const api = useBmgbr3Api();
 
+  // 🔄 NOVO: Hooks para autenticação e créditos
+  const { user } = useAuth();
+  const { balance: creditsBalance, isLoading: creditsLoading } = useCredits(user?.id);
+
   // 🗑️ REMOVIDO: Sistema de controle de sessão múltipla
 
   // 🕐 NOVO: Gerenciador de timers centralizado (previne memory leaks)
@@ -77,6 +83,9 @@ export default function BMGBR3() {
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Estado para modal de créditos
+  const [creditModalOpen, setCreditModalOpen] = useState(false);
 
   // ✅ NOVO: Estado para tokens de autenticação
   const [authTokens, setAuthTokens] = useState<{
@@ -3167,7 +3176,43 @@ export default function BMGBR3() {
           </button>
 
           {/* 💰 NOVO: Card de Créditos Disponíveis */}
-          <CreditDisplay />
+          <Card className="border-gray-700/30 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
+                <Coins className="h-5 w-5" />
+                CRÉDITOS
+              </CardTitle>
+              <CardDescription className="text-gray-400 font-mono text-xs">
+                {`// Saldo para operações`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Saldo Créditos */}
+                <div className="text-center py-4">
+                  <div className="flex items-center justify-center gap-3 mb-2">
+                    <Coins className="h-8 w-8 text-green-400" />
+                    <div className="text-3xl font-bold text-green-400 font-mono">
+                      {creditsLoading ? '...' : `${creditsBalance?.toFixed(2) || '0.00'}`}
+                    </div>
+                  </div>
+                  <div className="text-sm text-gray-400 font-mono">
+                    DISPONÍVEL
+                  </div>
+                </div>
+                
+                {/* Botão Comprar Créditos */}
+                <Button
+                  onClick={() => setCreditModalOpen(true)}
+                  className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono text-sm"
+                  variant="outline"
+                >
+                  <Coins className="h-4 w-4 mr-2" />
+                  COMPRAR_CRÉDITOS
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
 
 
@@ -3762,7 +3807,19 @@ export default function BMGBR3() {
 
       {/* 🗑️ REMOVIDO: Modal de Controle de Sessão */}
 
-      
+      {/* Modal de Compra de Créditos */}
+      {user && (
+        <CreditPurchaseModal
+          isOpen={creditModalOpen}
+          onClose={() => setCreditModalOpen(false)}
+          onSuccess={(amount: number, transactionId: string) => {
+            // Não é necessário fazer nada específico aqui pois o hook useCredits
+            // já atualiza automaticamente quando há mudanças
+            console.log(`✅ Créditos adicionados: ${amount}`);
+          }}
+          userId={user.id}
+        />
+      )}
 
       {/* Modal de Estratégia Removido - Agora usamos diretamente o card CONFIGURAR_BANCA */}
     </div>

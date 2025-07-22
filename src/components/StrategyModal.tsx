@@ -83,7 +83,7 @@ export default function StrategyModal({ isOpen, onClose, onConfirm, loading = fa
       }
 
       // Buscar dados via API route para evitar problemas de autenticação
-      const response = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+      const response = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -120,7 +120,7 @@ export default function StrategyModal({ isOpen, onClose, onConfirm, loading = fa
 
         
         // Limpar sessões existentes antes de ativar nova estratégia
-        const cleanupResponse = await fetch('/api/bots/blaze/pragmatic/api/megaroulette-bot', {
+        const cleanupResponse = await fetch('/api/bmgbr/blaze/pragmatic/blaze-megarouletebr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 

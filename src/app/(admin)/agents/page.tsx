@@ -395,10 +395,10 @@ export default function AgentsPage() {
         {/* Título da página */}
         <div>
           <h1 className="text-3xl font-bold text-green-400 font-mono mb-2">
-            AGENTS_MANAGER
+            USERS_MANAGER
           </h1>
           <p className="text-gray-400 font-mono text-sm">
-            {`// Sistema de gestão de agentes e comissões`}
+            {`// Todos os usuários podem indicar e ganhar comissões (50% padrão)`}
           </p>
         </div>
 
@@ -547,7 +547,7 @@ export default function AgentsPage() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
-                placeholder="Buscar por email ou código do agente..."
+                placeholder="Buscar por email ou código de indicação..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 bg-gray-800 border-gray-600 text-white font-mono"
@@ -561,10 +561,10 @@ export default function AgentsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-white font-mono">
               <Brain className="h-5 w-5" />
-              AGENTES_SISTEMA ({filteredAgents.length})
+              USUÁRIOS_SISTEMA ({filteredAgents.length})
             </CardTitle>
             <CardDescription className="text-gray-400 font-mono text-xs">
-              {`// Sistema de agentes e comissões personalizadas`}
+              {`// Todos os usuários podem indicar e ter comissões personalizadas`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -577,10 +577,10 @@ export default function AgentsPage() {
               <div className="text-center py-8">
                 <Brain className="h-12 w-12 text-gray-500 mx-auto mb-4" />
                 <p className="text-gray-400 font-mono">
-                  {searchTerm ? 'NENHUM_AGENTE_ENCONTRADO' : 'NENHUM_AGENTE_CADASTRADO'}
+                  {searchTerm ? 'NENHUM_USUÁRIO_ENCONTRADO' : 'NENHUM_USUÁRIO_CADASTRADO'}
                 </p>
                 <p className="text-gray-500 font-mono text-xs mt-2">
-                  {`// ${searchTerm ? 'Refine sua busca' : 'Clique em CRIAR_AGENTE para começar'}`}
+                  {`// ${searchTerm ? 'Refine sua busca' : 'Usuários aparecem automaticamente ao se cadastrarem'}`}
                 </p>
               </div>
             ) : (

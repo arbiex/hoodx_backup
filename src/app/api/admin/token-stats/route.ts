@@ -1,17 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-// Cliente Supabase com service role para bypassar RLS
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
+// Função para criar cliente Supabase admin (lazy initialization)
+function getSupabaseAdmin() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('Supabase credentials not found')
   }
-)
+  
+  return createClient(
+    supabaseUrl,
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    }
+  )
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,6 +40,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Buscar TODAS as transações de todos os usuários (usando service role)
+    const supabaseAdmin = getSupabaseAdmin()
     const { data: transactions, error } = await supabaseAdmin
       .from('fxa_token_transactions')
       .select('user_id, amount, amount_brl, created_at')
@@ -44,13 +54,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Buscar emails de todos os usuários únicos
-    const uniqueUserIds = [...new Set(transactions?.map(t => t.user_id) || [])]
+    const uniqueUserIds = [...new Set(transactions?.map((t: any) => t.user_id) || [])]
     const { data: users, error: usersError } = await supabaseAdmin.auth.admin.listUsers()
 
     const userEmailMap: Record<string, string> = {}
     
     if (users?.users) {
-      users.users.forEach(user => {
+      users.users.forEach((user: any) => {
         if (uniqueUserIds.includes(user.id)) {
           userEmailMap[user.id] = user.email || 'Email não encontrado'
         }
@@ -68,7 +78,7 @@ export async function POST(request: NextRequest) {
       purchase_count: number
     }>()
 
-    transactions?.forEach(transaction => {
+    transactions?.forEach((transaction: any) => {
       const userId = transaction.user_id
       const userEmail = userEmailMap[userId] || `user_${userId.slice(-8)}`
       

@@ -7,17 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { 
   Activity, 
-  Wifi, 
-  WifiOff, 
   CheckCircle,
-  Clock,
   Zap,
   Users,
   Bot,
-  RefreshCw,
   Server,
   X,
-  Power
+  TrendingUp
 } from 'lucide-react';
 import AdminHeader from '@/components/AdminHeader';
 import MaintenanceManager from '@/components/MaintenanceManager';
@@ -124,8 +120,7 @@ export default function BotsMonitoringPage() {
   const [botInstances, setBotInstances] = useState<BotInstance[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
 
-  // 🔥 NOVO: Estado para controle de loading dos botões de desconectar
-  const [disconnectingBots, setDisconnectingBots] = useState<Set<string>>(new Set());
+  // 🔥 REMOVIDO: Função de desconectar não é necessária para monitoramento
 
   // 🔥 NOVO: Estado para filtro de ordenação
   const [sortBy, setSortBy] = useState<'profit' | 'operations' | 'time'>('profit');
@@ -198,6 +193,9 @@ export default function BotsMonitoringPage() {
 
   useEffect(() => {
     checkCurrentUser();
+    
+    // 🔧 NOVO: Mostrar alerta sobre nova versão simplificada
+    showAlert('info', '📊 Página otimizada: Monitoramento focado apenas em apostas e lucros');
   }, []);
 
   useEffect(() => {
@@ -209,7 +207,7 @@ export default function BotsMonitoringPage() {
       
       const interval = setInterval(() => {
         discoverActiveBots();
-      }, 5000); // A cada 5 segundos
+      }, 30000); // 🔧 OTIMIZADO: A cada 30 segundos para monitoramento suave
       
       return () => clearInterval(interval);
     }
@@ -219,10 +217,10 @@ export default function BotsMonitoringPage() {
   useEffect(() => {
     if (botInstances.length > 0) {
       console.log(`🔄 botInstances atualizado: ${botInstances.length} instâncias. Carregando detalhes...`);
-      // Aguardar um pouco e carregar detalhes
+      // 🔧 CORREÇÃO: Aguardar mais tempo para evitar sobrecarga
       const timer = setTimeout(() => {
         loadBotsStatus();
-      }, 500);
+      }, 2000); // Era 500ms, agora 2s
       
       return () => clearTimeout(timer);
     }
@@ -233,14 +231,14 @@ export default function BotsMonitoringPage() {
     setCurrentUser(user);
   };
 
-  // 🔥 NOVA FUNÇÃO: Descobrir TODOS os bots conectados - VERSÃO ADMIN COMPLETA
+  // 🔥 NOVA FUNÇÃO: Descobrir bots ativos - VERSÃO SIMPLIFICADA PARA MONITORAMENTO
   const discoverActiveBots = async () => {
     if (!currentUser?.id) return;
     
     setDiscoveryLoading(true);
     
     try {
-      // 1. Buscar TODOS os usuários do sistema (não apenas ativos)
+      // 1. Buscar usuários ativos (simplificado)
       const { data: users, error: usersError } = await supabase.rpc('get_all_users_admin');
 
       if (usersError) {
@@ -248,65 +246,39 @@ export default function BotsMonitoringPage() {
         return;
       }
 
-      console.log(`🔍 Encontrados ${users?.length || 0} usuários no banco`);
+      console.log(`🔍 Verificando ${users?.length || 0} usuários para monitoramento`);
 
-      // 2. 🔥 MUDANÇA: Usar TODOS os usuários, não apenas os ativos nas últimas 6h
-      // Isso garante que vejamos bots de qualquer usuário que esteja conectado
-      const allUsersToCheck = users || [];
-      
-      // 3. Adicionar usuário atual se não estiver na lista
-      if (currentUser && !allUsersToCheck.find((u: any) => u.id === currentUser.id)) {
-        allUsersToCheck.push({
-          id: currentUser.id,
-          email: currentUser.email,
-          created_at: currentUser.created_at,
-          credits: 0,
-          last_login: new Date().toISOString()
-        });
-      }
-
-      // Filtrar usuários recentes apenas para estatísticas, mas verificar TODOS
+      // 2. Filtrar apenas usuários ativos nas últimas 6h para monitoramento
       const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
-      const activeUsersForStats = allUsersToCheck.filter((user: any) => {
+      const activeUsers = (users || []).filter((user: any) => {
         if (!user.last_login) return false;
         const lastLoginTime = new Date(user.last_login).getTime();
         return lastLoginTime > sixHoursAgo;
       });
 
-      setActiveUsers(activeUsersForStats);
-      console.log(`👥 Verificando TODOS os ${allUsersToCheck.length} usuários (${activeUsersForStats.length} ativos nas últimas 6h)`);
+      setActiveUsers(activeUsers);
+      console.log(`👥 Monitorando ${activeUsers.length} usuários ativos`);
 
-      // 4. Para cada usuário + cada endpoint, verificar conexões de bots
+      // 3. 🎯 DESCOBERTA SUPER SIMPLIFICADA: Só verificar connection status
       const discoveredBots: BotInstance[] = [];
-      let totalChecked = 0;
-
-      for (const user of allUsersToCheck) {
+      
+      for (const user of activeUsers) {
         console.log(`🔍 Verificando usuário: ${user.email}`);
         
+        // Verificar apenas o endpoint principal para cada usuário
         for (const endpoint of botEndpoints) {
           try {
-            totalChecked++;
-            
-            // Timeout mais rápido para verificação
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
-            
             const response = await fetch(endpoint.endpoint, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 userId: user.id,
                 action: 'get-connection-status',
-                sourcePage: endpoint.sourcePage,
-                verifyOrigin: true
-              }),
-              signal: controller.signal
+                monitoringOnly: true
+              })
             });
 
-            clearTimeout(timeoutId);
             const result = await response.json();
-            
-            console.log(`📡 ${user.email} em ${endpoint.name}: ${result.success ? (result.data?.connected ? 'CONECTADO' : 'desconectado') : 'erro'}`);
             
             if (result.success && result.data?.connected) {
               discoveredBots.push({
@@ -320,197 +292,106 @@ export default function BotsMonitoringPage() {
                 icon: endpoint.icon
               });
               
-              console.log(`✅ BOT ATIVO ENCONTRADO: ${user.email} - ${endpoint.name} (${endpoint.sourcePage})`);
+              console.log(`✅ Bot ativo: ${user.email} - ${endpoint.name}`);
+              break; // Primeira conexão encontrada, seguir para próximo usuário
             }
             
           } catch (error) {
-            if (error instanceof Error && error.name === 'AbortError') {
-              console.log(`⏱️ Timeout verificando ${user.email} em ${endpoint.name}`);
-            } else {
-              console.log(`❌ Erro verificando ${user.email} em ${endpoint.name}:`, error);
-            }
+            console.log(`❌ Erro verificando ${user.email}:`, error);
           }
-        }
-      }
-
-      // 🔍 DETECÇÃO INTELIGENTE DE ORIGEM: Filtrar conexões duplicadas da mesma API
-      const uniqueConnections = discoveredBots.reduce((unique: BotInstance[], bot) => {
-        // Verificar se já existe uma conexão deste usuário para esta API
-        const existingConnection = unique.find(existing => 
-          existing.userId === bot.userId && existing.endpoint === bot.endpoint
-        );
-        
-        if (!existingConnection) {
-          // Primeira conexão para esta API, adicionar
-          unique.push(bot);
-          console.log(`✅ Origem detectada: ${bot.userEmail} → ${bot.sourcePage} (${bot.endpoint})`);
-        } else {
-          // Já existe conexão para esta API, preferir a mais específica
-          // Heurística: /bmg, /bmg2, /bmgbr, /bmgbr2 são mais específicos que /blaze-megaroulettebr
-          const isMoreSpecific = bot.sourcePage !== '/blaze-megaroulettebr' && 
-                                 existingConnection.sourcePage === '/blaze-megaroulettebr';
           
-          if (isMoreSpecific) {
-            // Substituir pela origem mais específica
-            const index = unique.indexOf(existingConnection);
-            unique[index] = bot;
-            console.log(`🔄 Origem atualizada: ${bot.userEmail} → ${existingConnection.sourcePage} ➜ ${bot.sourcePage}`);
-          } else {
-            console.log(`🔄 Origem duplicada ignorada: ${bot.userEmail} → ${bot.sourcePage} (já existe ${existingConnection.sourcePage})`);
-          }
+          // Pequeno delay entre endpoints
+          await new Promise(resolve => setTimeout(resolve, 200));
         }
         
-        return unique;
-      }, []);
+        // Delay entre usuários
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
 
-      setBotInstances(uniqueConnections);
-      
-      console.log(`🎯 DESCOBERTA CONCLUÍDA: ${uniqueConnections.length} conexões únicas de ${discoveredBots.length} encontradas (${totalChecked} verificações)`);
-      if (uniqueConnections.length > 0) {
-        console.log(`📋 Conexões finais:`);
-        uniqueConnections.forEach((bot, i) => {
-          console.log(`  ${i+1}. ${bot.icon} ${bot.botType} - ${bot.userEmail} - ${bot.sourcePage}`);
-        });
-      }
-      
-      const duplicatesRemoved = discoveredBots.length - uniqueConnections.length;
-      if (duplicatesRemoved > 0) {
-        console.log(`🧹 ${duplicatesRemoved} conexões duplicadas removidas`);
-      }
+      setBotInstances(discoveredBots);
+      console.log(`🎯 ${discoveredBots.length} bots ativos descobertos`);
       
     } catch (error) {
-      console.error('Erro na descoberta de bots:', error);
+      console.error('Erro na descoberta:', error);
     } finally {
       setDiscoveryLoading(false);
     }
   };
 
-    // 🚀 FUNÇÃO SUPER MELHORADA: Carregar status completo dos bots
+  // 🚀 FUNÇÃO SUPER SIMPLIFICADA: Carregar apenas dados de apostas e lucro
   const loadBotsStatus = useCallback(async () => {
-    console.log(`🔧 loadBotsStatus chamado com ${botInstances.length} instâncias descobertas`);
+    console.log(`📊 Carregando dados de apostas/lucro para ${botInstances.length} bots`);
     
-    if (!currentUser?.id) {
-      console.log(`❌ Não há usuário atual logado`);
-      return;
-    }
-    
-    if (botInstances.length === 0) {
-      console.log(`❌ Nenhuma instância descoberta ainda`);
-      return;
-    }
+    if (!currentUser?.id || botInstances.length === 0) return;
     
     setLoading(true);
     const botStatuses: BotStatus[] = [];
 
-    console.log(`📊 Carregando detalhes para ${botInstances.length} bots descobertos:`);
-    botInstances.forEach((inst, i) => {
-      console.log(`  ${i+1}. ${inst.botType} - ${inst.userEmail} - ${inst.endpoint}`);
-    });
-
-    // 📊 Para cada bot ativo descoberto, buscar TODOS os dados disponíveis
+    // Processar cada bot - APENAS uma requisição por bot
     for (const instance of botInstances) {
       try {
-        console.log(`🔍 Carregando detalhes do bot: ${instance.botType} (${instance.userEmail})`);
+        console.log(`📊 Carregando relatório: ${instance.botType} (${instance.userEmail})`);
         
-        // 🔥 FAZER MÚLTIPLAS CHAMADAS EM PARALELO para cada bot
-        const [logsResponse, reportResponse] = await Promise.all([
-          // 1. Buscar logs e status da conexão
-          fetch(instance.endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: instance.userId,
-              action: 'get-websocket-logs'
-            })
-          }),
-          // 2. Buscar relatório de operação
-          fetch(instance.endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: instance.userId,
-              action: 'get-operation-report'
-            })
+        // 🎯 UMA ÚNICA REQUISIÇÃO: get-operation-report (contém tudo que precisamos)
+        const response = await fetch(instance.endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: instance.userId,
+            action: 'get-operation-report',
+            monitoringOnly: true
           })
-        ]);
-
-        console.log(`📡 Respostas obtidas para ${instance.botType}:`, {
-          logsStatus: logsResponse.status,
-          reportStatus: reportResponse.status
         });
 
-        const logsResult = await logsResponse.json();
-        const reportResult = await reportResponse.json();
+        const result = await response.json();
         
-        console.log(`📋 Dados processados para ${instance.botType}:`, {
-          logsSuccess: logsResult.success,
-          reportSuccess: reportResult.success,
-          hasData: !!logsResult.data
-        });
-        
-        if (logsResult.success && logsResult.data) {
-          const data = logsResult.data;
-          const report = reportResult.success ? reportResult.data : null;
+        if (result.success && result.data) {
+          const report = result.data;
+          const summary = report.summary || {};
           
-          console.log(`✅ Criando card para ${instance.botType}:`, {
-            connected: data.connectionStatus?.connected,
-            operationActive: data.operationActive,
-            hasStats: !!(report?.summary || data.operationState?.stats)
-          });
+          console.log(`✅ Dados obtidos: ${instance.botType} - ${summary.totalBets || 0} apostas, R$ ${(summary.profit || 0).toFixed(2)}`);
           
-          // 🎯 CONSTRUIR OBJETO COMPLETO COM TODAS AS INFORMAÇÕES
-          // Usar página de origem + userId para ID único por origem
-          const pageId = instance.sourcePage.replace('/', '');
+          // 🎯 CARD SIMPLIFICADO: Só dados essenciais
           const botStatus: BotStatus = {
-            id: `${instance.userId}-${pageId}`,
+            id: `${instance.userId}-${instance.sourcePage.replace('/', '')}`,
             name: `${instance.icon} ${instance.botType}`,
             endpoint: instance.endpoint,
             description: `${instance.sourcePage} • ${instance.userEmail}`,
-            connectionStatus: data.connectionStatus || { 
-              connected: false, 
+            connectionStatus: { 
+              connected: true, // Se chegou até aqui, está conectado
               lastUpdate: Date.now() 
             },
             operationStatus: {
-              isOperating: data.operationActive || false,
-              operationActive: data.operationActive || false,
-              mode: data.operationState?.mode, // Capturar o modo da API bmgbr
-              startedAt: report?.summary?.startedAt || data.operationState?.stats?.startedAt,
-              stats: report?.summary || data.operationState?.stats || {
-                totalBets: 0,
-                wins: 0,
-                losses: 0,
-                profit: 0
+              isOperating: summary.totalBets > 0, // Se tem apostas, está operando
+              operationActive: summary.totalBets > 0,
+              startedAt: summary.startedAt,
+              stats: {
+                totalBets: summary.totalBets || 0,
+                wins: summary.wins || 0,
+                losses: summary.losses || 0,
+                profit: summary.profit || 0,
+                winRate: summary.winRate || 0
               }
             },
             userInfo: {
               userId: instance.userId,
               email: instance.userEmail
-            },
-            lastSevenResults: data.lastSevenResults || [],
-            websocketLogs: (data.logs || []).slice(-10),
-            // 🔥 NOVOS DADOS DETALHADOS
-            operationDetails: data.operationState ? {
-              pattern: data.operationState.pattern,
-              currentLevel: data.operationState.level,
-              martingaleLevel: data.operationState.martingaleLevel,
-              waitingForResult: data.operationState.waitingForResult,
-              profitStatus: data.operationState.profitStatus
-            } : undefined,
-            sessionInfo: data.sessionStatus,
-            bettingWindow: data.bettingWindow
+            }
           };
           
           botStatuses.push(botStatus);
-          console.log(`✅ Card criado com sucesso para ${instance.botType}`);
         } else {
-          console.log(`❌ Falha ao obter dados para ${instance.botType}:`, logsResult.error);
+          console.log(`❌ Falha ao obter relatório: ${instance.botType}`);
         }
       } catch (error) {
-        console.error(`❌ Erro ao monitorar bot ${instance.botType} do usuário ${instance.userEmail}:`, error);
+        console.error(`❌ Erro ao carregar ${instance.botType}:`, error);
       }
+      
+      // Delay suave entre bots
+      await new Promise(resolve => setTimeout(resolve, 800));
     }
 
-    console.log(`🎯 RESULTADO FINAL: ${botStatuses.length} cards serão exibidos de ${botInstances.length} bots descobertos`);
+    console.log(`📋 ${botStatuses.length} relatórios carregados`);
     setBots(botStatuses);
     setLastUpdate(Date.now());
     setLoading(false);
@@ -524,117 +405,28 @@ export default function BotsMonitoringPage() {
     setTimeout(() => setAlertMessage(null), 5000);
   };
 
-  // 🔥 NOVO: Função para desconectar bot
-  const disconnectBot = async (bot: BotStatus) => {
-    if (!bot.userInfo?.userId) {
-      showAlert('error', 'ID do usuário não encontrado');
-      return;
-    }
+  // 🔥 REMOVIDO: Função de desconectar não é necessária para monitoramento simples
 
-    const botId = bot.id;
-    setDisconnectingBots(prev => new Set(prev).add(botId));
-
-    try {
-      console.log(`🔌 Desconectando bot: ${bot.name} (${bot.userInfo.email})`);
-      
-      const response = await fetch(bot.endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: bot.userInfo.userId,
-          action: 'stop-operation'
-        })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        showAlert('success', `Bot ${bot.name} desconectado com sucesso`);
-        
-        // Atualizar o status local imediatamente
-        setBots(prevBots => 
-          prevBots.map(b => 
-            b.id === botId 
-              ? {
-                  ...b,
-                  connectionStatus: { ...b.connectionStatus, connected: false },
-                  operationStatus: { 
-                    ...b.operationStatus, 
-                    isOperating: false, 
-                    operationActive: false,
-                    startedAt: undefined // ✅ CORREÇÃO: Resetar timestamp para parar contagem
-                  },
-                  sessionInfo: {
-                    ...b.sessionInfo,
-                    createdAt: undefined // ✅ CORREÇÃO: Resetar timestamp da sessão
-                  }
-                }
-              : b
-          )
-        );
-
-        // Forçar nova descoberta após um tempo
-        setTimeout(() => {
-          discoverActiveBots();
-        }, 2000);
-      } else {
-        showAlert('error', `Erro ao desconectar: ${result.error || 'Erro desconhecido'}`);
-      }
-    } catch (error) {
-      console.error('Erro ao desconectar bot:', error);
-      showAlert('error', 'Erro de conexão ao desconectar bot');
-    } finally {
-      setDisconnectingBots(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(botId);
-        return newSet;
-      });
-    }
-  };
-
+  // 🎯 FUNÇÕES SIMPLIFICADAS: Apenas apostas e lucro
   const getBotStatusColor = (bot: BotStatus) => {
-    if (bot.operationStatus.isOperating && bot.connectionStatus.connected) {
-      if (bot.operationStatus.mode === 'real') {
-        return 'text-green-400 bg-green-500/20 border-green-500/30';
-      } else if (bot.operationStatus.mode === 'analysis') {
-        return 'text-yellow-400 bg-yellow-500/20 border-yellow-500/30';
-      }
+    if ((bot.operationStatus.stats?.totalBets || 0) > 0) {
       return 'text-green-400 bg-green-500/20 border-green-500/30';
     }
-    if (bot.connectionStatus.connected) {
-      return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
-    }
-    return 'text-red-400 bg-red-500/20 border-red-500/30';
+    return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
   };
 
   const getBotStatusText = (bot: BotStatus) => {
-    if (bot.operationStatus.isOperating && bot.connectionStatus.connected) {
-      if (bot.operationStatus.mode === 'real') {
-        return 'Em operação';
-      } else if (bot.operationStatus.mode === 'analysis') {
-        return 'Em análise';
-      }
+    if ((bot.operationStatus.stats?.totalBets || 0) > 0) {
       return 'Operando';
     }
-    if (bot.connectionStatus.connected) {
-      return 'Conectado';
-    }
-    return 'Desconectado';
+    return 'Conectado';
   };
 
   const getBotStatusIcon = (bot: BotStatus) => {
-    if (bot.operationStatus.isOperating && bot.connectionStatus.connected) {
-      if (bot.operationStatus.mode === 'real') {
-        return <Zap className="h-4 w-4" />; // Operação real
-      } else if (bot.operationStatus.mode === 'analysis') {
-        return <Clock className="h-4 w-4" />; // Análise
-      }
-      return <Activity className="h-4 w-4" />;
+    if ((bot.operationStatus.stats?.totalBets || 0) > 0) {
+      return <Zap className="h-4 w-4" />;
     }
-    if (bot.connectionStatus.connected) {
-      return <Wifi className="h-4 w-4" />;
-    }
-    return <WifiOff className="h-4 w-4" />;
+    return <Activity className="h-4 w-4" />;
   };
 
   const formatDuration = (startTime: number) => {
@@ -747,10 +539,10 @@ export default function BotsMonitoringPage() {
         {/* Título da página */}
         <div>
           <h1 className="text-3xl font-bold text-green-400 font-mono mb-2">
-            BOTS_MONITOR
+            📊 BOTS_APOSTAS & LUCROS
           </h1>
           <p className="text-gray-400 font-mono text-sm">
-            {`// Sistema de monitoramento global automático • Última atualização: ${new Date(lastUpdate).toLocaleTimeString('pt-BR')} • Auto-refresh ${autoRefresh ? 'ativo' : 'pausado'}`}
+            {`// Monitoramento simplificado de apostas e lucros • Última atualização: ${new Date(lastUpdate).toLocaleTimeString('pt-BR')} • Auto-refresh ${autoRefresh ? 'ativo' : 'pausado'}`}
           </p>
         </div>
 
@@ -804,15 +596,15 @@ export default function BotsMonitoringPage() {
           <Card className="border-yellow-500/30 bg-gray-900/50">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-yellow-400 font-mono text-sm">
-                <Zap className="h-4 w-4" />
-                BOTS_OPERANDO
+                <TrendingUp className="h-4 w-4" />
+                APOSTAS_TOTAIS
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-yellow-400 font-mono">
-                {bots.filter(b => b.operationStatus.isOperating).length}
+                {bots.reduce((total, bot) => total + (bot.operationStatus.stats?.totalBets || 0), 0)}
               </div>
-              <p className="text-xs text-gray-400 font-mono">ativos</p>
+              <p className="text-xs text-gray-400 font-mono">em andamento</p>
             </CardContent>
           </Card>
                 </div>
@@ -892,39 +684,38 @@ export default function BotsMonitoringPage() {
                           </div>
                         </div>
                         
-                        <div className="text-xs font-mono text-gray-400 mb-2">
-                          Usuário: {bot.userInfo?.email || 'N/A'}
+                        <div className="text-xs font-mono text-gray-400 mb-3">
+                          👤 {bot.userInfo?.email || 'N/A'} • 📄 {bot.description?.split(' • ')[0] || 'N/A'}
                         </div>
 
-                        <div className="grid grid-cols-3 gap-4 text-sm">
-                          <div>
-                            <span className="text-gray-400">Tempo ativo:</span>
-                            <div className="text-gray-300 font-mono text-xs">
-                              {!bot.connectionStatus.connected 
-                                ? '--'
-                                : bot.operationStatus.startedAt 
-                                ? formatDuration(bot.operationStatus.startedAt)
-                                : bot.sessionInfo?.createdAt 
-                                ? formatDuration(bot.sessionInfo.createdAt)
-                                : '--'
-                              }
+                        {/* 🎯 DADOS PRINCIPAIS: Apenas apostas e lucro */}
+                        <div className="grid grid-cols-2 gap-6 text-sm">
+                          <div className="space-y-2">
+                            <div>
+                              <span className="text-gray-400 text-xs">📊 Total de Apostas:</span>
+                              <div className="text-purple-400 font-mono text-lg font-bold">
+                                {bot.operationStatus.stats?.totalBets || 0}
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-gray-400 text-xs">🎯 Taxa de Acerto:</span>
+                              <div className="text-blue-400 font-mono text-sm font-semibold">
+                                {bot.operationStatus.stats?.winRate || 0}%
+                              </div>
                             </div>
                           </div>
-                          <div>
-                            <span className="text-gray-400">Operações:</span>
-                            <div className="text-purple-400 font-mono text-sm font-bold">
-                              {bot.operationStatus.stats?.totalBets || 0} apostas
+                          <div className="space-y-2">
+                            <div>
+                              <span className="text-gray-400 text-xs">✅ Vitórias:</span>
+                              <div className="text-green-400 font-mono text-sm font-semibold">
+                                {bot.operationStatus.stats?.wins || 0}
+                              </div>
                             </div>
-                          </div>
-                          <div>
-                            <span className="text-gray-400">Status:</span>
-                            <div className="text-gray-300 font-mono text-xs">
-                              {!bot.connectionStatus.connected 
-                                ? 'desconectado'
-                                : bot.operationStatus.isOperating 
-                                ? (bot.operationStatus.mode === 'real' ? 'operando' : 'analisando')
-                                : 'conectado'
-                              }
+                            <div>
+                              <span className="text-gray-400 text-xs">❌ Derrotas:</span>
+                              <div className="text-red-400 font-mono text-sm font-semibold">
+                                {bot.operationStatus.stats?.losses || 0}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -943,21 +734,10 @@ export default function BotsMonitoringPage() {
                           {(bot.operationStatus.stats?.profit || 0) > 0 ? 'LUCRO' : 
                            (bot.operationStatus.stats?.profit || 0) < 0 ? 'PREJUÍZO' : 'NEUTRO'}
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={disconnectingBots.has(bot.id) || !bot.connectionStatus.connected}
-                          className={`mt-2 border-red-500/50 text-red-400 hover:text-red-300 hover:bg-red-500/10 font-mono ${
-                            disconnectingBots.has(bot.id) ? 'opacity-50' : ''
-                          }`}
-                          onClick={() => disconnectBot(bot)}
-                        >
-                          {disconnectingBots.has(bot.id) ? (
-                            <RefreshCw className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Power className="h-4 w-4" />
-                          )}
-                        </Button>
+                        {/* 🔥 REMOVIDO: Botão de desconectar - apenas monitoramento */}
+                        <div className="text-xs font-mono text-gray-500 mt-2">
+                          Monitoramento
+                        </div>
                       </div>
                     </div>
                   </div>

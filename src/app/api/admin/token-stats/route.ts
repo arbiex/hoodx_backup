@@ -2,21 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 // Cliente Supabase com service role para bypassar RLS
-const getSupabaseAdmin = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error('Missing Supabase environment variables')
-  }
-  
-  return createClient(supabaseUrl, supabaseKey, {
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
     auth: {
       autoRefreshToken: false,
       persistSession: false
     }
-  })
-}
+  }
+)
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,8 +30,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
-    const supabaseAdmin = getSupabaseAdmin()
-
     // Buscar TODAS as transações de todos os usuários (usando service role)
     const { data: transactions, error } = await supabaseAdmin
       .from('fxa_token_transactions')
@@ -51,13 +44,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Buscar emails de todos os usuários únicos
-    const uniqueUserIds = [...new Set(transactions?.map((t: any) => t.user_id) || [])]
+    const uniqueUserIds = [...new Set(transactions?.map(t => t.user_id) || [])]
     const { data: users, error: usersError } = await supabaseAdmin.auth.admin.listUsers()
 
     const userEmailMap: Record<string, string> = {}
     
     if (users?.users) {
-      users.users.forEach((user: any) => {
+      users.users.forEach(user => {
         if (uniqueUserIds.includes(user.id)) {
           userEmailMap[user.id] = user.email || 'Email não encontrado'
         }
@@ -75,7 +68,7 @@ export async function POST(request: NextRequest) {
       purchase_count: number
     }>()
 
-    transactions?.forEach((transaction: any) => {
+    transactions?.forEach(transaction => {
       const userId = transaction.user_id
       const userEmail = userEmailMap[userId] || `user_${userId.slice(-8)}`
       

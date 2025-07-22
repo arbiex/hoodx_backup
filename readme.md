@@ -1,4 +1,4 @@
-flyctl logs -a hoodx
+flyctl logs -a roleta-bot
 
 git add -A && git commit -m "fix: correct edge function name from blaze_history_megaroulette to blaze-mg-pragmatic in all references"
 

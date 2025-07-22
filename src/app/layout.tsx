@@ -15,13 +15,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://hoodx.ai'),
-  title: "HOODX.AI - A matemática oculta da sorte",
+  metadataBase: new URL('https://roleta.bot'),
+  title: "ROLETA.BOT - A matemática oculta da sorte",
   description: "Descubra os padrões ocultos nos jogos. Sistema de automação inteligente que revela a matemática por trás da sorte.",
   keywords: ["automação", "cassino", "bot", "multi-bot", "trading", "blaze", "matrix", "hacker"],
-  authors: [{ name: "HOODX.AI" }],
-  creator: "HOODX.AI",
-  publisher: "HOODX.AI",
+  authors: [{ name: "ROLETA.BOT" }],
+  creator: "ROLETA.BOT",
+  publisher: "ROLETA.BOT",
   formatDetection: {
     email: false,
     address: false,
@@ -51,16 +51,16 @@ export const metadata: Metadata = {
   },
   manifest: "/site.webmanifest",
   openGraph: {
-    title: "HOODX.AI - A matemática oculta da sorte",
+    title: "ROLETA.BOT - A matemática oculta da sorte",
     description: "Descubra os padrões ocultos nos jogos. Sistema de automação inteligente que revela a matemática por trás da sorte.",
-    url: "https://hoodx.ai",
-    siteName: "HOODX.AI",
+    url: "https://roleta.bot",
+    siteName: "ROLETA.BOT",
     images: [
       {
         url: "/opengraph.webp",
         width: 1200,
         height: 630,
-        alt: "HOODX.AI - Sistema de Automação Matrix",
+        alt: "ROLETA.BOT - Sistema de Automação Matrix",
       },
     ],
     locale: "pt_BR",
@@ -68,10 +68,10 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "HOODX.AI - A matemática oculta da sorte",
+    title: "ROLETA.BOT - A matemática oculta da sorte",
     description: "Descubra os padrões ocultos nos jogos. Sistema de automação inteligente que revela a matemática por trás da sorte.",
     images: ["/opengraph.webp"],
-    creator: "@hoodxai",
+    creator: "@roletabot",
   },
   robots: {
     index: true,
@@ -113,9 +113,9 @@ export default function RootLayout({
         <meta name="msapplication-TileImage" content="/144x144.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="HOODX.AI" />
+        <meta name="apple-mobile-web-app-title" content="ROLETA.BOT" />
         <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="application-name" content="HOODX.AI" />
+        <meta name="application-name" content="ROLETA.BOT" />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}

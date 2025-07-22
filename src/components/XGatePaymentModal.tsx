@@ -593,7 +593,7 @@ export default function XGatePaymentModal({
                     </div>
                   </div>
                   <div className="text-xs text-gray-400 font-mono mt-1">
-                    ≈ R$ {parseFloat(paymentAmount).toFixed(2)} convertidos em tokens
+                    Preço token R$ 0,25 und
                   </div>
                 </div>
               )}

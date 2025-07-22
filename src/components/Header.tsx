@@ -45,17 +45,20 @@ export default function Header() {
   return (
     <div className="flex justify-between items-center p-4 mb-4">
       {/* Logo e Brand */}
-      <div className="flex items-center gap-2">
+      <button 
+        onClick={() => router.push('/dashboard')}
+        className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer"
+      >
         <Image
           src="/isotipo.svg"
-          alt="HoodX Logo"
+          alt="Roleta Bot Logo"
           width={32}
           height={32}
         />
         <span className="text-lg font-bold font-mono text-green-400">
-          HOODX<span className="text-green-500">.AI</span>
+          ROLETA<span className="text-green-500">.BOT</span>
         </span>
-      </div>
+      </button>
 
       {/* Logout Icon */}
       <Button 

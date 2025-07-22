@@ -21,7 +21,7 @@ if (missingEnvVars.length > 0 && process.env.NODE_ENV !== 'development') {
 
 if (missingRecommendedVars.length > 0) {
   console.warn('💡 Recommended environment variables:', missingRecommendedVars.join(', '));
-  console.warn('ℹ️  NEXT_PUBLIC_APP_URL should be set to your domain (e.g., https://hoodx.ai)');
+  console.warn('ℹ️  NEXT_PUBLIC_APP_URL should be set to your domain (e.g., https://roleta.bot)');
 }
 
 const nextConfig: NextConfig = {
@@ -79,6 +79,11 @@ const nextConfig: NextConfig = {
       },
     ]
   },
+
+  // Remover redirects que podem interferir com ACME
+  // async redirects() {
+  //   return []
+  // },
 
   typescript: {
     ignoreBuildErrors: true,

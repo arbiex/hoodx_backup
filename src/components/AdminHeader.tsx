@@ -8,12 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { 
   Shield, 
-  Users, 
-  Bot, 
-  Activity,
-  Settings,
-  Home,
-  Brain
+  Home
 } from 'lucide-react';
 
 interface AdminHeaderProps {
@@ -36,24 +31,27 @@ export default function AdminHeader({ currentUser, additionalActions }: AdminHea
   const navigationItems = [
     {
       id: 'matrixx',
-      label: 'Matrix Panel',
+      label: 'Painel',
       href: '/matrixx',
-      icon: Shield,
       description: 'Gerenciamento de usuários e sistema'
     },
     {
       id: 'bots',
-      label: 'Bots Monitor',
+      label: 'Bots',
       href: '/bots',
-      icon: Bot,
       description: 'Monitoramento de bots em tempo real'
     },
     {
       id: 'agents',
       label: 'Agents',
       href: '/agents',
-      icon: Brain,
       description: 'Gerenciamento de agentes inteligentes'
+    },
+    {
+      id: 'tokens',
+      label: 'Tokens',
+      href: '/tokens',
+      description: 'Relatório de compras de tokens FXA'
     }
   ];
 
@@ -79,21 +77,19 @@ export default function AdminHeader({ currentUser, additionalActions }: AdminHea
           {/* Navegação */}
           <nav className="flex items-center gap-1">
             {navigationItems.map((item) => {
-              const Icon = item.icon;
               const active = isActive(item.href);
               
               return (
                 <Link
                   key={item.id}
                   href={item.href}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                     active
                       ? 'bg-purple-500/20 text-purple-400'
                       : 'text-gray-400 hover:text-white hover:bg-gray-800'
                   }`}
                   title={item.description}
                 >
-                  <Icon className="h-4 w-4" />
                   {item.label}
                 </Link>
               );

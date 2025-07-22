@@ -1,6 +1,6 @@
 {
-  "name": "HOODX.AI - Multi-Bot Tool V4",
-  "short_name": "HOODX.AI",
+  "name": "ROLETA.BOT - Multi-Bot Tool V4",
+  "short_name": "ROLETA.BOT",
   "description": "Sistema de automação para cassinos online com monitoramento em tempo real",
   "start_url": "/",
   "display": "standalone",
@@ -16,7 +16,7 @@
       "sizes": "1200x630",
       "type": "image/webp",
       "form_factor": "wide",
-      "label": "Tela principal do HOODX.AI Multi-Bot"
+      "label": "Tela principal do ROLETA.BOT Multi-Bot"
     }
   ],
   "icons": [

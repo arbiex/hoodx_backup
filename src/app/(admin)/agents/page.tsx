@@ -22,7 +22,8 @@ import {
   AlertTriangle,
   Check,
   X,
-  CreditCard
+  CreditCard,
+  RefreshCw
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -163,15 +164,17 @@ export default function AgentsPage() {
 
   const createAgent = async () => {
     if (!selectedUserId || !commissionRate) {
-      toast.error('Preencha todos os campos')
+      toast.error('Campos obrigatórios', {
+        description: 'Selecione um usuário e defina a taxa de comissão'
+      })
       return
     }
 
+    setLoading(true)
     try {
       const { data, error } = await supabase.rpc('create_agent', {
         p_user_id: selectedUserId,
-        p_commission_rate: parseFloat(commissionRate),
-        p_admin_user_id: currentUser?.id
+        p_commission_rate: parseFloat(commissionRate)
       })
 
       if (error) {
@@ -180,159 +183,21 @@ export default function AgentsPage() {
         return
       }
 
-      if (data.success) {
-        toast.success('Agente criado com sucesso', {
-          description: `Código: ${data.agent_code}`
-        })
-        closeCreateModal()
-        setSelectedUserId('')
-        setCommissionRate('50.00')
-        setUserSearchTerm('')
-        loadAgents()
-        loadUsers()
-      } else {
-        toast.error(data.error || 'Erro ao criar agente')
-      }
-    } catch (error) {
-      console.error('Erro:', error)
-      toast.error('Erro inesperado')
-    }
-  }
-
-  const updateAgent = async () => {
-    if (!editingAgent || !commissionRate) {
-      toast.error('Dados inválidos')
-      return
-    }
-
-    try {
-      const { data, error } = await supabase.rpc('update_agent', {
-        p_agent_id: editingAgent.id,
-        p_commission_rate: parseFloat(commissionRate),
-        p_is_active: editingAgent.is_active
+      toast.success('Agente criado com sucesso', {
+        description: `Código do agente: ${data.agent_code}`
       })
-
-      if (error) {
-        console.error('Erro ao atualizar agente:', error)
-        toast.error('Erro ao atualizar agente')
-        return
-      }
-
-      if (data.success) {
-        toast.success('Agente atualizado com sucesso')
-        closeEditModal()
-        setEditingAgent(null)
-        loadAgents()
-      } else {
-        toast.error(data.error || 'Erro ao atualizar agente')
-      }
+      
+      closeCreateModal()
+      setSelectedUserId('')
+      setCommissionRate('50.00')
+      setUserSearchTerm('')
+      loadAgents()
+      loadUsers()
     } catch (error) {
       console.error('Erro:', error)
-      toast.error('Erro inesperado')
-    }
-  }
-
-  // Função para desativar código de agente
-  const disableAgentCode = async (agentCode: string) => {
-    try {
-      const { data, error } = await supabase.rpc('disable_agent_code', {
-        p_agent_code: agentCode
-      });
-
-      if (error) {
-        console.error('Erro ao desativar código:', error);
-        toast.error('Erro ao desativar código do agente');
-        return;
-      }
-
-      if (data.success) {
-        toast.success(data.message);
-        await loadAgents(); // Recarregar lista
-      } else {
-        toast.error(data.error || 'Erro ao desativar código');
-      }
-    } catch (err) {
-      console.error('Erro inesperado:', err);
-      toast.error('Erro inesperado ao desativar código');
-    }
-  };
-
-  // Função para ativar código de agente
-  const enableAgentCode = async (agentCode: string) => {
-    try {
-      const { data, error } = await supabase.rpc('enable_agent_code', {
-        p_agent_code: agentCode
-      });
-
-      if (error) {
-        console.error('Erro ao ativar código:', error);
-        toast.error('Erro ao ativar código do agente');
-        return;
-      }
-
-      if (data.success) {
-        toast.success(data.message);
-        await loadAgents(); // Recarregar lista
-      } else {
-        toast.error(data.error || 'Erro ao ativar código');
-      }
-    } catch (err) {
-      console.error('Erro inesperado:', err);
-      toast.error('Erro inesperado ao ativar código');
-    }
-  };
-
-  // Função para alternar status do agente
-  const toggleAgentStatus = async (agentCode: string, currentStatus: boolean) => {
-    try {
-      const { data, error } = await supabase.rpc('toggle_agent_code', {
-        p_agent_code: agentCode
-      });
-
-      if (error) {
-        console.error('Erro ao alterar status:', error);
-        toast.error('Erro ao alterar status do agente');
-        return;
-      }
-
-      if (data.success) {
-        toast.success(data.message);
-        await loadAgents(); // Recarregar lista
-      } else {
-        toast.error(data.error || 'Erro ao alterar status');
-      }
-    } catch (err) {
-      console.error('Erro inesperado:', err);
-      toast.error('Erro inesperado ao alterar status');
-    }
-  };
-
-  const removeAgent = async (agent: Agent) => {
-    if (!confirm(`Tem certeza que deseja remover o agente ${agent.email}?`)) {
-      return
-    }
-
-    try {
-      const { data, error } = await supabase.rpc('remove_agent', {
-        p_agent_id: agent.id
-      })
-
-      if (error) {
-        console.error('Erro ao remover agente:', error)
-        toast.error('Erro ao remover agente')
-        return
-      }
-
-      if (data.success) {
-        toast.success('Agente removido com sucesso')
-        loadAgents()
-        loadUsers()
-      } else {
-        toast.error(data.error || 'Erro ao remover agente')
-      }
-    } catch (error) {
-      console.error('Erro:', error)
-      toast.error('Erro inesperado')
+      toast.error('Erro inesperado ao criar agente')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -342,91 +207,151 @@ export default function AgentsPage() {
     openEditModal()
   }
 
+  const updateAgent = async () => {
+    if (!editingAgent || !commissionRate) {
+      toast.error('Dados inválidos')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const { error } = await supabase.rpc('update_agent_commission', {
+        p_agent_code: editingAgent.agent_code,
+        p_commission_rate: parseFloat(commissionRate)
+      })
+
+      if (error) {
+        console.error('Erro ao atualizar agente:', error)
+        toast.error('Erro ao atualizar agente')
+        return
+      }
+
+      toast.success('Agente atualizado com sucesso')
+      closeEditModal()
+      setEditingAgent(null)
+      setCommissionRate('50.00')
+      loadAgents()
+    } catch (error) {
+      console.error('Erro:', error)
+      toast.error('Erro inesperado ao atualizar agente')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const deleteAgent = async (agentId: string) => {
+    if (!confirm('Tem certeza que deseja remover este agente? Esta ação não pode ser desfeita.')) {
+      return
+    }
+
+    setLoading(true)
+    try {
+      const { error } = await supabase
+        .from('agents')
+        .delete()
+        .eq('id', agentId)
+
+      if (error) {
+        console.error('Erro ao remover agente:', error)
+        toast.error('Erro ao remover agente')
+        return
+      }
+
+      toast.success('Agente removido com sucesso')
+      loadAgents()
+      loadUsers()
+    } catch (error) {
+      console.error('Erro:', error)
+      toast.error('Erro inesperado ao remover agente')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const openWithdrawalDetails = (withdrawal: PendingWithdrawal) => {
     setSelectedWithdrawal(withdrawal)
-    setAdminNotes('')
-    setReversalJustification('')
     openWithdrawalModal()
   }
 
-  const processWithdrawal = async (status: 'completed' | 'failed' | 'cancelled', rejectionReason?: string) => {
-    if (!selectedWithdrawal) return;
+  const closeWithdrawalDetails = () => {
+    closeWithdrawalModal()
+    setSelectedWithdrawal(null)
+    setAdminNotes('')
+    setReversalJustification('')
+  }
 
-    setProcessingWithdrawal(true);
+  const approveWithdrawal = async () => {
+    if (!selectedWithdrawal || !currentUser?.id) return
+
+    setProcessingWithdrawal(true)
     try {
-      const { data, error } = await supabase.rpc('process_withdrawal', {
+      const { data, error } = await supabase.rpc('approve_agent_withdrawal', {
         p_withdrawal_id: selectedWithdrawal.id,
-        p_status: status,
-        p_admin_notes: adminNotes || rejectionReason || null,
-        p_admin_user_id: currentUser?.id
-      });
+        p_admin_notes: adminNotes,
+        p_admin_user_id: currentUser.id
+      })
 
       if (error) {
-        console.error('Erro ao processar saque:', error);
-        toast.error('Erro ao processar saque');
-        return;
+        console.error('Erro ao aprovar saque:', error)
+        toast.error('Erro ao aprovar saque')
+        return
       }
 
       if (data.success) {
-        toast.success(`Saque ${status === 'completed' ? 'aprovado' : status === 'failed' ? 'rejeitado' : 'cancelado'} com sucesso`);
-        closeWithdrawalModal();
-        setSelectedWithdrawal(null);
-        setAdminNotes('');
-        loadPendingWithdrawals();
+                 toast.success('Saque aprovado com sucesso', {
+           description: `R$ ${data.amount_approved.toFixed(2)} aprovados para ${data.user_email}`
+         })
+         closeWithdrawalDetails()
+         loadPendingWithdrawals()
       } else {
-        toast.error('Erro ao processar saque', {
+        toast.error('Erro ao aprovar saque', {
           description: data.error || 'Erro desconhecido'
-        });
+        })
       }
     } catch (error) {
-      console.error('Erro:', error);
-      toast.error('Erro inesperado ao processar saque');
+      console.error('Erro:', error)
+      toast.error('Erro inesperado ao aprovar saque')
     } finally {
-      setProcessingWithdrawal(false);
+      setProcessingWithdrawal(false)
     }
-  };
+  }
 
   const reverseWithdrawal = async () => {
-    if (!selectedWithdrawal || !reversalJustification.trim()) {
-      toast.error('Justificativa é obrigatória para estorno');
-      return;
-    }
+    if (!selectedWithdrawal || !currentUser?.id) return
 
-    setProcessingWithdrawal(true);
+    setProcessingWithdrawal(true)
     try {
-      const { data, error } = await supabase.rpc('reverse_withdrawal', {
+      const { data, error } = await supabase.rpc('reverse_agent_withdrawal', {
         p_withdrawal_id: selectedWithdrawal.id,
-        p_admin_notes: reversalJustification,
-        p_admin_user_id: currentUser?.id
-      });
+        p_admin_notes: adminNotes,
+        p_reversal_reason: reversalJustification,
+        p_admin_user_id: currentUser.id
+      })
 
       if (error) {
-        console.error('Erro ao estornar saque:', error);
-        toast.error('Erro ao estornar saque');
-        return;
+        console.error('Erro ao estornar saque:', error)
+        toast.error('Erro ao estornar saque')
+        return
       }
 
       if (data.success) {
-        toast.success('Saque estornado com sucesso', {
-          description: `R$ ${data.amount_reversed.toFixed(2)} devolvidos para ${data.user_email}`
-        });
-        closeWithdrawalModal();
-        setSelectedWithdrawal(null);
-        setAdminNotes('');
-        setReversalJustification('');
-        loadPendingWithdrawals();
+                 toast.success('Saque estornado com sucesso', {
+           description: `R$ ${data.amount_reversed.toFixed(2)} devolvidos para ${data.user_email}`
+         })
+         closeWithdrawalDetails()
+         loadPendingWithdrawals()
       } else {
         toast.error('Erro ao estornar saque', {
           description: data.error || 'Erro desconhecido'
-        });
+        })
       }
     } catch (error) {
-      console.error('Erro:', error);
-      toast.error('Erro inesperado ao estornar saque');
+      console.error('Erro:', error)
+      toast.error('Erro inesperado ao estornar saque')
     } finally {
-      setProcessingWithdrawal(false);
+      setProcessingWithdrawal(false)
     }
-  };
+  }
 
   // Filtrar agentes
   const filteredAgents = agents.filter(agent => 
@@ -447,612 +372,496 @@ export default function AgentsPage() {
   const totalCommissions = agents.reduce((sum, a) => sum + a.total_commissions_generated, 0)
   const totalReferrals = agents.reduce((sum, a) => sum + a.total_referrals, 0)
 
-  // Header sem ações adicionais
-  const additionalActions = null
-
   return (
-    <div className="min-h-screen bg-gray-950">
-      <AdminHeader currentUser={currentUser} additionalActions={additionalActions} />
+    <div className="bg-black min-h-screen text-white">
+      {/* Admin Header */}
+      <AdminHeader 
+        currentUser={currentUser}
+        additionalActions={
+          <Button
+            onClick={openCreateModal}
+            className="bg-purple-500/20 border border-purple-500/50 text-purple-400 hover:bg-purple-500/30 font-mono"
+            variant="outline"
+            size="sm"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            CRIAR_AGENTE
+          </Button>
+        }
+      />
 
-      {/* Conteúdo */}
-      <main className="max-w-7xl mx-auto p-6">
-        <div className="space-y-6">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                <Brain className="h-7 w-7 text-purple-400" />
-                Gerenciamento de Agentes
-              </h1>
-              <p className="text-gray-400">Controle de agentes e suas comissões personalizadas</p>
-            </div>
-            <Button 
-              onClick={openCreateModal}
-              className="bg-purple-600 hover:bg-purple-700"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Criar Agente
-            </Button>
-          </div>
+      {/* Conteúdo da página */}
+      <div className="max-w-7xl mx-auto p-6 space-y-6">
+        {/* Título da página */}
+        <div>
+          <h1 className="text-3xl font-bold text-green-400 font-mono mb-2">
+            AGENTS_MANAGER
+          </h1>
+          <p className="text-gray-400 font-mono text-sm">
+            {`// Sistema de gestão de agentes e comissões`}
+          </p>
+        </div>
 
-          {/* Estatísticas */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <Card className="bg-gray-900 border-gray-800">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-purple-500/20 rounded-lg">
-                    <Brain className="h-6 w-6 text-purple-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-400">Total de Agentes</p>
-                    <p className="text-2xl font-bold text-white">{totalAgents}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gray-900 border-gray-800">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-green-500/20 rounded-lg">
-                    <Activity className="h-6 w-6 text-green-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-400">Agentes Ativos</p>
-                    <p className="text-2xl font-bold text-white">{activeAgents}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gray-900 border-gray-800">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-500/20 rounded-lg">
-                    <Users className="h-6 w-6 text-blue-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-400">Total Indicações</p>
-                    <p className="text-2xl font-bold text-white">{totalReferrals}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gray-900 border-gray-800">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-yellow-500/20 rounded-lg">
-                    <DollarSign className="h-6 w-6 text-yellow-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-400">Comissões Geradas</p>
-                    <p className="text-2xl font-bold text-white">R$ {totalCommissions.toFixed(2)}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Saques Pendentes */}
-          {pendingWithdrawals.length > 0 && (
-            <Card className="bg-gray-900 border-orange-500/30">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-orange-400 flex items-center gap-2">
-                      <AlertTriangle className="h-5 w-5" />
-                      Saques Pendentes
-                    </CardTitle>
-                    <CardDescription className="text-gray-400">
-                      {pendingWithdrawals.length} solicitação(ões) aguardando processamento
-                    </CardDescription>
-                  </div>
-                  <Button
-                    onClick={loadPendingWithdrawals}
-                    variant="outline"
-                    size="sm"
-                    disabled={loadingWithdrawals}
-                    className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
-                  >
-                    {loadingWithdrawals ? 'Carregando...' : 'Atualizar'}
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {pendingWithdrawals.map((withdrawal) => (
-                    <div
-                      key={withdrawal.id}
-                      className="flex items-center justify-between p-4 rounded-lg bg-orange-500/5 border border-orange-500/20"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-2 h-2 rounded-full bg-orange-400" />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-white">{withdrawal.user_email}</span>
-                            <Badge variant="outline" className="text-xs border-orange-500/50 text-orange-400">
-                              {withdrawal.agent_code}
-                            </Badge>
-                          </div>
-                          <div className="text-sm text-gray-400 mt-1">
-                            R$ {withdrawal.amount.toFixed(2)} • {withdrawal.withdrawal_type === 'crypto' ? `${withdrawal.crypto_type || 'CRYPTO'}` : `PIX ${withdrawal.pix_key_type?.toUpperCase() || ''}`} • {new Date(withdrawal.created_at).toLocaleDateString('pt-BR')}
-                          </div>
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openWithdrawalDetails(withdrawal)}
-                        className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
-                      >
-                        Processar
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Filtros */}
-          <Card className="bg-gray-900 border-gray-800">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Buscar por email ou código..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 bg-gray-800 border-gray-700"
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Lista de Agentes */}
-          <Card className="bg-gray-900 border-gray-800">
-            <CardHeader>
-              <CardTitle className="text-white">Lista de Agentes</CardTitle>
-              <CardDescription className="text-gray-400">
-                Agentes do sistema com taxas individuais. Agentes inativos bloqueiam novos cadastros e não geram comissões.
-              </CardDescription>
+        {/* Cards de Estatísticas */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="border-purple-500/30 bg-gray-900/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-purple-400 font-mono text-sm">
+                <Brain className="h-4 w-4" />
+                TOTAL_AGENTES
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              {loading ? (
-                <div className="text-center py-8">
-                  <p className="text-gray-400">Carregando agentes...</p>
+              <div className="text-2xl font-bold text-purple-400 font-mono">
+                {totalAgents}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-green-500/30 bg-gray-900/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-green-400 font-mono text-sm">
+                <Activity className="h-4 w-4" />
+                AGENTES_ATIVOS
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-400 font-mono">
+                {activeAgents}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-blue-500/30 bg-gray-900/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-blue-400 font-mono text-sm">
+                <Users className="h-4 w-4" />
+                TOTAL_INDICAÇÕES
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-blue-400 font-mono">
+                {totalReferrals}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-yellow-500/30 bg-gray-900/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-yellow-400 font-mono text-sm">
+                <DollarSign className="h-4 w-4" />
+                COMISSÕES_TOTAL
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-yellow-400 font-mono">
+                R$ {totalCommissions.toFixed(2)}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Saques Pendentes */}
+        {pendingWithdrawals.length > 0 && (
+          <Card className="border-orange-500/30 bg-gray-900/50">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-orange-400 flex items-center gap-2 font-mono">
+                    <AlertTriangle className="h-5 w-5" />
+                    SAQUES_PENDENTES ({pendingWithdrawals.length})
+                  </CardTitle>
+                  <CardDescription className="text-gray-400 font-mono text-xs">
+                    {`// Solicitações aguardando processamento`}
+                  </CardDescription>
                 </div>
-              ) : filteredAgents.length === 0 ? (
-                <div className="text-center py-8">
-                  <Brain className="h-12 w-12 text-gray-600 mx-auto mb-4" />
-                  <p className="text-gray-400">
-                    {searchTerm ? 'Nenhum agente encontrado' : 'Nenhum agente cadastrado'}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {filteredAgents.map((agent) => (
-                    <div
-                      key={agent.id}
-                      className="flex items-center justify-between p-4 rounded-lg bg-gray-800/50 border border-gray-700"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={`w-3 h-3 rounded-full ${agent.is_active ? 'bg-green-400' : 'bg-gray-500'}`} />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-medium text-white">{agent.email}</h3>
-                            <Badge variant="outline" className="text-xs">
-                              {agent.agent_code}
-                            </Badge>
-                            {!agent.is_active && (
-                              <Badge variant="destructive" className="text-xs">
-                                Inativo
-                              </Badge>
-                            )}
+                <Button
+                  onClick={loadPendingWithdrawals}
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingWithdrawals}
+                  className="bg-orange-500/20 border border-orange-500/50 text-orange-400 hover:bg-orange-500/30 font-mono"
+                >
+                  {loadingWithdrawals ? 'CARREGANDO...' : 'ATUALIZAR'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {pendingWithdrawals.map((withdrawal) => (
+                  <div
+                    key={withdrawal.id}
+                    className="border border-orange-500/50 rounded-lg p-4 bg-orange-500/5 hover:bg-orange-500/10 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-2 h-2 rounded-full bg-orange-400" />
+                          <div className="text-white font-mono font-semibold">
+                            {withdrawal.user_email}
                           </div>
-                          <div className="flex items-center gap-4 mt-1 text-sm text-gray-400">
-                            <span>Comissão: {agent.commission_rate}%</span>
-                            <span>Indicações: {agent.total_referrals}</span>
-                            <span>Gerado: R$ {agent.total_commissions_generated.toFixed(2)}</span>
-                            {!agent.is_active && (
-                              <span className="text-red-400 font-medium">• Bloqueia cadastros</span>
-                            )}
+                          <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 font-mono text-xs">
+                            {withdrawal.agent_code}
+                          </Badge>
+                        </div>
+                        
+                        <div className="text-xs font-mono text-gray-400 mb-2">
+                          Tipo: {withdrawal.withdrawal_type === 'crypto' ? `${withdrawal.crypto_type || 'CRYPTO'}` : `PIX ${withdrawal.pix_key_type?.toUpperCase() || ''}`}
+                        </div>
+
+                        <div className="text-sm">
+                          <span className="text-gray-400">Solicitado em:</span>
+                          <div className="text-gray-300 font-mono text-xs">
+                            {new Date(withdrawal.created_at).toLocaleString('pt-BR')}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="text-right ml-4">
+                        <div className="text-orange-400 font-bold font-mono text-lg">
+                          R$ {withdrawal.amount.toFixed(2)}
+                        </div>
+                        <div className="text-gray-400 font-mono text-xs mt-1">
+                          valor solicitado
+                        </div>
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => toggleAgentStatus(agent.agent_code, agent.is_active)}
-                          className={agent.is_active ? 'text-red-400 hover:bg-red-400/10' : 'text-green-400 hover:bg-green-400/10'}
+                          onClick={() => openWithdrawalDetails(withdrawal)}
+                          className="mt-2 border-orange-500/50 text-orange-400 hover:bg-orange-500/10 font-mono"
                         >
-                          {agent.is_active ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openEditAgentModal(agent)}
-                          className="text-blue-400 hover:bg-blue-400/10"
-                        >
-                          <Edit3 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => removeAgent(agent)}
-                          className="text-red-400 hover:bg-red-400/10"
-                        >
-                          <Trash2 className="h-4 w-4" />
+                          PROCESSAR
                         </Button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
+        )}
 
-
-        </div>
-      </main>
-
-      {/* Modal Criar Agente */}
-      <Modal isOpen={isCreateModalOpen} onClose={closeCreateModal}>
-        <div className="p-6">
-          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-            <Plus className="h-5 w-5" />
-            Criar Novo Agente
-          </h2>
-          
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="user-search" className="text-white">Buscar Usuário</Label>
-              <div className="relative">
-                <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${
-                  userSearchTerm.length >= 2 ? 'text-purple-400' : 'text-gray-400'
-                }`} />
-                <Input
-                  id="user-search"
-                  type="text"
-                  placeholder="Digite o email do usuário..."
-                  value={userSearchTerm}
-                  onChange={(e) => {
-                    setUserSearchTerm(e.target.value)
-                    setSelectedUserId('') // Limpar seleção quando buscar
-                  }}
-                  className={`pl-10 bg-gray-800 border-gray-700 text-white ${
-                    userSearchTerm.length >= 2 ? 'border-purple-500/50' : ''
-                  }`}
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="user-select" className="text-white">Usuário</Label>
-              <select
-                id="user-select"
-                value={selectedUserId}
-                onChange={(e) => setSelectedUserId(e.target.value)}
-                className="w-full mt-1 p-2 bg-gray-800 border border-gray-700 rounded-md text-white"
-                disabled={filteredAvailableUsers.length === 0}
-              >
-                <option value="">
-                  {userSearchTerm.length < 2 
-                    ? 'Digite pelo menos 2 caracteres para buscar'
-                    : filteredAvailableUsers.length === 0 
-                      ? 'Nenhum usuário encontrado'
-                      : 'Selecione um usuário'
-                  }
-                </option>
-                {filteredAvailableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.email}
-                  </option>
-                ))}
-              </select>
-              {userSearchTerm.length >= 2 ? (
-                <p className="text-xs text-gray-400 mt-1">
-                  {filteredAvailableUsers.length > 0 
-                    ? `${filteredAvailableUsers.length} usuário(s) encontrado(s)`
-                    : 'Nenhum usuário encontrado'
-                  }
-                </p>
-              ) : (
-                <p className="text-xs text-gray-500 mt-1">
-                  {users.length} usuário(s) disponível(is) para se tornar agente
-                </p>
-              )}
-            </div>
-
-            <div>
-              <Label htmlFor="commission-rate" className="text-white">Taxa de Comissão (%)</Label>
+        {/* Busca */}
+        <Card className="border-gray-700/30 bg-gray-900/50">
+          <CardContent className="p-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
-                id="commission-rate"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={commissionRate}
-                onChange={(e) => setCommissionRate(e.target.value)}
-                className="bg-gray-800 border-gray-700 text-white"
-                placeholder="50.00"
+                placeholder="Buscar por email ou código do agente..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 bg-gray-800 border-gray-600 text-white font-mono"
               />
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          <div className="flex justify-end gap-2 mt-6">
-            <Button 
-              variant="outline" 
-              onClick={() => {
-                closeCreateModal()
-                setSelectedUserId('')
-                setCommissionRate('50.00')
-                setUserSearchTerm('')
-              }}
-            >
-              Cancelar
-            </Button>
-            <Button 
-              onClick={createAgent} 
-              className="bg-purple-600 hover:bg-purple-700"
-              disabled={!selectedUserId || !commissionRate}
-            >
-              Criar Agente
-            </Button>
+        {/* Lista de Agentes */}
+        <Card className="border-gray-700/30 bg-gray-900/50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-white font-mono">
+              <Brain className="h-5 w-5" />
+              AGENTES_SISTEMA ({filteredAgents.length})
+            </CardTitle>
+            <CardDescription className="text-gray-400 font-mono text-xs">
+              {`// Sistema de agentes e comissões personalizadas`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="text-center py-8">
+                <RefreshCw className="h-8 w-8 animate-spin text-purple-400 mx-auto mb-4" />
+                <p className="text-gray-400 font-mono">Carregando agentes...</p>
+              </div>
+            ) : filteredAgents.length === 0 ? (
+              <div className="text-center py-8">
+                <Brain className="h-12 w-12 text-gray-500 mx-auto mb-4" />
+                <p className="text-gray-400 font-mono">
+                  {searchTerm ? 'NENHUM_AGENTE_ENCONTRADO' : 'NENHUM_AGENTE_CADASTRADO'}
+                </p>
+                <p className="text-gray-500 font-mono text-xs mt-2">
+                  {`// ${searchTerm ? 'Refine sua busca' : 'Clique em CRIAR_AGENTE para começar'}`}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {filteredAgents.map((agent) => (
+                  <div
+                    key={agent.id}
+                    className="border border-gray-700/50 rounded-lg p-4 hover:bg-gray-800/30 transition-colors"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className={`w-3 h-3 rounded-full ${agent.is_active ? 'bg-green-400' : 'bg-gray-500'}`} />
+                          <div className="text-white font-mono font-semibold">
+                            {agent.email}
+                          </div>
+                          <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30 font-mono text-xs">
+                            {agent.agent_code}
+                          </Badge>
+                          {!agent.is_active && (
+                            <Badge className="bg-red-500/20 text-red-400 border-red-500/30 font-mono text-xs">
+                              INATIVO
+                            </Badge>
+                          )}
+                        </div>
+                        
+                        <div className="grid grid-cols-3 gap-4 text-sm">
+                          <div>
+                            <span className="text-gray-400">Taxa comissão:</span>
+                            <div className="text-purple-400 font-mono text-sm font-bold">
+                              {agent.commission_rate}%
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-gray-400">Indicações:</span>
+                            <div className="text-blue-400 font-mono text-sm font-bold">
+                              {agent.total_referrals}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-gray-400">Cadastrado em:</span>
+                            <div className="text-gray-300 font-mono text-xs">
+                              {new Date(agent.created_at).toLocaleDateString('pt-BR')}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right ml-4">
+                        <div className="text-yellow-400 font-bold font-mono text-lg">
+                          R$ {agent.total_commissions_generated.toFixed(2)}
+                        </div>
+                        <div className="text-gray-400 font-mono text-xs mt-1">
+                          comissões geradas
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openEditAgentModal(agent)}
+                            className="border-gray-600 text-gray-300 hover:bg-gray-700 font-mono"
+                          >
+                            <Edit3 className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => deleteAgent(agent.id)}
+                            className="border-red-500/50 text-red-400 hover:bg-red-500/10 font-mono"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Modais */}
+      <Modal
+        isOpen={isCreateModalOpen}
+        onClose={closeCreateModal}
+        title="Criar Novo Agente"
+        type="info"
+      >
+        <div className="space-y-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="user-search" className="text-white font-mono">Buscar Usuário</Label>
+            <Input
+              id="user-search"
+              type="text"
+              value={userSearchTerm}
+              onChange={(e) => setUserSearchTerm(e.target.value)}
+              placeholder="Digite o email do usuário..."
+              className="bg-gray-800 border-gray-700 text-white font-mono"
+            />
+            {filteredAvailableUsers.length > 0 && (
+              <div className="max-h-32 overflow-y-auto border border-gray-700 rounded bg-gray-800">
+                {filteredAvailableUsers.map((user) => (
+                  <div
+                    key={user.id}
+                    className="p-2 hover:bg-gray-700 cursor-pointer text-white font-mono text-sm"
+                    onClick={() => {
+                      setSelectedUserId(user.id)
+                      setUserSearchTerm(user.email)
+                    }}
+                  >
+                    {user.email}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+          <div className="grid gap-2">
+            <Label htmlFor="commission-rate" className="text-white font-mono">Taxa de Comissão (%)</Label>
+            <Input
+              id="commission-rate"
+              type="number"
+              value={commissionRate}
+              onChange={(e) => setCommissionRate(e.target.value)}
+              placeholder="Ex: 50.00"
+              className="bg-gray-800 border-gray-700 text-white font-mono"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={closeCreateModal} disabled={loading}>
+            CANCELAR
+          </Button>
+          <Button onClick={createAgent} disabled={loading || !selectedUserId}>
+            {loading ? 'CRIANDO...' : 'CRIAR_AGENTE'}
+          </Button>
         </div>
       </Modal>
 
-      {/* Modal Editar Agente */}
-      <Modal isOpen={isEditModalOpen} onClose={closeEditModal}>
-        <div className="p-6">
-          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-            <Edit3 className="h-5 w-5" />
-            Editar Agente
-          </h2>
-          
-          {editingAgent && (
-            <div className="space-y-4">
-              <div>
-                <Label className="text-white">Email</Label>
-                <Input
-                  value={editingAgent.email}
-                  readOnly
-                  className="bg-gray-800 border-gray-700 text-gray-400"
-                />
-              </div>
-
-              <div>
-                <Label className="text-white">Código do Agente</Label>
-                <Input
-                  value={editingAgent.agent_code}
-                  readOnly
-                  className="bg-gray-800 border-gray-700 text-gray-400"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="edit-commission-rate" className="text-white">Taxa de Comissão (%)</Label>
-                <Input
-                  id="edit-commission-rate"
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={commissionRate}
-                  onChange={(e) => setCommissionRate(e.target.value)}
-                  className="bg-gray-800 border-gray-700 text-white"
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="flex justify-end gap-2 mt-6">
-            <Button variant="outline" onClick={closeEditModal}>
-              Cancelar
-            </Button>
-            <Button onClick={updateAgent} className="bg-blue-600 hover:bg-blue-700">
-              Salvar Alterações
-            </Button>
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={closeEditModal}
+        title={`Editar Agente: ${editingAgent?.email || ''}`}
+        type="info"
+      >
+        <div className="space-y-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="edit-commission-rate" className="text-white font-mono">Taxa de Comissão (%)</Label>
+            <Input
+              id="edit-commission-rate"
+              type="number"
+              value={commissionRate}
+              onChange={(e) => setCommissionRate(e.target.value)}
+              placeholder="Ex: 50.00"
+              className="bg-gray-800 border-gray-700 text-white font-mono"
+            />
           </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={closeEditModal} disabled={loading}>
+            CANCELAR
+          </Button>
+          <Button onClick={updateAgent} disabled={loading}>
+            {loading ? 'SALVANDO...' : 'SALVAR_ALTERAÇÕES'}
+          </Button>
         </div>
       </Modal>
 
-      {/* Modal Processar Saque */}
-      <Modal 
-        isOpen={isWithdrawalModalOpen} 
-        onClose={() => {
-          closeWithdrawalModal()
-          setSelectedWithdrawal(null)
-          setAdminNotes('')
-          setReversalJustification('')
-        }}
-        title="Processar Saque"
-        size="lg"
+      <Modal
+        isOpen={isWithdrawalModalOpen}
+        onClose={closeWithdrawalDetails}
+        title={`Processar Saque: ${selectedWithdrawal?.user_email || ''}`}
+        type="warning"
       >
         {selectedWithdrawal && (
           <div className="space-y-4 py-4">
-            {/* Informações do Saque */}
-            <div className="grid gap-2">
-              <Label className="text-white">Informações do Saque</Label>
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <span className="text-gray-400">ID:</span>
-                    <span className="text-white ml-2">#{selectedWithdrawal.id.slice(0, 8)}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">Status:</span>
-                    <Badge variant="outline" className="ml-2 border-orange-500/50 text-orange-400">
-                      {selectedWithdrawal.status.toUpperCase()}
-                    </Badge>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">Agente:</span>
-                    <span className="text-white ml-2">{selectedWithdrawal.user_email}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">Código:</span>
-                    <span className="text-white ml-2">{selectedWithdrawal.agent_code}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">Data:</span>
-                    <span className="text-white ml-2">{new Date(selectedWithdrawal.created_at).toLocaleDateString('pt-BR')}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">Tipo:</span>
-                    <span className="text-white ml-2">
-                      {selectedWithdrawal.withdrawal_type === 'crypto' 
-                        ? selectedWithdrawal.crypto_type || 'CRYPTO' 
-                        : 'PIX'}
-                    </span>
-                  </div>
+            <div className="bg-gray-800 rounded-lg p-4 space-y-2">
+              <div className="flex justify-between">
+                <span className="text-gray-400 font-mono">Valor:</span>
+                <span className="text-white font-mono font-bold">R$ {selectedWithdrawal.amount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400 font-mono">Taxa:</span>
+                <span className="text-white font-mono">R$ {selectedWithdrawal.fee_amount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400 font-mono">Valor líquido:</span>
+                <span className="text-green-400 font-mono font-bold">R$ {selectedWithdrawal.net_amount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400 font-mono">Tipo:</span>
+                <span className="text-white font-mono">
+                  {selectedWithdrawal.withdrawal_type === 'crypto' ? `${selectedWithdrawal.crypto_type}` : 'PIX'}
+                </span>
+              </div>
+              {selectedWithdrawal.withdrawal_type === 'crypto' ? (
+                <div className="flex justify-between">
+                  <span className="text-gray-400 font-mono">Carteira:</span>
+                  <span className="text-white font-mono text-xs break-all">{selectedWithdrawal.wallet_address}</span>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400 font-mono">Tipo PIX:</span>
+                    <span className="text-white font-mono">{selectedWithdrawal.pix_key_type?.toUpperCase()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400 font-mono">Chave:</span>
+                    <span className="text-white font-mono">{selectedWithdrawal.pix_key}</span>
+                  </div>
+                  {selectedWithdrawal.full_name && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 font-mono">Nome:</span>
+                      <span className="text-white font-mono">{selectedWithdrawal.full_name}</span>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
-            {/* Valores */}
             <div className="grid gap-2">
-              <Label className="text-white">Valores</Label>
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm">
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <span className="text-gray-400">Solicitado:</span>
-                    <span className="text-green-400 ml-2 font-medium">R$ {selectedWithdrawal.amount.toFixed(2)}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">Taxa:</span>
-                    <span className="text-red-400 ml-2">-R$ {selectedWithdrawal.fee_amount.toFixed(2)}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">Líquido:</span>
-                    <span className="text-white ml-2 font-medium">R$ {selectedWithdrawal.net_amount.toFixed(2)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Dados de Pagamento */}
-            <div className="grid gap-2">
-              <Label className="text-white">Dados de Pagamento</Label>
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm">
-                {selectedWithdrawal.withdrawal_type === 'crypto' ? (
-                  <div className="space-y-2">
-                    <div>
-                      <span className="text-gray-400">Cripto:</span>
-                      <span className="text-white ml-2">{selectedWithdrawal.crypto_type}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">Wallet:</span>
-                      <span className="text-white ml-2 font-mono text-xs break-all">{selectedWithdrawal.wallet_address}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div>
-                      <span className="text-gray-400">PIX:</span>
-                      <span className="text-white ml-2">{selectedWithdrawal.pix_key}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">Nome:</span>
-                      <span className="text-white ml-2">{selectedWithdrawal.full_name}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">CPF:</span>
-                      <span className="text-white ml-2">{selectedWithdrawal.cpf}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Notas do Admin */}
-            <div className="grid gap-2">
-              <Label htmlFor="admin-notes" className="text-white">Notas do Administrador</Label>
-              <textarea
+              <Label htmlFor="admin-notes" className="text-white font-mono">Observações do Admin</Label>
+              <Input
                 id="admin-notes"
+                type="text"
                 value={adminNotes}
                 onChange={(e) => setAdminNotes(e.target.value)}
                 placeholder="Observações sobre o processamento..."
-                className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500 rounded-lg p-3 text-sm"
-                rows={2}
+                className="bg-gray-800 border-gray-700 text-white font-mono"
               />
             </div>
 
-            {/* Estorno (só para saques completed ou failed) */}
-            {(selectedWithdrawal.status === 'completed' || selectedWithdrawal.status === 'failed') && (
+            {selectedWithdrawal.withdrawal_type === 'crypto' && (
               <div className="grid gap-2">
-                <Label className="text-yellow-400">Estorno de Saque</Label>
-                <div className="bg-yellow-500/5 border border-yellow-500/30 rounded-lg p-3">
-                  <p className="text-sm text-gray-400 mb-2">
-                    Devolverá R$ {selectedWithdrawal.amount.toFixed(2)} para o saldo do agente.
-                  </p>
-                  <textarea
-                    value={reversalJustification}
-                    onChange={(e) => setReversalJustification(e.target.value)}
-                    placeholder="Justificativa obrigatória para o estorno..."
-                    className="w-full bg-gray-800 border-gray-700 text-white placeholder:text-gray-500 rounded-lg p-3 text-sm"
-                    rows={2}
-                  />
-                </div>
+                <Label htmlFor="reversal-justification" className="text-white font-mono">Justificativa para Estorno</Label>
+                <Input
+                  id="reversal-justification"
+                  type="text"
+                  value={reversalJustification}
+                  onChange={(e) => setReversalJustification(e.target.value)}
+                  placeholder="Motivo do estorno (obrigatório para crypto)..."
+                  className="bg-gray-800 border-gray-700 text-white font-mono"
+                />
               </div>
             )}
           </div>
         )}
-
-        <div className="flex justify-between gap-2">
-          <Button
-            variant="outline"
-            onClick={() => {
-              closeWithdrawalModal()
-              setSelectedWithdrawal(null)
-              setAdminNotes('')
-              setReversalJustification('')
-            }}
-            disabled={processingWithdrawal}
-          >
-            Cancelar
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={closeWithdrawalDetails} disabled={processingWithdrawal}>
+            CANCELAR
           </Button>
-          
-          <div className="flex gap-2">
-            {/* Estorno */}
-            {selectedWithdrawal && (selectedWithdrawal.status === 'completed' || selectedWithdrawal.status === 'failed') && (
+          {selectedWithdrawal?.withdrawal_type === 'crypto' ? (
+            <Button
+              onClick={reverseWithdrawal}
+              disabled={processingWithdrawal || !reversalJustification.trim()}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {processingWithdrawal ? 'PROCESSANDO...' : 'ESTORNAR'}
+            </Button>
+          ) : (
+            <>
               <Button
                 onClick={reverseWithdrawal}
-                disabled={processingWithdrawal || !reversalJustification.trim()}
-                className="bg-yellow-600 hover:bg-yellow-700"
+                disabled={processingWithdrawal}
+                variant="outline"
+                className="border-red-500 text-red-400 hover:bg-red-500/10"
               >
-                {processingWithdrawal ? 'Estornando...' : 'Estornar'}
+                {processingWithdrawal ? 'PROCESSANDO...' : 'ESTORNAR'}
               </Button>
-            )}
-            
-            {/* Ações para saques pendentes */}
-            {selectedWithdrawal && selectedWithdrawal.status === 'pending' && (
-              <>
-                <Button
-                  onClick={() => processWithdrawal('failed', 'Saque rejeitado pelo administrador')}
-                  disabled={processingWithdrawal}
-                  className="bg-red-600 hover:bg-red-700"
-                >
-                  {processingWithdrawal ? 'Processando...' : 'Rejeitar'}
-                </Button>
-                <Button
-                  onClick={() => processWithdrawal('completed')}
-                  disabled={processingWithdrawal}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  {processingWithdrawal ? 'Processando...' : 'Aprovar'}
-                </Button>
-              </>
-            )}
-          </div>
+              <Button
+                onClick={approveWithdrawal}
+                disabled={processingWithdrawal}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {processingWithdrawal ? 'PROCESSANDO...' : 'APROVAR'}
+              </Button>
+            </>
+          )}
         </div>
       </Modal>
     </div>
   )
-} 
+}

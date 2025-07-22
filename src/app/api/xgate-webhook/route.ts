@@ -98,7 +98,7 @@ async function processPaymentConfirmation(transactionId: string, webhookData: an
       const { error: tokenError } = await supabase.rpc('add_fxa_tokens', {
         p_user_id: transaction.user_id,
         p_amount: tokensToAdd,
-        p_description: `Compra via PIX - R$ ${transaction.amount.toFixed(2)}`,
+        p_description: `Compra de créditos - R$ ${transaction.amount.toFixed(2)} / Preço por token - R$ 0.25`,
         p_payment_reference: transactionId,
         p_metadata: {
           payment_amount_brl: transaction.amount,

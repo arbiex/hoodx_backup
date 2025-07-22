@@ -233,7 +233,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
           <div className="flex justify-center mb-4">
             <Image
               src="/isotipo.svg"
-              alt="HoodX Logo"
+              alt="Roleta Bot Logo"
               width={80}
               height={80}
               className={isInviteOnly ? "opacity-80 filter drop-shadow-lg" : ""}
@@ -251,7 +251,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
           ) : (
             <>
               <h1 className="text-4xl font-bold font-mono text-green-400 mb-2">
-                HOODX<span className="text-green-500">.AI</span>
+                ROLETA<span className="text-green-500">.BOT</span>
               </h1>
               <p className="text-gray-500 font-mono text-sm">
                 // A matemática oculta da sorte
@@ -321,7 +321,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
                     type="email"
                     value={email}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-                    placeholder="user@hoodx.ai"
+                    placeholder="user@roleta.bot"
                     required
                     className="bg-black/50 border-green-500/30 text-green-400 placeholder:text-gray-600 font-mono focus:border-green-400 focus:ring-green-400/20"
                   />
@@ -402,7 +402,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
                     type="email"
                     value={email}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-                    placeholder="user@hoodx.ai"
+                    placeholder="user@roleta.bot"
                     required
                     className="bg-black/50 border-green-500/30 text-green-400 placeholder:text-gray-600 font-mono focus:border-green-400 focus:ring-green-400/20"
                   />

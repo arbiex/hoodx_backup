@@ -12,6 +12,7 @@ interface FxaTransaction {
   user_id: string
   transaction_type: 'credit' | 'debit'
   amount: number
+  amount_brl?: number
   balance_before: number
   balance_after: number
   description?: string
@@ -84,6 +85,7 @@ export function useFxaTokens(userId?: string) {
         .from('fxa_token_transactions')
         .select('*')
         .eq('user_id', userIdToUse)
+        .eq('status', 'completed')
         .order('created_at', { ascending: false })
         .limit(limit)
 
@@ -96,10 +98,12 @@ export function useFxaTokens(userId?: string) {
         user_id: tx.user_id,
         transaction_type: tx.transaction_type,
         amount: Number(tx.amount),
+        amount_brl: tx.amount_brl ? Number(tx.amount_brl) : undefined,
         balance_before: Number(tx.balance_before),
         balance_after: Number(tx.balance_after),
         description: tx.description,
         payment_reference: tx.payment_reference,
+        status: tx.status,
         metadata: tx.metadata,
         created_at: tx.created_at,
         updated_at: tx.updated_at

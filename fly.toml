@@ -1,11 +1,11 @@
-app = "hoodx"
+app = "roleta-bot"
 primary_region = "gru"
 
 [build]
   [build.args]
     NEXT_PUBLIC_SUPABASE_URL = "https://pcwekkqhcipvghvqvvtu.supabase.co"
     NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MDkwNTcsImV4cCI6MjA2Mzk4NTA1N30.s9atBox8lrUba0Cb5qnH_dHTVJQkvwupoS2L6VneXHA"
-    NEXT_PUBLIC_APP_URL = "https://hoodx.ai"
+    NEXT_PUBLIC_APP_URL = "https://roleta.bot"
     NEXT_PUBLIC_CACHE_BUST = "v2"
     NEXT_MATRIXX_AUTHORIZED_IDS = "7a3972f5-d603-4420-af55-4852ba61032e,de8aa205-318b-4890-8731-b2463185c885"
 
@@ -16,7 +16,7 @@ primary_region = "gru"
   NEXT_PUBLIC_CACHE_BUST = "v2"
   NEXT_MATRIXX_AUTHORIZED_IDS = "7a3972f5-d603-4420-af55-4852ba61032e,de8aa205-318b-4890-8731-b2463185c885"
   NEXT_FLY_APP_URL = "https://hoodx.fly.dev"
-  NEXT_PUBLIC_APP_URL = "https://hoodx.ai"
+  NEXT_PUBLIC_APP_URL = "https://roleta.bot"
   SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBjd2Vra3FoY2lwdmdodnF2dnR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODQwOTA1NywiZXhwIjoyMDYzOTg1MDU3fQ.qokqoM6yHAZRj-iEpNR448fI3Br9Q57dYrF_g0LJHOo"
   
   # XGATE Global Payment Gateway
@@ -27,7 +27,7 @@ primary_region = "gru"
 
 [http_service]
   internal_port = 3000
-  force_https = true
+  force_https = false
   auto_stop_machines = true
   auto_start_machines = true
   min_machines_running = 1

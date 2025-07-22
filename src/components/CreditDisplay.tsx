@@ -70,7 +70,7 @@ export default function CreditDisplay() {
             TOKENS_FXA
           </CardTitle>
           <CardDescription className="text-gray-400 font-mono text-xs">
-            {`// Tokens para operar na plataforma`}
+            {`// Compra antecipada do Token FIXA`}
           </CardDescription>
         </CardHeader>
         <CardContent>

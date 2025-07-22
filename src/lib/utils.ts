@@ -39,7 +39,15 @@ export function getBaseUrl(): string {
  * Obtém a URL pública do site (para links de indicação, etc.)
  */
 export function getPublicUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL || 'https://hoodx.ai';
+  return process.env.NEXT_PUBLIC_APP_URL || 'https://roleta.bot';
+}
+
+/**
+ * Obtém um cache buster único baseado na versão do site
+ */
+export function getCacheBuster(): string {
+  const cacheBustEnv = process.env.NEXT_PUBLIC_CACHE_BUST || '0';
+  return `v${cacheBustEnv}-${Date.now()}`;
 }
 
 /**

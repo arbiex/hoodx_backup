@@ -358,7 +358,7 @@ export async function POST(request: NextRequest) {
 
     console.log('✅ Verificação anti-duplicação aprovada - Prosseguindo...')
 
-    const finalDescription = description || `Compra de créditos - R$ ${amount.toFixed(2)}`
+    const finalDescription = description || `Compra de créditos - R$ ${amount.toFixed(2)} / Preço por token - R$ 0.25`
 
     // Verificar se ambiente está configurado
     if (!XGATE_CONFIG.email || !XGATE_CONFIG.password) {

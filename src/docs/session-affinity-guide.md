@@ -166,7 +166,7 @@ grep "SESSION-AFFINITY" logs | grep "Redirecionando"
 ```bash
 FLY_ALLOC_ID=...     # ID único da instância
 FLY_REGION=...       # Região (gru, iad, etc)  
-FLY_APP_NAME=hoodx   # Nome da aplicação
+FLY_APP_NAME=roleta-bot   # Nome da aplicação
 ```
 
 ---

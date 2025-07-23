@@ -405,21 +405,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(freshData);
       
     } else {
-      // 👥 ESTA INSTÂNCIA É FOLLOWER → Servir cache local (pode estar desatualizado)
-      console.log('🔄 [FOLLOWER] Servindo dados do cache local');
-      
-      if (cachedInsights) {
-        const cacheAge = now - lastFetch;
-        console.log(`⚡ [FOLLOWER] Cache local com ${Math.round(cacheAge/1000)}s de idade`);
-        return NextResponse.json(cachedInsights);
-      }
-      
-      // 🚨 FALLBACK: Se follower não tem cache, tentar assumir liderança emergencial
-      console.log('🚨 [FOLLOWER] Sem cache local, tentando liderança emergencial...');
+      // 👥 ESTA INSTÂNCIA NÃO É LEADER → Tentar assumir liderança ou retornar erro
+      console.log('🔄 [NON-LEADER] Tentando assumir liderança...');
       const emergencyLeader = await tryBecomeLeader();
       
       if (emergencyLeader && isLeader) {
-        console.log('🏆 [FOLLOWER→LEADER] Assumiu liderança emergencial');
+        console.log('🏆 [NON-LEADER→LEADER] Assumiu liderança com sucesso');
         const freshData = await fetchFreshInsights();
         if (freshData.success) {
           cachedInsights = freshData;
@@ -429,9 +420,11 @@ export async function POST(request: NextRequest) {
         }
       }
       
+      // Se não conseguiu ser leader, retornar erro para load balancer tentar outra instância
+      console.log('❌ [NON-LEADER] Não conseguiu assumir liderança - redirecionando para Leader');
       return NextResponse.json({
         success: false,
-        error: 'Nenhum dado disponível no cache local'
+        error: 'Esta instância não é leader - tente novamente'
       }, { status: 503 });
     }
     

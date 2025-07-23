@@ -12,6 +12,13 @@ export function middleware(request: NextRequest) {
   
   // 🔗 APLICAR: Sessões pegajosas para rotas BMGBR
   if (pathname.includes('/api/bmgbr')) {
+    
+    // 📊 EXCEÇÃO: Insights compartilhados - SEM session affinity (qualquer instância pode responder)
+    if (pathname === '/api/bmgbr3/insights-shared') {
+      console.log(`📊 [MIDDLEWARE] Endpoint de insights - sem session affinity`);
+      return NextResponse.next();
+    }
+    
     console.log(`🔗 [MIDDLEWARE] Verificando session affinity para: ${pathname}`);
     
     const shouldServe = SimpleSessionAffinity.shouldServeUser(request);

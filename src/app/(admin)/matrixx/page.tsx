@@ -73,7 +73,7 @@ export default function MatrixPage() {
     setLoading(true);
     try {
       // Usar a mesma abordagem das outras páginas admin
-      const { data, error } = await supabase.rpc('get_all_users_admin');
+      const { data, error } = await supabase.rpc('get_users_admin_simple');
       
       if (error) {
         console.error('Erro ao buscar usuários:', error);

@@ -6,12 +6,15 @@ import { Input } from '@/components/ui/input'
 import { Copy, Users, Link as LinkIcon, DollarSign, Crown, Shield, Target, Check, Filter, ChevronDown, ChevronUp, Clock, CreditCard, AlertCircle } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
 import MatrixRain from '@/components/MatrixRain'
 import Modal, { useModal } from '@/components/ui/modal'
 import { useNetwork, NetworkNode } from '@/hooks/useNetwork'
 import { Pagination, PaginationInfo, usePagination } from '@/components/ui/pagination'
+import { WithdrawalModal } from '@/components/WithdrawalModal'
 
 export default function HackerNetworkPage() {
+  const router = useRouter()
   const { 
     networkStats,
     networkNodes,
@@ -23,6 +26,7 @@ export default function HackerNetworkPage() {
   } = useNetwork()
   
   const { isOpen: isFiltersModalOpen, openModal: openFiltersModal, closeModal: closeFiltersModal } = useModal()
+  const [withdrawalModalOpen, setWithdrawalModalOpen] = useState(false)
   
   // Estados para proteção por senha - DESABILITADO para desenvolvimento
   const [isAuthenticated, setIsAuthenticated] = useState(true)
@@ -133,21 +137,21 @@ export default function HackerNetworkPage() {
     } else {
       setPasswordError('Senha incorreta. Tente novamente.')
     }
-  }
+      }
 
-  // Função para fazer logout (limpar autenticação)
-  const handleLogout = () => {
-    setIsAuthenticated(false)
-    localStorage.removeItem('network_authenticated')
-  }
-
-  const commissionRates = [
+    const commissionRates = [
     { level: 1, rate: 50, icon: Crown, description: 'Indicações diretas', color: 'text-yellow-400 border-yellow-500/50' }
   ]
 
   const handleWithdrawalClick = () => {
-    // Navigate to withdrawal page
-    window.location.href = '/withdrawal'
+    const availableBalance = commissionBalance?.commission_balance || 0
+    if (availableBalance < 100) {
+      toast.error('Saldo insuficiente para saque', {
+        description: 'Valor mínimo para saque é R$ 100,00'
+      })
+      return
+    }
+    setWithdrawalModalOpen(true)
   }
 
   const copyInviteLink = () => {
@@ -259,19 +263,11 @@ export default function HackerNetworkPage() {
       
       <div className="relative z-10">
                  {/* Page Title */}
-         <div className="mb-6 flex justify-between items-center">
+         <div className="mb-6">
            <div>
-             <h1 className="text-2xl font-bold text-green-400 font-mono mb-2">REDE.exe</h1>
+             <h1 className="text-2xl font-bold text-green-400 font-mono mb-2">NETWORK</h1>
              <p className="text-gray-400 font-mono text-sm">// Expanda sua rede e ganhe comissões</p>
            </div>
-           <Button
-             onClick={handleLogout}
-             variant="ghost"
-             size="sm"
-             className="text-gray-500 hover:text-red-400 font-mono text-xs"
-           >
-             SAIR
-           </Button>
          </div>
 
          {/* Network Stats Overview */}
@@ -299,7 +295,7 @@ export default function HackerNetworkPage() {
              <CardHeader>
                <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
                  <Users className="h-5 w-5" />
-                 NÓS_ATIVOS
+                 MEMBROS_ATIVOS
                </CardTitle>
                <CardDescription className="text-gray-400 font-mono text-xs">
                  {`// Membros conectados da rede`}
@@ -329,15 +325,27 @@ export default function HackerNetworkPage() {
               <div className="text-3xl font-bold font-mono text-purple-400 mb-2">
                 R$ {commissionBalance?.commission_balance?.toFixed(2) || '0.00'}
               </div>
-              <div className="text-sm text-gray-400 font-mono mb-4">Disponível para saque imediato</div>
-              <Button
-                onClick={handleWithdrawalClick}
-                className="bg-purple-500/20 border border-purple-500/50 text-purple-400 hover:bg-purple-500/30 font-mono px-8 py-3"
-                size="lg"
-              >
-                <DollarSign className="h-5 w-5 mr-2" />
-                SOLICITAR_SAQUE
-              </Button>
+              <div className="text-sm text-gray-400 font-mono mb-1">Disponível para saque imediato</div>
+              <div className="text-xs text-yellow-400 font-mono mb-4">⚠️ Valor mínimo: R$ 100,00</div>
+              <div className="flex gap-3 justify-center">
+                <Button
+                  onClick={handleWithdrawalClick}
+                  className="bg-purple-500/20 border border-purple-500/50 text-purple-400 hover:bg-purple-500/30 font-mono px-8 py-3"
+                  size="lg"
+                >
+                  <DollarSign className="h-5 w-5 mr-2" />
+                  SOLICITAR_SAQUE
+                </Button>
+                <Button
+                  onClick={() => router.push('/withdrawal-history')}
+                  variant="outline"
+                  className="border-gray-600 text-gray-300 hover:bg-gray-700 font-mono px-6 py-3"
+                  size="lg"
+                >
+                  <Clock className="h-5 w-5 mr-2" />
+                  HISTÓRICO
+                </Button>
+              </div>
             </div>
              </CardContent>
            </Card>
@@ -446,7 +454,7 @@ export default function HackerNetworkPage() {
                   <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
                     <DollarSign className="h-5 w-5 text-blue-400 mt-0.5" />
                     <div>
-                      <div className="font-medium font-mono text-blue-400 text-sm">CRÉDITO_INSTANTÂNEO</div>
+                      <div className="font-medium font-mono text-blue-400 text-sm">Crédito instantâneo</div>
                       <div className="text-xs text-gray-400 font-mono mt-1">
                         Comissão é creditada na sua conta imediatamente após a compra
                       </div>
@@ -457,7 +465,7 @@ export default function HackerNetworkPage() {
                   <div className="flex items-start gap-3 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
                     <Clock className="h-5 w-5 text-yellow-400 mt-0.5" />
                     <div>
-                      <div className="font-medium font-mono text-yellow-400 text-sm">TEMPO_SAQUE</div>
+                      <div className="font-medium font-mono text-yellow-400 text-sm">Tempo de processamento</div>
                       <div className="text-xs text-gray-400 font-mono mt-1">
                         Saques são processados em até 24 horas após a solicitação
                       </div>
@@ -468,7 +476,7 @@ export default function HackerNetworkPage() {
                   <div className="flex items-start gap-3 p-3 rounded-lg bg-red-500/5 border border-red-500/20">
                     <Target className="h-5 w-5 text-red-400 mt-0.5" />
                       <div>
-                      <div className="font-medium font-mono text-red-400 text-sm">TAXA_SAQUE</div>
+                      <div className="font-medium font-mono text-red-400 text-sm">Taxa de saque</div>
                       <div className="text-xs text-gray-400 font-mono mt-1">
                         Taxa de processamento de 3% aplicada a todas as solicitações de saque
                       </div>
@@ -479,9 +487,20 @@ export default function HackerNetworkPage() {
                   <div className="flex items-start gap-3 p-3 rounded-lg bg-purple-500/5 border border-purple-500/20">
                     <Shield className="h-5 w-5 text-purple-400 mt-0.5" />
                     <div>
-                      <div className="font-medium font-mono text-purple-400 text-sm">LIMITE_SAQUE</div>
+                      <div className="font-medium font-mono text-purple-400 text-sm">Limite de saque</div>
                       <div className="text-xs text-gray-400 font-mono mt-1">
                         Máximo de uma solicitação de saque por semana por conta
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Minimum Withdrawal */}
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+                    <Target className="h-5 w-5 text-yellow-400 mt-0.5" />
+                    <div>
+                                             <div className="font-medium font-mono text-yellow-400 text-sm">Valor mínimo</div>
+                      <div className="text-xs text-gray-400 font-mono mt-1">
+                        Valor mínimo para solicitação de saque é R$ 100,00
                       </div>
                     </div>
                   </div>
@@ -709,6 +728,13 @@ export default function HackerNetworkPage() {
             </div>
         </div>
         </Modal>
+
+        {/* Withdrawal Modal */}
+        <WithdrawalModal
+          isOpen={withdrawalModalOpen}
+          onClose={() => setWithdrawalModalOpen(false)}
+          availableBalance={commissionBalance?.commission_balance || 0}
+        />
       </div>
     </div>
   )

@@ -72,7 +72,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
     joined_date: string;
   } | null>(null)
   
-  // const { getSponsorInfo, registerWithReferral } = useNetwork() // Removido temporariamente
+  const { getSponsorInfo } = useNetwork()
   const hasShownToast = useRef(false)
 
   // Check for referral code on mount
@@ -103,37 +103,37 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
       // Automatically switch to register mode when referral code is detected
       setIsLogin(false)
       // Get sponsor info
-      // getSponsorInfo(refCode).then(sponsor => { // Removido temporariamente
-      //   if (sponsor) {
-      //     setSponsorInfo(sponsor)
-      //     if (isInviteOnly && !hasShownToast.current) {
-      //       toast.success("CONVITE_ACEITO", {
-      //         description: `Bem-vindo ao círculo interno. Convidado por ${sponsor.email}`
-      //       })
-      //       hasShownToast.current = true
-      //     } else if (!isInviteOnly && !hasShownToast.current) {
-      //       toast.success("INDICAÇÃO_DETECTADA", {
-      //         description: `Você foi convidado por ${sponsor.email}`
-      //       })
-      //       hasShownToast.current = true
-      //     }
-      //   } else if (isInviteOnly && !hasShownToast.current) {
-      //     toast.error("CONVITE_INVÁLIDO", {
-      //       description: "Este código de convite não é válido"
-      //     })
-      //     hasShownToast.current = true
-      //   }
-      // }).catch(error => { // Removido temporariamente
-      //   console.error('Error in getSponsorInfo:', error)
-      //   if (isInviteOnly && !hasShownToast.current) {
-      //     toast.error("CONVITE_INVÁLIDO", {
-      //       description: "Erro ao validar código de convite"
-      //     })
-      //     hasShownToast.current = true
-      //   }
-      // })
+      getSponsorInfo(refCode).then(sponsor => {
+        if (sponsor) {
+          setSponsorInfo(sponsor)
+          if (isInviteOnly && !hasShownToast.current) {
+            toast.success("CONVITE_ACEITO", {
+              description: `Bem-vindo ao círculo interno. Convidado por ${sponsor.email}`
+            })
+            hasShownToast.current = true
+          } else if (!isInviteOnly && !hasShownToast.current) {
+            toast.success("INDICAÇÃO_DETECTADA", {
+              description: `Você foi convidado por ${sponsor.email}`
+            })
+            hasShownToast.current = true
+          }
+        } else if (isInviteOnly && !hasShownToast.current) {
+          toast.error("CONVITE_INVÁLIDO", {
+            description: "Este código de convite não é válido"
+          })
+          hasShownToast.current = true
+        }
+      }).catch(error => {
+        console.error('Error in getSponsorInfo:', error)
+        if (isInviteOnly && !hasShownToast.current) {
+          toast.error("CONVITE_INVÁLIDO", {
+            description: "Erro ao validar código de convite"
+          })
+          hasShownToast.current = true
+        }
+      })
     }
-  }, [initialReferralCode]) // Removido getSponsorInfo e registerWithReferral da dependência
+  }, [initialReferralCode, getSponsorInfo])
 
   const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -183,18 +183,14 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
         // If signup was successful, register the user (with or without referral)
         if (!result.error && result.data?.user) {
           try {
-            // registerWithReferral( // Removido temporariamente
-            //   result.data.user.id,
-            //   email,
-            //   result.data.user.user_metadata?.full_name,
-            //   referralCode || undefined // Pass referral code if exists
-            // )
+            // TODO: Implementar registerWithReferral quando necessário
+            console.log('Usuário registrado com código de referral:', referralCode)
             
-            // if (referralCode && sponsorInfo) { // Removido temporariamente
-            //   toast.success("INDICAÇÃO_REGISTRADA", {
-            //     description: `Conectado à rede de ${sponsorInfo.email}`
-            //   })
-            // }
+            if (referralCode && sponsorInfo) {
+              toast.success("INDICAÇÃO_REGISTRADA", {
+                description: `Conectado à rede de ${sponsorInfo.email}`
+              })
+            }
           } catch (referralError) {
             console.error('Error registering user:', referralError)
             // Don't fail the whole signup for registration errors
@@ -365,25 +361,25 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         const code = e.target.value.toUpperCase()
                         setReferralCode(code)
-                        // getSponsorInfo(code).then(sponsor => { // Removido temporariamente
-                        //   if (sponsor) {
-                        //     setSponsorInfo(sponsor)
-                        //     toast.success("CÓDIGO_VÁLIDO", {
-                        //       description: `Agente encontrado: ${sponsor.email}`
-                        //     })
-                        //   } else {
-                        //     setSponsorInfo(null)
-                        //     toast.error("CÓDIGO_INVÁLIDO", {
-                        //       description: "Código não encontrado ou inativo"
-                        //     })
-                        //   }
-                        // }).catch(error => { // Removido temporariamente
-                        //   console.error('Error in input getSponsorInfo:', error)
-                        //   setSponsorInfo(null)
-                        //   toast.error("ERRO_VALIDAÇÃO", {
-                        //     description: "Erro ao validar código"
-                        //   })
-                        // })
+                        getSponsorInfo(code).then(sponsor => {
+                          if (sponsor) {
+                            setSponsorInfo(sponsor)
+                            toast.success("CÓDIGO_VÁLIDO", {
+                              description: `Agente encontrado: ${sponsor.email}`
+                            })
+                          } else {
+                            setSponsorInfo(null)
+                            toast.error("CÓDIGO_INVÁLIDO", {
+                              description: "Código não encontrado ou inativo"
+                            })
+                          }
+                        }).catch(error => {
+                          console.error('Error in input getSponsorInfo:', error)
+                          setSponsorInfo(null)
+                          toast.error("ERRO_VALIDAÇÃO", {
+                            description: "Erro ao validar código"
+                          })
+                        })
                       }}
                       placeholder="Digite o código de convite"
                       required

@@ -50,6 +50,10 @@ export function WithdrawalModal({ isOpen, onClose, availableBalance }: Withdrawa
 
     const numAmount = parseFloat(amount)
     
+    if (numAmount < 100) {
+      return
+    }
+    
     if (numAmount > availableBalance) {
       return
     }
@@ -79,7 +83,7 @@ export function WithdrawalModal({ isOpen, onClose, availableBalance }: Withdrawa
   }
 
   const isFormValid = () => {
-    if (!amount || parseFloat(amount) <= 0 || parseFloat(amount) > availableBalance) {
+    if (!amount || parseFloat(amount) < 100 || parseFloat(amount) > availableBalance) {
       return false
     }
 
@@ -140,14 +144,20 @@ export function WithdrawalModal({ isOpen, onClose, availableBalance }: Withdrawa
           <Input
             id="amount"
             type="number"
-            min="0"
+            min="100"
             step="0.01"
             max={availableBalance}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
+            placeholder="100.00"
             className="bg-gray-900/50 border-gray-600 text-white font-mono"
           />
+          {parseFloat(amount) > 0 && parseFloat(amount) < 100 && (
+            <div className="flex items-center gap-1 mt-1 text-red-400 text-sm">
+              <AlertCircle className="h-3 w-3" />
+              <span className="font-mono">Valor mínimo R$ 100,00</span>
+            </div>
+          )}
           {parseFloat(amount) > availableBalance && (
             <div className="flex items-center gap-1 mt-1 text-red-400 text-sm">
               <AlertCircle className="h-3 w-3" />
@@ -159,9 +169,22 @@ export function WithdrawalModal({ isOpen, onClose, availableBalance }: Withdrawa
         {/* Cálculo da Taxa */}
         {fee && (
           <div className="text-sm font-mono text-gray-400 -mt-2">
-            Você receberá: <span className="text-green-400 font-bold">R$ {fee.netAmount.toFixed(2)}</span> <span className="text-gray-500 text-xs">(taxa 2%)</span>
+            Você receberá: <span className="text-green-400 font-bold">R$ {fee.netAmount.toFixed(2)}</span> <span className="text-gray-500 text-xs">(taxa 3%)</span>
           </div>
         )}
+
+        {/* Aviso sobre tempo de processamento */}
+        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+          <div className="flex items-start gap-2">
+            <div className="text-yellow-400 mt-0.5">⏱️</div>
+            <div>
+              <div className="text-sm font-mono text-yellow-400 font-semibold">Tempo de processamento</div>
+              <div className="text-xs text-gray-400 font-mono mt-1">
+                Saques são processados em até 24 horas após a solicitação
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Campos PIX */}
         {withdrawalType === 'pix' && (

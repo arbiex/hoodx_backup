@@ -126,19 +126,22 @@ export default function AgentsPage() {
 
   const loadUsers = async () => {
     try {
-      const { data, error } = await supabase.rpc('get_all_users_admin')
+      const { data, error } = await supabase.rpc('get_users_admin_simple')
       
       if (error) {
         console.error('Erro ao carregar usuários:', error)
         return
       }
 
+      // A função RPC retorna um array de usuários diretamente
+      const usersData = Array.isArray(data) ? data : []
+      
       // Filtrar usuários que não são agentes
       const agentUserIds = agents.map(agent => agent.user_id)
-      const availableUsers = (data || []).filter((user: User) => !agentUserIds.includes(user.id))
+      const availableUsers = usersData.filter((user: User) => !agentUserIds.includes(user.id))
       setUsers(availableUsers)
     } catch (error) {
-      console.error('Erro:', error)
+      console.error('Erro ao carregar usuários:', error)
     }
   }
 
@@ -285,32 +288,55 @@ export default function AgentsPage() {
 
     setProcessingWithdrawal(true)
     try {
+      console.log('✅ Iniciando aprovação:', {
+        withdrawal_id: selectedWithdrawal.id,
+        admin_notes: adminNotes,
+        admin_user_id: currentUser.id
+      })
+
       const { data, error } = await supabase.rpc('approve_agent_withdrawal', {
         p_withdrawal_id: selectedWithdrawal.id,
         p_admin_notes: adminNotes,
         p_admin_user_id: currentUser.id
       })
 
+      console.log('📊 Resposta do Supabase:', { data, error })
+
       if (error) {
-        console.error('Erro ao aprovar saque:', error)
-        toast.error('Erro ao aprovar saque')
+        console.error('❌ Erro ao aprovar saque:', {
+          error,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        })
+        toast.error('Erro ao aprovar saque', {
+          description: error.message || error.details || 'Erro na comunicação com o banco'
+        })
         return
       }
 
-      if (data.success) {
-                 toast.success('Saque aprovado com sucesso', {
-           description: `R$ ${data.amount_approved.toFixed(2)} aprovados para ${data.user_email}`
-         })
-         closeWithdrawalDetails()
-         loadPendingWithdrawals()
+      if (data?.success) {
+        toast.success('Saque aprovado com sucesso', {
+          description: `R$ ${data.amount_approved.toFixed(2)} aprovados para ${data.user_email}`
+        })
+        closeWithdrawalDetails()
+        loadPendingWithdrawals()
       } else {
+        console.error('❌ Falha na aprovação:', data)
         toast.error('Erro ao aprovar saque', {
-          description: data.error || 'Erro desconhecido'
+          description: data?.error || 'Falha no processamento da aprovação'
         })
       }
     } catch (error) {
-      console.error('Erro:', error)
-      toast.error('Erro inesperado ao aprovar saque')
+      console.error('💥 Erro inesperado ao aprovar saque:', {
+        error,
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
+        stack: error instanceof Error ? error.stack : undefined
+      })
+      toast.error('Erro inesperado ao aprovar saque', {
+        description: error instanceof Error ? error.message : 'Erro desconhecido'
+      })
     } finally {
       setProcessingWithdrawal(false)
     }
@@ -321,6 +347,13 @@ export default function AgentsPage() {
 
     setProcessingWithdrawal(true)
     try {
+      console.log('🔄 Iniciando estorno:', {
+        withdrawal_id: selectedWithdrawal.id,
+        admin_notes: adminNotes,
+        reversal_reason: reversalJustification,
+        admin_user_id: currentUser.id
+      })
+
       const { data, error } = await supabase.rpc('reverse_agent_withdrawal', {
         p_withdrawal_id: selectedWithdrawal.id,
         p_admin_notes: adminNotes,
@@ -328,26 +361,43 @@ export default function AgentsPage() {
         p_admin_user_id: currentUser.id
       })
 
+      console.log('📊 Resposta do Supabase:', { data, error })
+
       if (error) {
-        console.error('Erro ao estornar saque:', error)
-        toast.error('Erro ao estornar saque')
+        console.error('❌ Erro ao estornar saque:', {
+          error,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        })
+        toast.error('Erro ao estornar saque', {
+          description: error.message || error.details || 'Erro na comunicação com o banco'
+        })
         return
       }
 
-      if (data.success) {
-                 toast.success('Saque estornado com sucesso', {
-           description: `R$ ${data.amount_reversed.toFixed(2)} devolvidos para ${data.user_email}`
-         })
-         closeWithdrawalDetails()
-         loadPendingWithdrawals()
+      if (data?.success) {
+        toast.success('Saque estornado com sucesso', {
+          description: `R$ ${data.amount_reversed.toFixed(2)} devolvidos para ${data.user_email}`
+        })
+        closeWithdrawalDetails()
+        loadPendingWithdrawals()
       } else {
+        console.error('❌ Falha no estorno:', data)
         toast.error('Erro ao estornar saque', {
-          description: data.error || 'Erro desconhecido'
+          description: data?.error || 'Falha no processamento do estorno'
         })
       }
     } catch (error) {
-      console.error('Erro:', error)
-      toast.error('Erro inesperado ao estornar saque')
+      console.error('💥 Erro inesperado ao estornar saque:', {
+        error,
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
+        stack: error instanceof Error ? error.stack : undefined
+      })
+      toast.error('Erro inesperado ao estornar saque', {
+        description: error instanceof Error ? error.message : 'Erro desconhecido'
+      })
     } finally {
       setProcessingWithdrawal(false)
     }

@@ -925,9 +925,7 @@ export default function Dashboard() {
 
           {/* Card de Créditos - Mostrar quando dados carregados */}
           {!isDataLoading && (
-            <div className="mb-4">
-              {/* Card CRÉDITOS - Design centralizado igual ao TOKENS_FXA */}
-              <Card className="border-gray-700/30 backdrop-blur-sm">
+            <Card className="border-gray-700/30 backdrop-blur-sm mb-6">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
                     <Coins className="h-5 w-5" />
@@ -965,76 +963,73 @@ export default function Dashboard() {
                   </div>
                 </CardContent>
               </Card>
-            </div>
           )}
 
           {/* Card de Histórico de Compras de Créditos - Mostrar quando dados carregados */}
           {!isDataLoading && (
-            <div className="mb-4">
-              <Card className="border-green-500/30 backdrop-blur-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
-                    <History className="h-5 w-5" />
-                    HISTÓRICO_COMPRAS
-                  </CardTitle>
-                  <CardDescription className="text-gray-400 font-mono text-xs">
-                    {`// Compras de créditos realizadas`}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {creditsLoadingNew ? (
-                    <div className="text-center py-8">
-                      <div className="text-green-400 font-mono">CARREGANDO_TRANSAÇÕES...</div>
-                    </div>
-                  ) : purchaseTransactions.length === 0 ? (
-                    <div className="text-center py-8">
-                      <div className="text-gray-400 font-mono">NENHUMA_COMPRA_ENCONTRADA</div>
-                      <p className="text-xs text-gray-500 font-mono mt-2">
-                        Suas compras de créditos aparecerão aqui
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3 max-h-80 overflow-y-auto">
-                      {purchaseTransactions.map((transaction) => (
-                        <div
-                          key={transaction.id}
-                          className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg border border-gray-700/50 hover:bg-gray-800/50 transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            {getTransactionIcon(transaction.transaction_type)}
-                            <div>
-                              <div className="font-medium font-mono text-sm text-white">
-                                {transaction.description || 'Compra de Créditos'}
-                              </div>
-                              <div className="text-xs text-gray-400 font-mono">
-                                {formatDate(transaction.created_at)}
-                                {transaction.payment_method && ` • ${transaction.payment_method.toUpperCase()}`}
-                              </div>
+            <Card className="border-gray-700/30 backdrop-blur-sm mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
+                  <History className="h-5 w-5" />
+                  HISTÓRICO_COMPRAS
+                </CardTitle>
+                <CardDescription className="text-gray-400 font-mono text-xs">
+                  {`// Compras de créditos realizadas`}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {creditsLoadingNew ? (
+                  <div className="text-center py-8">
+                    <div className="text-green-400 font-mono">CARREGANDO_TRANSAÇÕES...</div>
+                  </div>
+                ) : purchaseTransactions.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="text-gray-400 font-mono">NENHUMA_COMPRA_ENCONTRADA</div>
+                    <p className="text-xs text-gray-500 font-mono mt-2">
+                      Suas compras de créditos aparecerão aqui
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-80 overflow-y-auto">
+                    {purchaseTransactions.map((transaction) => (
+                      <div
+                        key={transaction.id}
+                        className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg border border-gray-700/50 hover:bg-gray-800/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          {getTransactionIcon(transaction.transaction_type)}
+                          <div>
+                            <div className="font-medium font-mono text-sm text-white">
+                              {transaction.description || 'Compra de Créditos'}
                             </div>
-                          </div>
-                          
-                          <div className="text-right">
-                            <div className="font-bold font-mono text-sm text-green-400">
-                              +{transaction.amount.toFixed(2)}
+                            <div className="text-xs text-gray-400 font-mono">
+                              {formatDate(transaction.created_at)}
+                              {transaction.payment_method && ` • ${transaction.payment_method.toUpperCase()}`}
                             </div>
-                            {transaction.amount_brl && transaction.amount_brl !== transaction.amount && (
-                              <div className="text-xs text-gray-400 font-mono">
-                                Pagou: {formatCurrency(transaction.amount_brl)}
-                              </div>
-                            )}
-                            <Badge 
-                              className="text-xs font-mono mt-1 bg-green-500/20 text-green-400 border-green-500/50"
-                            >
-                              CONCLUÍDA
-                            </Badge>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                        
+                        <div className="text-right">
+                          <div className="font-bold font-mono text-sm text-green-400">
+                            +{transaction.amount.toFixed(2)}
+                          </div>
+                          {transaction.amount_brl && transaction.amount_brl !== transaction.amount && (
+                            <div className="text-xs text-gray-400 font-mono">
+                              Pagou: {formatCurrency(transaction.amount_brl)}
+                            </div>
+                          )}
+                          <Badge 
+                            className="text-xs font-mono mt-1 bg-green-500/20 text-green-400 border-green-500/50"
+                          >
+                            CONCLUÍDA
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           )}
 
           {/* Card de Controles de Áudio removido - funcionalidade não utilizada */}

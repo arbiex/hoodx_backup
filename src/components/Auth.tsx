@@ -189,10 +189,8 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
             if (referralCode && sponsorInfo) {
               const { supabase } = await import('@/lib/supabase')
               
-              const { data: referralResult, error: referralError } = await supabase.rpc('register_user_with_referral', {
+              const { data: referralResult, error: referralError } = await supabase.rpc('register_user_referral_simple', {
                 p_user_id: result.data.user.id,
-                p_email: email,
-                p_full_name: result.data.user.user_metadata?.full_name || null,
                 p_referral_code: referralCode
               })
               

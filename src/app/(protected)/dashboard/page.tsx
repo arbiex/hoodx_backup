@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Bot, RefreshCw, Play, Square, Trash2, Settings, Coins } from 'lucide-react'
+import { Bot, RefreshCw, Play, Square, Trash2, Settings, Coins, History } from 'lucide-react'
 import MatrixRain from '@/components/MatrixRain'
 import Modal, { useModal } from '@/components/ui/modal'
 import InlineAlert from '@/components/ui/inline-alert'
@@ -13,6 +13,7 @@ import { useCredits } from '@/hooks/useCredits'
 import { useNetwork } from '@/hooks/useNetwork'
 import { useRouter } from 'next/navigation'
 import CreditPurchaseModal from '@/components/CreditPurchaseModal'
+import { Badge } from '@/components/ui/badge'
 
 // Sistema de áudio removido - funcionalidade não utilizada
 import StrategyModal from '@/components/StrategyModal'
@@ -120,7 +121,7 @@ export default function Dashboard() {
   
   // Hook para créditos - precisa do userId
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const { balance: creditsBalanceNew, isLoading: creditsLoadingNew } = useCredits(currentUserId || undefined)
+  const { balance: creditsBalanceNew, isLoading: creditsLoadingNew, transactions: creditTransactions, fetchTransactions } = useCredits(currentUserId || undefined)
   const router = useRouter()
   
   // Hook de alertas sonoros removido - funcionalidade não utilizada
@@ -218,6 +219,29 @@ export default function Dashboard() {
   
   // Estado de carregamento combinado para evitar flash
   const isDataLoading = creditsLoadingNew || networkLoading
+
+  // Função para formatar data
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit', 
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
+  // Função para obter ícone da transação
+  const getTransactionIcon = (type: string) => {
+    return <Coins className="h-4 w-4 text-green-400" />
+  }
+
+  // Filtrar apenas transações de compras (tipo credit) concluídas
+  const purchaseTransactions = useMemo(() => {
+    return creditTransactions
+      ?.filter(tx => tx.transaction_type === 'credit' && tx.status === 'completed')
+      ?.slice(0, 10) || []
+  }, [creditTransactions])
 
   // Buscar userId do usuário autenticado
   useEffect(() => {
@@ -944,6 +968,75 @@ export default function Dashboard() {
             </div>
           )}
 
+          {/* Card de Histórico de Compras de Créditos - Mostrar quando dados carregados */}
+          {!isDataLoading && (
+            <div className="mb-4">
+              <Card className="border-green-500/30 backdrop-blur-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
+                    <History className="h-5 w-5" />
+                    HISTÓRICO_COMPRAS
+                  </CardTitle>
+                  <CardDescription className="text-gray-400 font-mono text-xs">
+                    {`// Compras de créditos realizadas`}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {creditsLoadingNew ? (
+                    <div className="text-center py-8">
+                      <div className="text-green-400 font-mono">CARREGANDO_TRANSAÇÕES...</div>
+                    </div>
+                  ) : purchaseTransactions.length === 0 ? (
+                    <div className="text-center py-8">
+                      <div className="text-gray-400 font-mono">NENHUMA_COMPRA_ENCONTRADA</div>
+                      <p className="text-xs text-gray-500 font-mono mt-2">
+                        Suas compras de créditos aparecerão aqui
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-80 overflow-y-auto">
+                      {purchaseTransactions.map((transaction) => (
+                        <div
+                          key={transaction.id}
+                          className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg border border-gray-700/50 hover:bg-gray-800/50 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            {getTransactionIcon(transaction.transaction_type)}
+                            <div>
+                              <div className="font-medium font-mono text-sm text-white">
+                                {transaction.description || 'Compra de Créditos'}
+                              </div>
+                              <div className="text-xs text-gray-400 font-mono">
+                                {formatDate(transaction.created_at)}
+                                {transaction.payment_method && ` • ${transaction.payment_method.toUpperCase()}`}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="text-right">
+                            <div className="font-bold font-mono text-sm text-green-400">
+                              +{formatCurrency(transaction.amount)}
+                            </div>
+                            {transaction.amount_brl && transaction.amount_brl !== transaction.amount && (
+                              <div className="text-xs text-gray-400 font-mono">
+                                Pagou: {formatCurrency(transaction.amount_brl)}
+                              </div>
+                            )}
+                            <Badge 
+                              className="text-xs font-mono mt-1 bg-green-500/20 text-green-400 border-green-500/50"
+                            >
+                              CONCLUÍDA
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
           {/* Card de Controles de Áudio removido - funcionalidade não utilizada */}
 
         </div>
@@ -966,9 +1059,11 @@ export default function Dashboard() {
           onClose={() => setCreditModalOpen(false)}
           onSuccess={(amount, transactionId) => {
             console.log('✅ Compra de créditos concluída:', { amount, transactionId })
-            // Atualizar saldo de créditos
+            // Atualizar saldo de créditos e transações
             if (currentUserId) {
               // O hook useCredits já vai atualizar automaticamente via refresh()
+              // Também atualizar as transações para mostrar a nova compra
+              fetchTransactions(50, currentUserId)
             }
             setCreditModalOpen(false)
             setAlertMessage({

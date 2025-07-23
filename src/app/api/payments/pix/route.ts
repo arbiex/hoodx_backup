@@ -398,17 +398,17 @@ export async function POST(request: NextRequest) {
       .from(tableName)
       .insert({
         user_id: userId,
-        transaction_type: 'credit',
+        transaction_type: 'credit', // Sempre 'credit' para compras/entradas
         amount: finalAmount,
         amount_brl: amount, // Valor pago em BRL  
         payment_reference: xgateResult.transactionId,
-        payment_method: type === 'credits' ? 'pix' : 'PIX',
+        payment_method: 'pix',
         status: 'pending',
         description: finalDescription,
         metadata: {
           xgate_transaction_id: xgateResult.transactionId,
           created_via: 'api_payment_pix',
-          transaction_type: type
+          transaction_type: type // tipo de moeda no metadata para referência
         }
       })
       .select()

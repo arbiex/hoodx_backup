@@ -168,29 +168,11 @@ async function processPaymentConfirmation(transactionId: string, webhookData: an
 
     if (transactionType === 'fxa_tokens') {
       // ✨ PROCESSAR TOKENS FXA (R$ 0.25 = 1 TOKEN)
+      // 🚫 NÃO USAR add_fxa_tokens aqui pois ele cria nova transação
+      // A transação já foi criada pela API e apenas atualizada acima
+      
       tokensToAdd = Math.floor(transaction.amount_brl / 0.25)
-      if (tokensToAdd > 0) {
-        const { error: tokenError } = await supabase.rpc('add_fxa_tokens', {
-          p_user_id: transaction.user_id,
-          p_amount: tokensToAdd,
-          p_description: `Compra de tokens FXA - R$ ${transaction.amount_brl.toFixed(2)} / Preço por token - R$ 0.25`,
-          p_payment_reference: transactionId,
-          p_amount_brl: transaction.amount_brl,
-          p_metadata: {
-            payment_amount_brl: transaction.amount_brl,
-            conversion_rate: 0.25,
-            purchase_date: new Date().toISOString(),
-            webhook_processed: true
-          }
-        })
-
-        if (tokenError) {
-          console.error('❌ Erro ao adicionar tokens FXA:', tokenError)
-          // Não falhar o pagamento por causa dos tokens - apenas log
-        } else {
-          console.log(`✅ ${tokensToAdd} tokens FXA adicionados para usuário ${transaction.user_id}`)
-        }
-      }
+      console.log(`✅ ${tokensToAdd} tokens FXA confirmados para usuário ${transaction.user_id} (transação ${transactionId})`)
     } else {
       // ✨ PROCESSAR CRÉDITOS (R$ 1.00 = 1.00 CRÉDITO) + COMISSÕES
       // 🚫 NÃO USAR add_credits aqui pois ele cria nova transação

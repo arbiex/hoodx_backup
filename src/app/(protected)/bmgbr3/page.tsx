@@ -3108,14 +3108,14 @@ export default function BMGBR3() {
 
   // 2. Adicionar o select de stake abaixo do switch Break-Even Estratégico
   return (
-    <div className="min-h-screen bg-black text-green-400 relative overflow-hidden">
+    <div className="px-4 relative">
       {/* Matrix Rain Background */}
       <MatrixRain />
       
       {/* 🗑️ REMOVIDO: Indicador de sessão inativa */}
       
-      <div className="relative z-10 p-4 sm:p-6 lg:p-8">
-        <div className="w-full max-w-sm sm:max-w-2xl lg:max-w-4xl xl:max-w-6xl mx-auto space-y-4 sm:space-y-6">
+      <div className="relative z-10">
+        <div className="flex flex-col gap-6">
           
 
 

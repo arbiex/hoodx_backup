@@ -1015,7 +1015,7 @@ export default function Dashboard() {
                           
                           <div className="text-right">
                             <div className="font-bold font-mono text-sm text-green-400">
-                              +{formatCurrency(transaction.amount)}
+                              +{transaction.amount.toFixed(2)}
                             </div>
                             {transaction.amount_brl && transaction.amount_brl !== transaction.amount && (
                               <div className="text-xs text-gray-400 font-mono">

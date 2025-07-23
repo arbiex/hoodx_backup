@@ -440,6 +440,15 @@ export default function BMGBR3() {
     return stakes.m2;
   };
 
+  // 💰 NOVA FUNÇÃO: Calcular custo cumulativo até determinado nível
+  const calculateCumulativeCost = (currentLevel: number): number => {
+    let totalCost = 0;
+    for (let i = 0; i < currentLevel; i++) {
+      totalCost += STAKE_LEVELS[i].cost * stakeMultiplier;
+    }
+    return totalCost;
+  };
+
   // 💰 NOVA FUNÇÃO: Calcular lucro real considerando gastos acumulados
   const calculateRealProfit = (currentLevel: number): number => {
     const currentLevelData = STAKE_LEVELS[currentLevel - 1];
@@ -3705,7 +3714,7 @@ export default function BMGBR3() {
                           <tr>
                             <th className="px-2 py-1 text-left text-gray-400">Nível</th>
                             <th className="px-2 py-1 text-right text-gray-400">Aposta</th>
-                            <th className="px-2 py-1 text-right text-gray-400">Custo</th>
+                            <th className="px-2 py-1 text-right text-gray-400">Custo Acum.</th>
                             <th className="px-2 py-1 text-right text-gray-400">Lucro</th>
                           </tr>
                         </thead>
@@ -3717,7 +3726,7 @@ export default function BMGBR3() {
                                 {formatCurrency(level.m2 * stakeMultiplier)}
                               </td>
                               <td className="px-2 py-1 text-right text-green-400">
-                                {formatCurrency(level.cost * stakeMultiplier)}
+                                {formatCurrency(calculateCumulativeCost(level.level))}
                               </td>
                               <td className="px-2 py-1 text-right text-blue-400">
                                 {formatCurrency(calculateRealProfit(level.level))}

@@ -868,12 +868,12 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="px-4 relative">
+    <div className="min-h-screen bg-black text-green-400 relative overflow-hidden">
       {/* Matrix Rain Background */}
       <MatrixRain />
       
-      <div className="relative z-10">
-        <div className="flex flex-col gap-6">
+      <div className="relative z-10 p-4 sm:p-6 lg:p-8">
+        <div className="w-full max-w-sm sm:max-w-2xl lg:max-w-4xl xl:max-w-6xl mx-auto space-y-4 sm:space-y-6">
           {/* Card BLAZE_TOKEN removido - funcionalidade disponível na página específica */}
 
           {/* Bot Control Card - Estilo similar ao ACESSO_BLAZE */}
@@ -925,7 +925,7 @@ export default function Dashboard() {
 
           {/* Card de Créditos - Mostrar quando dados carregados */}
           {!isDataLoading && (
-            <Card className="border-gray-700/30 backdrop-blur-sm mb-6">
+            <Card className="border-gray-700/30 backdrop-blur-sm">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
                     <Coins className="h-5 w-5" />
@@ -967,7 +967,7 @@ export default function Dashboard() {
 
           {/* Card de Histórico de Compras de Créditos - Mostrar quando dados carregados */}
           {!isDataLoading && (
-            <Card className="border-gray-700/30 backdrop-blur-sm mb-6">
+            <Card className="border-gray-700/30 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
                   <History className="h-5 w-5" />

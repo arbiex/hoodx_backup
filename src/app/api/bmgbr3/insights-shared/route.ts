@@ -360,32 +360,16 @@ async function fetchFreshInsights(): Promise<{
   }
 }
 
-// 🚀 ENDPOINT PRINCIPAL COM LEADER ELECTION
+// 🚀 ENDPOINT PRINCIPAL COM CACHE COMPARTILHADO SIMPLES
 export async function POST(request: NextRequest) {
   try {
     const now = Date.now();
     
-    // 🔍 VERIFICAR: É requisição de follower?
-    const isFollowerRequest = request.headers.get('x-follower-request') === 'true';
-    
-    if (isFollowerRequest) {
-      // 📤 Requisição de follower → retornar cache local da leader
-      if (cachedInsights) {
-        console.log('🔄 [LEADER] Fornecendo dados para follower');
-        return NextResponse.json(cachedInsights);
-      } else {
-        return NextResponse.json({
-          success: false,
-          error: 'Cache local vazio na leader'
-        }, { status: 503 });
-      }
-    }
-    
     // 🏆 TENTAR SE TORNAR LEADER
     const becameLeader = await tryBecomeLeader();
     
-    if (becameLeader) {
-      // 👑 ESTA INSTÂNCIA É LEADER → Coletar dados da Pragmatic
+    if (isLeader) {
+      // 👑 ESTA INSTÂNCIA É LEADER → Coletar dados da Pragmatic quando necessário
       
       // Atualizar heartbeat
       await updateLeaderHeartbeat();
@@ -421,34 +405,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(freshData);
       
     } else {
-      // 👥 ESTA INSTÂNCIA É FOLLOWER → Consumir dados da leader
-      console.log('🔄 [FOLLOWER] Consumindo dados da instância leader...');
+      // 👥 ESTA INSTÂNCIA É FOLLOWER → Servir cache local (pode estar desatualizado)
+      console.log('🔄 [FOLLOWER] Servindo dados do cache local');
       
-      const leaderData = await getLeaderData();
-      
-      if (!leaderData.success) {
-        // Se falhar, tentar se tornar leader como fallback
-        console.log('⚠️ [FOLLOWER] Falha ao consumir leader, tentando assumir liderança...');
-        const emergencyLeader = await tryBecomeLeader();
-        
-        if (emergencyLeader) {
-          console.log('🚨 [EMERGENCY-LEADER] Assumiu liderança de emergência');
-          const freshData = await fetchFreshInsights();
-          if (freshData.success) {
-            cachedInsights = freshData;
-            lastFetch = now;
-            return NextResponse.json(freshData);
-          }
-        }
-        
-        return NextResponse.json({
-          success: false,
-          error: leaderData.error || 'Falha na eleição de leader'
-        }, { status: 503 });
+      if (cachedInsights) {
+        const cacheAge = now - lastFetch;
+        console.log(`⚡ [FOLLOWER] Cache local com ${Math.round(cacheAge/1000)}s de idade`);
+        return NextResponse.json(cachedInsights);
       }
       
-      console.log('✅ [FOLLOWER] Dados recebidos da instância leader');
-      return NextResponse.json(leaderData);
+      // 🚨 FALLBACK: Se follower não tem cache, tentar assumir liderança emergencial
+      console.log('🚨 [FOLLOWER] Sem cache local, tentando liderança emergencial...');
+      const emergencyLeader = await tryBecomeLeader();
+      
+      if (emergencyLeader && isLeader) {
+        console.log('🏆 [FOLLOWER→LEADER] Assumiu liderança emergencial');
+        const freshData = await fetchFreshInsights();
+        if (freshData.success) {
+          cachedInsights = freshData;
+          lastFetch = now;
+          await updateLeaderHeartbeat();
+          return NextResponse.json(freshData);
+        }
+      }
+      
+      return NextResponse.json({
+        success: false,
+        error: 'Nenhum dado disponível no cache local'
+      }, { status: 503 });
     }
     
   } catch (error) {

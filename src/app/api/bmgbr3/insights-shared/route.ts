@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
 
 // Cache dinâmico inteligente
 interface CachedInsightsData {
@@ -11,6 +12,12 @@ let cachedInsights: CachedInsightsData | null = null;
 let lastFetch = 0;
 const FRESH_DURATION = 1000; // 1 segundo = dados fresquíssimos
 
+// 🏆 LEADER ELECTION: Configuração
+const LEADER_TIMEOUT = 30000; // 30 segundos para leader expirar
+const INSTANCE_ID = process.env.FLY_MACHINE_ID || `instance-${Date.now()}`; // ID único da instância
+let isLeader = false;
+let lastLeaderHeartbeat = 0;
+
 // Cache de números vermelhos
 const RED_NUMBERS = new Set([
   1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36
@@ -18,6 +25,136 @@ const RED_NUMBERS = new Set([
 
 // 🔥 EDGE FUNCTION URL: Centralizando configuração
 const BLAZE_AUTH_EDGE_FUNCTION_URL = 'https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth';
+
+// 🏆 LEADER ELECTION: Funções de coordenação
+async function tryBecomeLeader(): Promise<boolean> {
+  try {
+    const now = Date.now();
+    
+    // Verificar se já existe um leader ativo
+    const { data: currentLeader, error } = await supabase
+      .from('system_leader')
+      .select('*')
+      .eq('service', 'insights-collector')
+      .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+      console.error('❌ [LEADER-ELECTION] Erro ao verificar leader atual:', error);
+      return false;
+    }
+
+    // Se não há leader ou leader expirou
+    if (!currentLeader || (now - new Date(currentLeader.last_heartbeat).getTime()) > LEADER_TIMEOUT) {
+      // Tentar se tornar leader
+      const { error: upsertError } = await supabase
+        .from('system_leader')
+        .upsert({
+          service: 'insights-collector',
+          instance_id: INSTANCE_ID,
+          last_heartbeat: new Date().toISOString()
+        }, {
+          onConflict: 'service'
+        });
+
+      if (upsertError) {
+        console.error('❌ [LEADER-ELECTION] Erro ao se tornar leader:', upsertError);
+        return false;
+      }
+
+      console.log(`🏆 [LEADER-ELECTION] Instância ${INSTANCE_ID} se tornou LEADER`);
+      isLeader = true;
+      lastLeaderHeartbeat = now;
+      return true;
+    }
+
+    // Verificar se esta instância é o leader atual
+    if (currentLeader.instance_id === INSTANCE_ID) {
+      isLeader = true;
+      lastLeaderHeartbeat = now;
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error('❌ [LEADER-ELECTION] Erro na eleição de leader:', error);
+    return false;
+  }
+}
+
+async function updateLeaderHeartbeat(): Promise<void> {
+  if (!isLeader) return;
+
+  try {
+    const { error } = await supabase
+      .from('system_leader')
+      .update({
+        last_heartbeat: new Date().toISOString()
+      })
+      .eq('service', 'insights-collector')
+      .eq('instance_id', INSTANCE_ID);
+
+    if (error) {
+      console.error('❌ [LEADER-ELECTION] Erro ao atualizar heartbeat:', error);
+      isLeader = false; // Perdeu liderança
+    } else {
+      lastLeaderHeartbeat = Date.now();
+    }
+  } catch (error) {
+    console.error('❌ [LEADER-ELECTION] Erro no heartbeat:', error);
+    isLeader = false;
+  }
+}
+
+async function getLeaderData(): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    // Buscar qual instância é a leader
+    const { data: leader, error } = await supabase
+      .from('system_leader')
+      .select('*')
+      .eq('service', 'insights-collector')
+      .single();
+
+    if (error || !leader) {
+      return {
+        success: false,
+        error: 'Nenhuma instância leader encontrada'
+      };
+    }
+
+    // Se esta instância é a leader, retornar dados locais
+    if (leader.instance_id === INSTANCE_ID) {
+      return cachedInsights || { success: false, error: 'Cache local vazio' };
+    }
+
+    // Buscar dados da instância leader via HTTP interno
+    const leaderUrl = `https://${leader.instance_id}.internal:3000/api/bmgbr3/insights-shared`;
+    
+    const response = await fetch(leaderUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-follower-request': 'true' // Identificar como request de follower
+      },
+      body: JSON.stringify({ follower: true })
+    });
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: `Erro ao buscar dados da leader: ${response.status}`
+      };
+    }
+
+    const leaderData = await response.json();
+    return leaderData;
+
+  } catch (error: any) {
+    return {
+      success: false,
+      error: `Erro ao consumir dados da leader: ${error.message}`
+    };
+  }
+}
 
 // 🔐 GERAÇÃO DE TOKENS COM CONTA COBAIA
 async function generateCobraTokens(blazeToken: string, isBackup = false): Promise<{
@@ -223,40 +360,96 @@ async function fetchFreshInsights(): Promise<{
   }
 }
 
-// 🚀 ENDPOINT PRINCIPAL
+// 🚀 ENDPOINT PRINCIPAL COM LEADER ELECTION
 export async function POST(request: NextRequest) {
   try {
     const now = Date.now();
     
-    // 🔍 VERIFICAÇÃO: Cache está fresco? (< 1 segundo)
-    if (now - lastFetch < FRESH_DURATION && cachedInsights) {
-      console.log('⚡ [INSIGHTS-SHARED] Retornando cache fresco');
-      return NextResponse.json(cachedInsights);
+    // 🔍 VERIFICAR: É requisição de follower?
+    const isFollowerRequest = request.headers.get('x-follower-request') === 'true';
+    
+    if (isFollowerRequest) {
+      // 📤 Requisição de follower → retornar cache local da leader
+      if (cachedInsights) {
+        console.log('🔄 [LEADER] Fornecendo dados para follower');
+        return NextResponse.json(cachedInsights);
+      } else {
+        return NextResponse.json({
+          success: false,
+          error: 'Cache local vazio na leader'
+        }, { status: 503 });
+      }
     }
     
-    // 🔄 Cache velho → buscar dados novos
-    console.log('🔄 [INSIGHTS-SHARED] Cache expirado, buscando dados frescos...');
-    const freshData = await fetchFreshInsights();
+    // 🏆 TENTAR SE TORNAR LEADER
+    const becameLeader = await tryBecomeLeader();
     
-    if (!freshData.success) {
-      // Retornar cache antigo se disponível, ou erro
-      if (cachedInsights) {
-        console.log('⚠️ [INSIGHTS-SHARED] Erro ao buscar dados frescos, retornando cache antigo');
+    if (becameLeader) {
+      // 👑 ESTA INSTÂNCIA É LEADER → Coletar dados da Pragmatic
+      
+      // Atualizar heartbeat
+      await updateLeaderHeartbeat();
+      
+      // 🔍 VERIFICAÇÃO: Cache está fresco? (< 1 segundo)
+      if (now - lastFetch < FRESH_DURATION && cachedInsights) {
+        console.log('⚡ [LEADER] Retornando cache fresco');
         return NextResponse.json(cachedInsights);
       }
       
-      return NextResponse.json({
-        success: false,
-        error: freshData.error
-      }, { status: 500 });
+      // 🔄 Cache velho → buscar dados novos da Pragmatic
+      console.log('🔄 [LEADER] Cache expirado, coletando dados da Pragmatic...');
+      const freshData = await fetchFreshInsights();
+      
+      if (!freshData.success) {
+        // Retornar cache antigo se disponível, ou erro
+        if (cachedInsights) {
+          console.log('⚠️ [LEADER] Erro ao coletar, retornando cache antigo');
+          return NextResponse.json(cachedInsights);
+        }
+        
+        return NextResponse.json({
+          success: false,
+          error: freshData.error
+        }, { status: 500 });
+      }
+      
+      // 💾 Atualizar cache com dados frescos
+      cachedInsights = freshData;
+      lastFetch = now;
+      
+      console.log('✅ [LEADER] Cache atualizado com dados frescos da Pragmatic');
+      return NextResponse.json(freshData);
+      
+    } else {
+      // 👥 ESTA INSTÂNCIA É FOLLOWER → Consumir dados da leader
+      console.log('🔄 [FOLLOWER] Consumindo dados da instância leader...');
+      
+      const leaderData = await getLeaderData();
+      
+      if (!leaderData.success) {
+        // Se falhar, tentar se tornar leader como fallback
+        console.log('⚠️ [FOLLOWER] Falha ao consumir leader, tentando assumir liderança...');
+        const emergencyLeader = await tryBecomeLeader();
+        
+        if (emergencyLeader) {
+          console.log('🚨 [EMERGENCY-LEADER] Assumiu liderança de emergência');
+          const freshData = await fetchFreshInsights();
+          if (freshData.success) {
+            cachedInsights = freshData;
+            lastFetch = now;
+            return NextResponse.json(freshData);
+          }
+        }
+        
+        return NextResponse.json({
+          success: false,
+          error: leaderData.error || 'Falha na eleição de leader'
+        }, { status: 503 });
+      }
+      
+      console.log('✅ [FOLLOWER] Dados recebidos da instância leader');
+      return NextResponse.json(leaderData);
     }
-    
-    // 💾 Atualizar cache com dados frescos
-    cachedInsights = freshData;
-    lastFetch = now;
-    
-    console.log('✅ [INSIGHTS-SHARED] Cache atualizado com dados frescos');
-    return NextResponse.json(freshData);
     
   } catch (error) {
     console.error('❌ [INSIGHTS-SHARED] Erro no processamento:', error);
@@ -275,12 +468,35 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// 📊 ENDPOINT GET PARA STATUS
+// 📊 ENDPOINT GET PARA STATUS + LEADER ELECTION
 export async function GET() {
   try {
     const now = Date.now();
     const cacheAge = cachedInsights ? now - lastFetch : null;
     const isFresh = cacheAge !== null && cacheAge < FRESH_DURATION;
+    
+    // Buscar informações do leader atual
+    let leaderInfo = null;
+    try {
+      const { data: leader } = await supabase
+        .from('system_leader')
+        .select('*')
+        .eq('service', 'insights-collector')
+        .single();
+      
+      if (leader) {
+        const leaderAge = now - new Date(leader.last_heartbeat).getTime();
+        leaderInfo = {
+          instance_id: leader.instance_id,
+          last_heartbeat: leader.last_heartbeat,
+          age_ms: leaderAge,
+          is_expired: leaderAge > LEADER_TIMEOUT,
+          is_current_instance: leader.instance_id === INSTANCE_ID
+        };
+      }
+    } catch (error) {
+      // Ignorar erro se tabela não existir ainda
+    }
     
     return NextResponse.json({
       success: true,
@@ -294,6 +510,12 @@ export async function GET() {
         tokens: {
           hasPrimary: !!process.env.NEXT_BLAZE_ACCESS_TOKEN,
           hasBackup: !!process.env.NEXT_BACKUP_BLAZE_ACCESS_TOKEN
+        },
+        leaderElection: {
+          instance_id: INSTANCE_ID,
+          is_leader: isLeader,
+          leader_info: leaderInfo,
+          leader_timeout: LEADER_TIMEOUT
         }
       }
     });

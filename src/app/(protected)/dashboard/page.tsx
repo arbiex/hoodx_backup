@@ -868,12 +868,12 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-green-400 relative overflow-hidden">
+    <div className="px-4 relative">
       {/* Matrix Rain Background */}
       <MatrixRain />
       
-      <div className="relative z-10 p-4 sm:p-6 lg:p-8">
-        <div className="w-full max-w-sm sm:max-w-2xl lg:max-w-4xl xl:max-w-6xl mx-auto space-y-4 sm:space-y-6">
+      <div className="relative z-10">
+        <div className="flex flex-col gap-6">
           {/* Card BLAZE_TOKEN removido - funcionalidade disponível na página específica */}
 
           {/* Bot Control Card - Estilo similar ao ACESSO_BLAZE */}

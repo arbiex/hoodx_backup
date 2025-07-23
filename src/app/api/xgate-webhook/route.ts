@@ -193,26 +193,10 @@ async function processPaymentConfirmation(transactionId: string, webhookData: an
       }
     } else {
       // ✨ PROCESSAR CRÉDITOS (R$ 1.00 = 1.00 CRÉDITO) + COMISSÕES
-      const { error: creditError } = await supabase.rpc('add_credits', {
-        p_user_id: transaction.user_id,
-        p_amount: transaction.amount,
-        p_description: `Compra de créditos - R$ ${transaction.amount_brl.toFixed(2)}`,
-        p_payment_reference: transactionId,
-        p_amount_brl: transaction.amount_brl,
-        p_metadata: {
-          payment_amount_brl: transaction.amount_brl,
-          conversion_rate: 1.0,
-          purchase_date: new Date().toISOString(),
-          webhook_processed: true
-        }
-      })
-
-      if (creditError) {
-        console.error('❌ Erro ao adicionar créditos:', creditError)
-        throw new Error(`Erro ao adicionar créditos: ${creditError.message}`)
-      } else {
-        console.log(`✅ ${transaction.amount} créditos adicionados para usuário ${transaction.user_id}`)
-      }
+      // 🚫 NÃO USAR add_credits aqui pois ele cria nova transação
+      // A transação já foi criada pela API e apenas atualizada acima
+      
+      console.log(`✅ ${transaction.amount} créditos confirmados para usuário ${transaction.user_id} (transação ${transactionId})`)
 
       // 🎯 PROCESSAR COMISSÕES PARA AGENTES (só para créditos)
       await processAgentCommissions(supabase, transaction.user_id, transaction.amount_brl)

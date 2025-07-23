@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import Image from 'next/image'
 import { Terminal, Lock, User, Crown, Mail, ArrowLeft, Eye, EyeOff } from 'lucide-react'
 import MatrixRain from '@/components/MatrixRain'
-import { useNetwork } from '@/hooks/useNetwork'
+import { useSponsorInfo } from '@/hooks/useSponsorInfo'
 
 // Função para traduzir mensagens de erro do Supabase
 const translateSupabaseError = (errorMessage: string): string => {
@@ -72,7 +72,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
     joined_date: string;
   } | null>(null)
   
-  const { getSponsorInfo } = useNetwork()
+  const { getSponsorInfo } = useSponsorInfo()
   const hasShownToast = useRef(false)
 
   // Check for referral code on mount
@@ -103,7 +103,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
       // Automatically switch to register mode when referral code is detected
       setIsLogin(false)
       // Get sponsor info
-      getSponsorInfo(refCode).then(sponsor => {
+      getSponsorInfo(refCode).then((sponsor: any) => {
         if (sponsor) {
           setSponsorInfo(sponsor)
           if (isInviteOnly && !hasShownToast.current) {
@@ -123,7 +123,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
           })
           hasShownToast.current = true
         }
-      }).catch(error => {
+      }).catch((error: any) => {
         console.error('Error in getSponsorInfo:', error)
         if (isInviteOnly && !hasShownToast.current) {
           toast.error("CONVITE_INVÁLIDO", {
@@ -183,17 +183,41 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
         // If signup was successful, register the user (with or without referral)
         if (!result.error && result.data?.user) {
           try {
-            // TODO: Implementar registerWithReferral quando necessário
             console.log('Usuário registrado com código de referral:', referralCode)
             
+            // Registrar vinculação ao sponsor se código foi fornecido
             if (referralCode && sponsorInfo) {
-              toast.success("INDICAÇÃO_REGISTRADA", {
-                description: `Conectado à rede de ${sponsorInfo.email}`
+              const { supabase } = await import('@/lib/supabase')
+              
+              const { data: referralResult, error: referralError } = await supabase.rpc('register_user_with_referral', {
+                p_user_id: result.data.user.id,
+                p_email: email,
+                p_full_name: result.data.user.user_metadata?.full_name || null,
+                p_referral_code: referralCode
               })
+              
+              if (referralError) {
+                console.error('Erro ao vincular sponsor:', referralError)
+                toast.error("ERRO_VINCULAÇÃO", {
+                  description: "Cadastro realizado, mas houve erro na vinculação ao sponsor"
+                })
+              } else if (referralResult?.success) {
+                toast.success("INDICAÇÃO_REGISTRADA", {
+                  description: `Conectado à rede de ${sponsorInfo.email} com sucesso!`
+                })
+                console.log('Vinculação realizada:', referralResult)
+              } else {
+                console.error('Falha na vinculação:', referralResult)
+                toast.error("ERRO_VINCULAÇÃO", {
+                  description: referralResult?.error || "Erro desconhecido na vinculação"
+                })
+              }
             }
           } catch (referralError) {
             console.error('Error registering user:', referralError)
-            // Don't fail the whole signup for registration errors
+            toast.error("ERRO_SISTEMA", {
+              description: "Cadastro realizado, mas houve erro no sistema de indicações"
+            })
           }
         }
       }
@@ -361,7 +385,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         const code = e.target.value.toUpperCase()
                         setReferralCode(code)
-                        getSponsorInfo(code).then(sponsor => {
+                        getSponsorInfo(code).then((sponsor: any) => {
                           if (sponsor) {
                             setSponsorInfo(sponsor)
                             toast.success("CÓDIGO_VÁLIDO", {
@@ -373,7 +397,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
                               description: "Código não encontrado ou inativo"
                             })
                           }
-                        }).catch(error => {
+                        }).catch((error: any) => {
                           console.error('Error in input getSponsorInfo:', error)
                           setSponsorInfo(null)
                           toast.error("ERRO_VALIDAÇÃO", {

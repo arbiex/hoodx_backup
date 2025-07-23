@@ -42,7 +42,7 @@ interface InsightsApiData {
 // Endpoints da API
 const API_ENDPOINTS = {
   MAIN: '/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr',
-  INSIGHTS: '/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights'
+  INSIGHTS: '/api/bmgbr3/insights-shared' // 🔄 NOVO: Endpoint compartilhado
 } as const;
 
 export const useBmgbr3Api = () => {

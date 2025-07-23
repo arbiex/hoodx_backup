@@ -1632,8 +1632,8 @@ async function checkForNewResults(userId: string): Promise<void> {
       try {
         console.log(`🔄 [RETRY ${attempt}/${maxRetries}] Tentando buscar insights para usuário ${userId}`);
         
-        // 🎯 SOLUÇÃO: Usar getBaseUrl() para funcionar tanto no localhost quanto em produção
-        response = await fetch(`${getBaseUrl()}/api/bmgbr3/blaze/pragmatic/blaze-megarouletebr/insights`, {
+        // 🎯 SOLUÇÃO: Usar novo endpoint compartilhado
+        response = await fetch(`${getBaseUrl()}/api/bmgbr3/insights-shared`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

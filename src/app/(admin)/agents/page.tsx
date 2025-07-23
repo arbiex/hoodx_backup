@@ -218,25 +218,39 @@ export default function AgentsPage() {
 
     setLoading(true)
     try {
-      const { error } = await supabase.rpc('update_agent_commission', {
+      const { data, error } = await supabase.rpc('update_agent_commission', {
         p_agent_code: editingAgent.agent_code,
-        p_commission_rate: parseFloat(commissionRate)
+        p_commission_rate: parseFloat(commissionRate),
+        p_admin_user_id: currentUser?.id
       })
 
       if (error) {
-        console.error('Erro ao atualizar agente:', error)
-        toast.error('Erro ao atualizar agente')
+        console.error('Erro RPC ao atualizar agente:', error)
+        toast.error('Erro ao atualizar agente', {
+          description: error.message || 'Erro na comunicação com o banco'
+        })
         return
       }
 
-      toast.success('Agente atualizado com sucesso')
-      closeEditModal()
-      setEditingAgent(null)
-      setCommissionRate('50.00')
-      loadAgents()
+      if (data?.success) {
+        toast.success('Agente atualizado com sucesso', {
+          description: `Taxa alterada para ${data.new_commission_rate}% - ${data.user_email}`
+        })
+        closeEditModal()
+        setEditingAgent(null)
+        setCommissionRate('50.00')
+        loadAgents()
+      } else {
+        console.error('Falha na atualização:', data)
+        toast.error('Erro ao atualizar agente', {
+          description: data?.error || 'Falha no processamento da atualização'
+        })
+      }
     } catch (error) {
-      console.error('Erro:', error)
-      toast.error('Erro inesperado ao atualizar agente')
+      console.error('Erro inesperado ao atualizar agente:', error)
+      toast.error('Erro inesperado ao atualizar agente', {
+        description: error instanceof Error ? error.message : 'Erro desconhecido'
+      })
     } finally {
       setLoading(false)
     }

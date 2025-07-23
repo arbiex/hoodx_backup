@@ -10,6 +10,7 @@ import Image from 'next/image'
 import { Terminal, Lock, User, Crown, Mail, ArrowLeft, Eye, EyeOff } from 'lucide-react'
 import MatrixRain from '@/components/MatrixRain'
 import { useSponsorInfo } from '@/hooks/useSponsorInfo'
+import { useGoogleAnalytics } from '@/hooks/useGoogleAnalytics'
 
 // Função para traduzir mensagens de erro do Supabase
 const translateSupabaseError = (errorMessage: string): string => {
@@ -73,6 +74,7 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
   } | null>(null)
   
   const { getSponsorInfo } = useSponsorInfo()
+  const { trackLogin, trackSignUp, trackEvent } = useGoogleAnalytics()
   const hasShownToast = useRef(false)
 
   // Check for referral code on mount
@@ -226,6 +228,31 @@ export default function Auth({ onAuthSuccess, defaultMode = 'login', initialRefe
           description: translateSupabaseError(result.error.message) || "Falha na autenticação"
         })
       } else {
+        // Rastrear eventos do Google Analytics
+        if (isLogin) {
+          trackLogin('email')
+          trackEvent('user_engagement', {
+            event_category: 'authentication',
+            event_label: 'login_success'
+          })
+        } else {
+          trackSignUp('email')
+          trackEvent('user_engagement', {
+            event_category: 'authentication',
+            event_label: 'signup_success',
+            has_referral: referralCode ? true : false
+          })
+          
+          // Rastrear indicação se houver
+          if (referralCode && sponsorInfo) {
+            trackEvent('referral_conversion', {
+              event_category: 'marketing',
+              event_label: 'referral_signup',
+              sponsor_email: sponsorInfo.email
+            })
+          }
+        }
+        
         toast.success(isLogin ? "AUTENTICAÇÃO_SUCESSO" : "USUÁRIO_REGISTRADO", {
           description: isLogin ? "Acesso ao sistema concedido" : "Novo usuário inicializado com sucesso"
         })

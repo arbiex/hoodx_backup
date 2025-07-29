@@ -8,25 +8,23 @@ interface CachedInsightsData {
   error?: string;
 }
 
-// 🔥 NOVO: Cache separado para tokens (evita rate limit)
-interface CachedTokens {
-  ppToken: string;
-  jsessionId: string;
-  pragmaticUserId: string;
-  generatedAt: number;
+// 🔥 NOVO: Interface para cache global no Supabase
+interface GlobalCacheData {
+  id: string;
+  cache_type: 'bmgbr3_tokens' | 'bmgbr3_results';
+  data: any;
+  created_at: string;
+  expires_at: string;
+  is_locked: boolean;
 }
 
-let cachedInsights: CachedInsightsData | null = null;
-let cachedTokens: CachedTokens | null = null;
-let lastFetch = 0;
-let lastGameId: string | null = null;
+// 🎯 NOVO: Cache local em memória (backup)
+let localCache: { [key: string]: { data: any; expiresAt: number } } = {};
 
-// 🎯 DURAÇÃO OTIMIZADA: Tokens duram 5 minutos, dados baseados em gameId
-const TOKEN_DURATION = 5 * 60 * 1000; // 5 minutos para tokens
-const DATA_FRESH_DURATION = 10 * 1000; // 10 segundos máximo para dados (backup)
-
-// ❌ LEADER ELECTION REMOVIDO: Com apenas 1 máquina, sempre será líder
-// Sistema simplificado para instância única
+// 🎯 DURAÇÃO OTIMIZADA: Cache global compartilhado
+const GLOBAL_TOKEN_DURATION = 8 * 60 * 1000; // 8 minutos para tokens
+const GLOBAL_DATA_DURATION = 15 * 1000; // 15 segundos para dados históricos
+const LOCK_TIMEOUT = 30 * 1000; // 30 segundos máximo para lock
 
 // Cache de números vermelhos
 const RED_NUMBERS = new Set([
@@ -36,147 +34,318 @@ const RED_NUMBERS = new Set([
 // 🔥 EDGE FUNCTION URL: Centralizando configuração
 const BLAZE_AUTH_EDGE_FUNCTION_URL = 'https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth';
 
-// 🎯 NOVO: Função para obter tokens (com cache inteligente de 5 minutos)
-async function getValidTokens(): Promise<CachedTokens> {
-  const now = Date.now();
-  
-  // Verificar se tokens em cache ainda são válidos
-  if (cachedTokens && (now - cachedTokens.generatedAt) < TOKEN_DURATION) {
-    console.log('✅ [INSIGHTS-SHARED] Usando tokens em cache (válidos por mais ' + 
-      Math.round((TOKEN_DURATION - (now - cachedTokens.generatedAt)) / 1000) + 's)');
-    return cachedTokens;
+// 🎯 FUNÇÃO: Obter dados do cache global (Supabase)
+async function getGlobalCache(cacheType: 'bmgbr3_tokens' | 'bmgbr3_results'): Promise<any | null> {
+  try {
+    const { data, error } = await supabase
+      .from('system_cache')
+      .select('*')
+      .eq('cache_type', cacheType)
+      .single();
+
+    if (error || !data) {
+      console.log(`📦 [GLOBAL-CACHE] Cache ${cacheType} não encontrado`);
+      return null;
+    }
+
+    // Verificar se expirou
+    const now = new Date();
+    const expiresAt = new Date(data.expires_at);
+    
+    if (now > expiresAt) {
+      console.log(`⏰ [GLOBAL-CACHE] Cache ${cacheType} expirado`);
+      // Limpar cache expirado
+      await supabase
+        .from('system_cache')
+        .delete()
+        .eq('cache_type', cacheType);
+      return null;
+    }
+
+    console.log(`✅ [GLOBAL-CACHE] Cache ${cacheType} válido encontrado`);
+    return data.data;
+
+  } catch (error) {
+    console.error(`❌ [GLOBAL-CACHE] Erro ao buscar cache ${cacheType}:`, error);
+    return null;
   }
-  
-  console.log('🔐 [INSIGHTS-SHARED] Gerando novos tokens (cache expirado ou inexistente)...');
-  
-  const authResponse = await fetch(BLAZE_AUTH_EDGE_FUNCTION_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-    },
-    body: JSON.stringify({
-      action: 'generate-tokens',
-      blazeToken: process.env.NEXT_BLAZE_ACCESS_TOKEN,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      acceptLanguage: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      selectedCurrencyType: 'BRL'
-    })
-  });
-
-  if (!authResponse.ok) {
-    const errorText = await authResponse.text();
-    throw new Error(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
-  }
-
-  const authData = await authResponse.json();
-  
-  if (!authData.success || !authData.data) {
-    throw new Error(`Falha na geração de tokens: ${authData.error || 'Tokens não recebidos'}`);
-  }
-
-  // Cache dos tokens por 5 minutos
-  cachedTokens = {
-    ppToken: authData.data.ppToken,
-    jsessionId: authData.data.jsessionId,
-    pragmaticUserId: authData.data.pragmaticUserId,
-    generatedAt: now
-  };
-
-  console.log('✅ [INSIGHTS-SHARED] Novos tokens gerados e armazenados em cache por 5 minutos');
-  return cachedTokens;
 }
 
-// 🎯 OTIMIZADO: Função para coletar dados (reutiliza tokens)
+// 🎯 FUNÇÃO: Salvar dados no cache global com lock
+async function setGlobalCache(cacheType: 'bmgbr3_tokens' | 'bmgbr3_results', data: any, durationMs: number): Promise<boolean> {
+  try {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + durationMs);
+
+    const { error } = await supabase
+      .from('system_cache')
+      .upsert({
+        cache_type: cacheType,
+        data: data,
+        created_at: now.toISOString(),
+        expires_at: expiresAt.toISOString(),
+        is_locked: false
+      });
+
+    if (error) {
+      console.error(`❌ [GLOBAL-CACHE] Erro ao salvar cache ${cacheType}:`, error);
+      return false;
+    }
+
+    console.log(`✅ [GLOBAL-CACHE] Cache ${cacheType} salvo até ${expiresAt.toLocaleTimeString()}`);
+    return true;
+
+  } catch (error) {
+    console.error(`❌ [GLOBAL-CACHE] Erro ao salvar cache ${cacheType}:`, error);
+    return false;
+  }
+}
+
+// 🔒 FUNÇÃO: Adquirir lock para geração de cache
+async function acquireLock(cacheType: 'bmgbr3_tokens' | 'bmgbr3_results'): Promise<boolean> {
+  try {
+    // Tentar adquirir lock
+    const { data, error } = await supabase
+      .from('system_cache')
+      .upsert({
+        cache_type: `${cacheType}_lock`,
+        data: { locked: true, locked_at: new Date().toISOString() },
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + LOCK_TIMEOUT).toISOString(),
+        is_locked: true
+      })
+      .select();
+
+    if (error) {
+      console.log(`🔒 [LOCK] Não foi possível adquirir lock para ${cacheType}`);
+      return false;
+    }
+
+    console.log(`🔒 [LOCK] Lock adquirido para ${cacheType}`);
+    return true;
+
+  } catch (error) {
+    console.error(`❌ [LOCK] Erro ao adquirir lock:`, error);
+    return false;
+  }
+}
+
+// 🔓 FUNÇÃO: Liberar lock
+async function releaseLock(cacheType: 'bmgbr3_tokens' | 'bmgbr3_results'): Promise<void> {
+  try {
+    await supabase
+      .from('system_cache')
+      .delete()
+      .eq('cache_type', `${cacheType}_lock`);
+
+    console.log(`🔓 [LOCK] Lock liberado para ${cacheType}`);
+  } catch (error) {
+    console.error(`❌ [LOCK] Erro ao liberar lock:`, error);
+  }
+}
+
+// 🎯 FUNÇÃO: Obter tokens válidos (global shared)
+async function getValidTokens(): Promise<any> {
+  // 1. Tentar cache global primeiro
+  let cachedTokens = await getGlobalCache('bmgbr3_tokens');
+  
+  if (cachedTokens) {
+    console.log(`✅ [SHARED-TOKENS] Usando tokens globais compartilhados`);
+    return cachedTokens;
+  }
+
+  // 2. Tentar adquirir lock para gerar novos tokens
+  const lockAcquired = await acquireLock('bmgbr3_tokens');
+  
+  if (!lockAcquired) {
+    // Se não conseguiu lock, aguardar um pouco e tentar cache novamente
+    console.log(`⏳ [SHARED-TOKENS] Aguardando outros tokens serem gerados...`);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    cachedTokens = await getGlobalCache('bmgbr3_tokens');
+    if (cachedTokens) {
+      return cachedTokens;
+    }
+    
+    throw new Error('Não foi possível obter tokens - múltiplas tentativas simultâneas');
+  }
+
+  try {
+    // 3. Gerar novos tokens (apenas UMA instância por vez)
+    console.log('🔐 [SHARED-TOKENS] Gerando novos tokens ÚNICOS para todos os usuários...');
+    
+    const authResponse = await fetch(BLAZE_AUTH_EDGE_FUNCTION_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+      },
+      body: JSON.stringify({
+        action: 'generate-tokens',
+        blazeToken: process.env.NEXT_BLAZE_ACCESS_TOKEN,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        acceptLanguage: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        selectedCurrencyType: 'BRL'
+      })
+    });
+
+    if (!authResponse.ok) {
+      const errorText = await authResponse.text();
+      throw new Error(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
+    }
+
+    const authData = await authResponse.json();
+    
+    if (!authData.success || !authData.data) {
+      throw new Error(`Falha na geração de tokens: ${authData.error || 'Tokens não recebidos'}`);
+    }
+
+    const tokensData = {
+      ppToken: authData.data.ppToken,
+      jsessionId: authData.data.jsessionId,
+      pragmaticUserId: authData.data.pragmaticUserId,
+      generatedAt: Date.now()
+    };
+
+    // 4. Salvar no cache global
+    await setGlobalCache('bmgbr3_tokens', tokensData, GLOBAL_TOKEN_DURATION);
+
+    console.log('✅ [SHARED-TOKENS] Tokens únicos gerados e compartilhados globalmente por 8 minutos');
+    return tokensData;
+
+  } finally {
+    // 5. Sempre liberar o lock
+    await releaseLock('bmgbr3_tokens');
+  }
+}
+
+// 🎯 FUNÇÃO: Coletar dados históricos (global shared)
 async function collectFreshInsights(): Promise<CachedInsightsData> {
-  console.log('🔄 [INSIGHTS-SHARED] Buscando dados frescos da Pragmatic...');
+  console.log('🔄 [SHARED-INSIGHTS] Buscando dados compartilhados...');
   
   try {
-    // Obter tokens válidos (pode usar cache)
-    const tokens = await getValidTokens();
-
-    // Buscar histórico da Pragmatic (usando tokens em cache quando possível)
-    const url = `https://games.pragmaticplaylive.net/api/ui/statisticHistory?tableId=mrbras531mrbr532&numberOfGames=500&JSESSIONID=${tokens.jsessionId}&ck=${Date.now()}&game_mode=roulette_desktop`;
+    // 1. Verificar cache global de dados primeiro
+    let cachedData = await getGlobalCache('bmgbr3_results');
     
-    const historyResponse = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        'Referer': 'https://games.pragmaticplaylive.net/',
-        'Cache-Control': 'no-cache'
-      }
-    });
-
-    if (!historyResponse.ok) {
-      throw new Error(`Erro na API Pragmatic: ${historyResponse.status}`);
-    }
-
-    const responseText = await historyResponse.text();
-    
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (parseError) {
-      console.error('❌ [INSIGHTS-SHARED] Erro ao parsear JSON:', parseError);
-      throw new Error('Erro ao processar resposta da API');
-    }
-
-    if (data.errorCode !== "0") {
-      console.error('❌ [INSIGHTS-SHARED] Erro na API Pragmatic:', data.errorCode);
-      throw new Error(`API Pragmatic retornou erro: ${data.errorCode}`);
-    }
-
-    if (!Array.isArray(data.history)) {
-      console.error('❌ [INSIGHTS-SHARED] Histórico não é um array:', typeof data.history);
-      throw new Error('Dados de histórico inválidos');
-    }
-
-    // Processar resultados (mesmo formato dos outros sistemas)
-    const results = data.history.map((item: any, index: number) => {
-      const gameResult = item.gameResult || '';
-      const parts = gameResult.split(' ');
-      const number = parseInt(parts[0]) || 0;
-
-      // Determinar cor usando Set pré-calculado
-      let color = 'green';
-      if (number !== 0) {
-        color = RED_NUMBERS.has(number) ? 'red' : 'black';
-      }
-
+    if (cachedData) {
+      console.log('📦 [SHARED-INSIGHTS] Usando dados globais compartilhados');
       return {
-        id: item.gameId || `${item.gameId}-${Date.now()}`,
-        gameId: item.gameId,
-        number: number,
-        color: color,
-        timestamp: Date.now() - (index * 60000), // Espaçamento de 1 minuto entre resultados
-        gameResult: gameResult
+        success: true,
+        data: cachedData
       };
-    });
-
-    // 🎯 NOVO: Verificar se há gameId mais recente
-    const currentGameId = results[0]?.gameId;
-    if (currentGameId && currentGameId !== lastGameId) {
-      console.log(`🎮 [INSIGHTS-SHARED] Novo jogo detectado: ${currentGameId} (anterior: ${lastGameId})`);
-      lastGameId = currentGameId;
     }
 
-    console.log(`✅ [INSIGHTS-SHARED] Dados frescos coletados: ${results.length} resultados`);
+    // 2. Tentar adquirir lock para buscar novos dados
+    const lockAcquired = await acquireLock('bmgbr3_results');
+    
+    if (!lockAcquired) {
+      // Aguardar e tentar cache novamente
+      console.log('⏳ [SHARED-INSIGHTS] Aguardando dados serem coletados...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      cachedData = await getGlobalCache('bmgbr3_results');
+      if (cachedData) {
+        return {
+          success: true,
+          data: cachedData
+        };
+      }
+      
+      throw new Error('Não foi possível obter dados - múltiplas coletas simultâneas');
+    }
 
-    return {
-      success: true,
-      data: {
+    try {
+      // 3. Buscar dados (apenas UMA instância por vez)
+      console.log('🌐 [SHARED-INSIGHTS] Fazendo requisição ÚNICA à Pragmatic para todos os usuários...');
+      
+      // Obter tokens compartilhados
+      const tokens = await getValidTokens();
+
+      // Buscar dados históricos da Pragmatic
+      const url = `https://games.pragmaticplaylive.net/api/ui/statisticHistory?tableId=mrbras531mrbr532&numberOfGames=500&JSESSIONID=${tokens.jsessionId}&ck=${Date.now()}&game_mode=roulette_desktop`;
+      
+      const historyResponse = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+          'Referer': 'https://games.pragmaticplaylive.net/',
+          'Cache-Control': 'no-cache'
+        }
+      });
+
+      if (!historyResponse.ok) {
+        throw new Error(`Erro na API Pragmatic: ${historyResponse.status}`);
+      }
+
+      const responseText = await historyResponse.text();
+      
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ [SHARED-INSIGHTS] Erro ao parsear JSON:', parseError);
+        throw new Error('Erro ao processar resposta da API');
+      }
+
+      if (data.errorCode !== "0") {
+        console.error('❌ [SHARED-INSIGHTS] Erro na API Pragmatic:', data.errorCode);
+        throw new Error(`API Pragmatic retornou erro: ${data.errorCode}`);
+      }
+
+      if (!Array.isArray(data.history)) {
+        console.error('❌ [SHARED-INSIGHTS] Histórico não é um array:', typeof data.history);
+        throw new Error('Dados de histórico inválidos');
+      }
+
+      // Processar resultados
+      const results = data.history.map((item: any, index: number) => {
+        const gameResult = item.gameResult || '';
+        const parts = gameResult.split(' ');
+        const number = parseInt(parts[0]) || 0;
+
+        // Determinar cor usando Set pré-calculado
+        let color = 'green';
+        if (number !== 0) {
+          color = RED_NUMBERS.has(number) ? 'red' : 'black';
+        }
+
+        return {
+          id: item.gameId || `${item.gameId}-${Date.now()}`,
+          gameId: item.gameId,
+          number: number,
+          color: color,
+          timestamp: Date.now() - (index * 60000),
+          gameResult: gameResult
+        };
+      });
+
+      const resultsData = {
         results: results,
         timestamp: Date.now(),
         userId: 'shared-insights-bmgbr3',
         resultsCount: results.length,
-        currentGameId: currentGameId,
-        tokensFromCache: cachedTokens ? (Date.now() - cachedTokens.generatedAt) < TOKEN_DURATION : false
-      }
-    };
+        currentGameId: results[0]?.gameId,
+        tokensFromCache: true
+      };
+
+      // 4. Salvar no cache global
+      await setGlobalCache('bmgbr3_results', resultsData, GLOBAL_DATA_DURATION);
+
+      console.log(`✅ [SHARED-INSIGHTS] Dados únicos coletados e compartilhados: ${results.length} resultados`);
+
+      return {
+        success: true,
+        data: resultsData
+      };
+
+    } finally {
+      // 5. Sempre liberar o lock
+      await releaseLock('bmgbr3_results');
+    }
 
   } catch (error) {
-    console.error('❌ [INSIGHTS-SHARED] Erro ao coletar dados:', error);
+    console.error('❌ [SHARED-INSIGHTS] Erro ao coletar dados:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Erro desconhecido'
@@ -199,37 +368,20 @@ export async function POST(request: NextRequest) {
     // Processar ações
     switch (action) {
       case 'start':
-        console.log(`🚀 [INSIGHTS-SHARED] Iniciando coleta para usuário: ${user_id}`);
-        return NextResponse.json({ success: true, message: 'Coleta iniciada' });
+        console.log(`🚀 [SHARED-INSIGHTS] Iniciando coleta compartilhada para usuário: ${user_id}`);
+        return NextResponse.json({ success: true, message: 'Coleta compartilhada iniciada' });
 
       case 'stop':
-        console.log(`🛑 [INSIGHTS-SHARED] Parando coleta para usuário: ${user_id}`);
+        console.log(`🛑 [SHARED-INSIGHTS] Parando coleta para usuário: ${user_id}`);
         return NextResponse.json({ success: true, message: 'Coleta parada' });
 
       case 'get':
-        const now = Date.now();
+        console.log(`📦 [SHARED-INSIGHTS] Usuário ${user_id} solicitando dados compartilhados`);
         
-        // 🎯 CACHE INTELIGENTE: Verificar se precisa atualizar baseado em tempo E gameId
-        const isDataFresh = cachedInsights && (now - lastFetch) < DATA_FRESH_DURATION;
+        // Usar sistema de cache global compartilhado
+        const sharedData = await collectFreshInsights();
         
-        if (isDataFresh) {
-          // Retornar dados do cache se ainda estão frescos
-          console.log('📦 [INSIGHTS-SHARED] Retornando dados do cache (ainda frescos)');
-          return NextResponse.json(cachedInsights);
-        }
-
-        // Cache expirado ou inexistente - coletar dados
-        console.log('🔄 [INSIGHTS-SHARED] Cache de dados expirado, atualizando...');
-        
-        const freshData = await collectFreshInsights();
-        
-        // Atualizar cache de dados
-        cachedInsights = freshData;
-        lastFetch = now;
-        
-        console.log('✅ [INSIGHTS-SHARED] Cache de dados atualizado');
-        
-        return NextResponse.json(freshData);
+        return NextResponse.json(sharedData);
 
       default:
         return NextResponse.json({
@@ -239,7 +391,7 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('❌ [INSIGHTS-SHARED] Erro na requisição:', error);
+    console.error('❌ [SHARED-INSIGHTS] Erro na requisição:', error);
     return NextResponse.json({
       success: false,
       error: 'Erro interno do servidor'

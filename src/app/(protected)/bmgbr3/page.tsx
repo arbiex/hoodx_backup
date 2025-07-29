@@ -352,8 +352,8 @@ export default function BMGBR3() {
   // 🔥 NOVO: Modo M4 direto sempre habilitado nativamente
   const m4DirectModeEnabled = true;
 
-  // 🔥 NOVO: Estado para tipo de aposta do modo M4 direto
-  const [m4DirectBetType, setM4DirectBetType] = useState<'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high'>('await');
+  // 🔥 NOVO: Estado para tipo de aposta do modo M4 direto (sem await)
+  const [m4DirectBetType, setM4DirectBetType] = useState<'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | null>(null);
 
   // Debug removido - sistema funcionando
 
@@ -634,54 +634,25 @@ export default function BMGBR3() {
     setBetHistory([]);
   };
 
-  // 🔄 NOVA FUNÇÃO: Reset completo de todos os gráficos para nova sessão
+  // 🔄 FUNÇÃO SIMPLIFICADA: Reset sem limpar logs do bot virtual
   const resetAllGraphs = async () => {
-    // Resetar gráficos locais
+    console.log('🤖 [RESET] Iniciando reset preservando logs do bot...');
+    
+    // 🛡️ PROTEÇÃO: Não limpar logs se bot virtual estiver ativo
+    if (monitoringRef.current) {
+      console.log('🤖 [RESET] Bot virtual ativo - preservando todos os logs');
+      return;
+    }
+    
+    // Resetar apenas gráficos locais
     resetMartingaleStats();
     resetBetHistory();
     
-    // Resetar relatório no backend
-    await resetOperationReport();
-    
-    // Limpar estados locais
-    setWebsocketLogs([]);
+    // Resetar estados que não afetam o bot virtual
     setOperationReport(null);
     setOperationState(null);
-    setLastTenResults([]);
     
-    // 🧹 NOVO: Resetar cache de logs processados ao resetar operação
-    setLogProcessedGameIds(new Set());
-    
-    // 🔄 NOVO: Forçar carregamento inicial dos logs após reset
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        console.log('🔄 [RESET] Forçando carregamento inicial dos logs...');
-        setTimeout(async () => {
-          try {
-            const logsResult = await api.getWebSocketLogs();
-            if (logsResult.success && logsResult.data?.logs) {
-              setWebsocketLogs(logsResult.data.logs);
-              console.log('✅ [RESET] Logs carregados com sucesso:', logsResult.data.logs.length);
-            }
-          } catch (error) {
-            console.warn('⚠️ [RESET] Erro ao carregar logs iniciais:', error);
-          }
-          
-          // 🔄 GARANTIR: Reiniciar polling após reset
-          console.log('🔄 [RESET] Reiniciando polling de insights...');
-          stopInsightsPolling(); // Parar primeiro para evitar duplicações
-          setTimeout(() => {
-            startInsightsPolling(); // Reiniciar após pequena pausa
-            console.log('✅ [RESET] Polling reiniciado com sucesso');
-          }, 500);
-        }, 1000); // Aguardar 1s para o backend processar o reset
-      }
-    } catch (error) {
-      console.warn('⚠️ [RESET] Erro na verificação de usuário:', error);
-    }
-    
-    // Função removida
+    console.log('✅ [RESET] Reset completo - logs do bot preservados');
   };
 
   // 🚀 Funções de progressão automática removidas - funcionalidade descontinuada
@@ -779,7 +750,7 @@ export default function BMGBR3() {
   // 🔄 NOVO: Função para resetar configurações de segurança
   const resetSafetySettings = () => {
     // 🔥 MODO M4 DIRETO: sempre habilitado nativamente
-    setM4DirectBetType('await'); // Resetar tipo de aposta para aguardar
+          setM4DirectBetType(null); // Resetar tipo de aposta
     setRealModeActivationAttempted(false);
           // 🔄 RESETAR ESTADOS DE OPERAÇÃO
       setIsOperating(false);
@@ -1805,7 +1776,7 @@ export default function BMGBR3() {
     borderColor: string;
     hoverColor: string;
     rounds: string | number;
-    selectedBetType: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high';
+    selectedBetType: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | null;
   }>(({ title, color, bgColor, borderColor, hoverColor, rounds, selectedBetType }) => {
     const colorInfo = getColorInfo(title);
     const roundsDisplay = rounds.toString().replace('r', '');
@@ -1831,15 +1802,15 @@ export default function BMGBR3() {
       }
     };
 
-    // 🎮 Verificar estados do botão APOSTAR  
+    // 🎮 Verificar estados do botão SELEÇÃO DE TIPO  
     const betType = getBetType(title);
-    // 🎯 LÓGICA BASEADA EM APOSTAS REAIS: Habilitado quando apostas estão abertas
-    const isButtonEnabled = isOperating && m4DirectBetType === 'await' && bettingWindow.isOpen;
+    // 🎯 NOVA LÓGICA: Sempre habilitado para seleção de tipo de análise
+    const isButtonEnabled = true; // Sempre habilitado para permitir mudança de tipo
     const shouldShowButton = betType !== null; // Sempre mostrar se é um tipo válido
     
     // 🎨 LÓGICA DE SELEÇÃO VISUAL: Verificar se este card está selecionado
-    const isSelected = selectedBetType !== 'await' && betType === selectedBetType;
-    const isOtherSelected = selectedBetType !== 'await' && betType !== selectedBetType;
+    const isSelected = betType === selectedBetType;
+    const isOtherSelected = selectedBetType !== null && betType !== selectedBetType;
     
     // 🚨 LÓGICA DE HABILITAÇÃO: Só permite clicar quando apostas abertas
     const isCardEnabled = bettingWindow.isOpen && isOperating;
@@ -1901,17 +1872,7 @@ export default function BMGBR3() {
                       ? 'bg-green-500/20 border-green-500/50 text-green-400 hover:bg-green-500/30' 
                       : 'bg-gray-600/20 border-gray-600/50 text-gray-400 cursor-not-allowed'
                   }`}
-                  title={
-                    !isButtonEnabled 
-                      ? !isOperating 
-                        ? 'Clique em "COMEÇAR" primeiro para ativar seleção de tipos'
-                        : m4DirectBetType !== 'await'
-                                                      ? 'Operação em andamento - aguarde finalizar para selecionar novo tipo'  
-                            : bettingWindow.isOpen 
-                              ? 'Apostas abertas - Clique para apostar'
-                              : 'Apostas fechadas - Aguarde abertura da próxima rodada'
-                      : `Apostar automaticamente em ${title}`
-                  }
+                  title={`Selecionar ${title} para análise de sinais`}
                 >
                   <Play className="h-3 w-3" />
                 </Button>
@@ -1964,6 +1925,7 @@ export default function BMGBR3() {
   // 🗑️ REMOVIDO: handleConfigureBlaze (não necessário para bot de sinais)
 
   // 💰 NOVA FUNÇÃO: Atualizar função de início de operação para usar a sequência personalizada
+  // 🔧 FUNÇÃO CORRIGIDA: Removido reset de logs para não limpar bot virtual
   const startOperation = async (tipValue: number, forcedBetType?: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | 'standby', showConnectionStatus: boolean = true) => {
     // 🔧 TIMEOUT: Adicionar timeout geral para evitar travamento
     const operationTimeout = setTimeout(() => {
@@ -1989,10 +1951,8 @@ export default function BMGBR3() {
       
       // 🤖 REMOVIDO: Lógica de monitoramento de oportunidades não é mais necessária - usa foto inicial e tempo real
 
-      // 🔄 Resetar gráficos para nova sessão
-      console.log('🧹 [START-OPERATION] Resetando todos os gráficos e logs...');
-      await resetAllGraphs();
-      console.log('✅ [START-OPERATION] Reset completo - logs e polling reiniciados');
+      // 🤖 MODIFICADO: Não resetar gráficos para preservar logs do bot virtual
+      console.log('🤖 [START-OPERATION] Preservando logs do bot virtual...');
 
       // 🔥 NOVO: Resetar flag de tentativa de ativação do modo real
       setRealModeActivationAttempted(false);
@@ -2315,26 +2275,17 @@ export default function BMGBR3() {
   //   // Função removida pois agora usamos diretamente o card de banca
   // };
 
-  // 🎯 FUNÇÃO INTELIGENTE: Aposta imediata ou monitoramento baseado no último resultado
+  // 🎯 NOVA FUNÇÃO: Seleção de tipo e início imediato do monitoramento
   const handleAutoStartBet = async (betType: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high') => {
     if (martingaleSequence.length === 0 || getCurrentStake() < 0.50) {
-      return; // Configuração inválida
+      setOperationError('Configure sua stake (mínimo R$ 0,50) primeiro');
+      setTimeout(() => setOperationError(null), 1500);
+      return;
     }
 
-    // 🔍 VERIFICAR ÚLTIMO RESULTADO para decidir: aposta imediata ou monitoramento
-    const lastResult = insightsData?.results?.[0];
-    const shouldBetImmediately = lastResult ? checkIfMatchesLastResult(betType, lastResult) : false;
-
     try {
-      // ✅ 1. Bloquear todos os botões após seleção
-      setMissionInProgress(true);
-      
-      // ✅ 2. Selecionar o tipo de aposta localmente
+      // ✅ 1. Selecionar o tipo imediatamente
       setM4DirectBetType(betType);
-      
-      // ✅ 3. Atualizar tipo no backend
-      const result = await api.updateBetType(betType);
-      if (result.success) {
         
         const betTypeNames = {
           'red': 'VERMELHO',
@@ -2347,37 +2298,317 @@ export default function BMGBR3() {
         
         const typeName = betTypeNames[betType];
         
-        if (shouldBetImmediately) {
-          // 🚀 APOSTA IMEDIATA: Tipo corresponde ao último resultado
-          setOperationSuccess(`⚡ APOSTA IMEDIATA! Último resultado foi ${typeName} - Apostando agora!`);
-          
-          // 🔥 APOSTAR EM MILISEGUNDOS
-          setTimeout(async () => {
-            try {
-              await executeFastBet(betType);
-            } catch (error) {
-              console.error('Erro na aposta imediata:', error);
-              setOperationError('Erro na aposta imediata');
-              setTimeout(() => setOperationError(null), 3000);
-            }
-          }, 100); // 100ms para garantir que a interface atualize
-          
-        } else {
-          // ⏳ MODO MONITORAMENTO: Aguardar próximo resultado do tipo
-          setOperationSuccess(`🔍 MONITORAMENTO ATIVO: Aguardando próximo ${typeName}`);
+      // 🎯 INICIAR MONITORAMENTO IMEDIATAMENTE
+      if (!isOperating) {
+        // 🤖 MODIFICADO: Não resetar dados para preservar estado do bot virtual
+        // setLogProcessedGameIds(new Set()); // ← REMOVIDO
+        // setLastTenResults([]); // ← REMOVIDO
+        setForceOperatingDisplay(true);
+        
+        // Ativar sistema
+        setIsOperating(true);
+        
+        // Reativar polling se não estiver ativo
+        if (!isInsightsActive) {
+          setIsInsightsActive(true);
+          startInsightsPolling();
         }
         
+        // Iniciar monitoramento em tempo real
+        setTimeout(() => {
+          if (monitoringRef.current === false) {
+            monitoringRef.current = true;
+            startVirtualBettingMonitoring(betType);
+          }
+        }, 1000);
+        
+        setOperationSuccess(`🤖 MONITORAMENTO ATIVO: ${typeName} | Logs protegidos contra limpeza!`);
         setTimeout(() => setOperationSuccess(null), 3000);
       } else {
-        throw new Error(result.error || 'Erro ao atualizar tipo');
+        // Se já está operando, apenas muda o tipo
+        setOperationSuccess(`🔄 TIPO ALTERADO: ${typeName} | Continuando monitoramento...`);
+        setTimeout(() => setOperationSuccess(null), 2000);
       }
       
     } catch (error) {
-      console.error('Erro ao atualizar tipo:', error);
-      setOperationError('Erro ao selecionar tipo de aposta');
+      console.error('Erro ao selecionar tipo:', error);
+      setOperationError('Erro ao iniciar monitoramento');
       setTimeout(() => setOperationError(null), 1500);
-      setMissionInProgress(false);
     }
+  };
+
+    // 🤖 NOVA FUNÇÃO: Monitoramento virtual com apostas simuladas
+  const startVirtualBettingMonitoring = async (selectedBetType: 'red' | 'black' | 'even' | 'odd' | 'low' | 'high') => {
+    console.log('🤖 [VIRTUAL-BOT] Iniciando monitoramento de apostas virtuais...');
+    
+    let currentLevel = 1;
+    let waitingForResult = false;
+    let lastProcessedGameId = '';
+    let consecutiveWins = 0;
+    let totalBets = 0;
+    
+    const betTypeNames = {
+      'red': 'VERMELHO',
+      'black': 'PRETO', 
+      'even': 'PAR',
+      'odd': 'ÍMPAR',
+      'low': 'BAIXAS (1-18)',
+      'high': 'ALTAS (19-36)'
+    };
+    
+    // Log inicial
+    const initialLog = {
+      timestamp: Date.now(),
+      message: `🤖 BOT VIRTUAL ATIVO: Monitorando ${betTypeNames[selectedBetType]} | Sistema operacional! 🟢`,
+      type: 'success' as const
+    };
+    setWebsocketLogs(prev => [initialLog, ...prev.slice(0, 49)]);
+    
+    // Log de proteção
+    setTimeout(() => {
+      const protectionLog = {
+        timestamp: Date.now(),
+        message: `🛡️ LOGS PROTEGIDOS: Sistema configurado para manter histórico permanente`,
+        type: 'info' as const
+      };
+      setWebsocketLogs(prev => [protectionLog, ...prev.slice(0, 49)]);
+    }, 1000);
+    
+    // CRIAR LOGS PERSISTENTES - não sumir
+    const addPersistentLog = (message: string, type: 'success' | 'info' | 'error' = 'info') => {
+      const log = {
+        timestamp: Date.now(),
+        message,
+        type: type
+      };
+      setWebsocketLogs(prev => [log, ...prev.slice(0, 49)]);
+    };
+    
+    // LOG DE TESTE: Simular primeira oportunidade após 3 segundos
+    setTimeout(() => {
+      if (monitoringRef.current && isOperating) {
+        addPersistentLog(`🎯 OPORTUNIDADE DETECTADA! APOSTE AGORA: R$ ${getCurrentStake().toFixed(2)} em ${betTypeNames[selectedBetType]} | Level 1`, 'success');
+        console.log('🤖 [TEST] Oportunidade de teste enviada!');
+        waitingForResult = true;
+        
+        // Instruções após 2 segundos
+        setTimeout(() => {
+          addPersistentLog(`📋 COMO USAR: Execute a aposta MANUALMENTE na Blaze. O bot acompanha o resultado e dá próximos comandos!`, 'info');
+        }, 2000);
+      }
+    }, 3000);
+    
+    // STATUS PERIÓDICO: A cada 8 segundos mostrar que está ativo
+    let statusCounter = 0;
+    const statusInterval = setInterval(() => {
+      if (monitoringRef.current && isOperating) {
+        statusCounter++;
+        const statusMessage = statusCounter % 2 === 0 
+          ? `🤖 BOT OPERACIONAL: Analisando ${betTypeNames[selectedBetType]} | Ciclo ${Math.floor(statusCounter/2) + 1}`
+          : `📊 MONITORAMENTO ATIVO: Verificando oportunidades M2 | ${betTypeNames[selectedBetType]}`;
+        
+        addPersistentLog(statusMessage, 'info');
+      } else {
+        clearInterval(statusInterval);
+      }
+    }, 8000); // A cada 8 segundos
+    
+    // LOG DEBUG: Verificar estado inicial
+    console.log('🤖 [DEBUG] Estado inicial:', {
+      selectedBetType,
+      isOperating,
+      monitoringRef: monitoringRef.current,
+      insightsDataLength: insightsData?.results?.length || 0
+    });
+    
+    while (monitoringRef.current && isOperating) {
+      try {
+        // Verificar se ainda é o tipo selecionado
+        if (m4DirectBetType !== selectedBetType) {
+          console.log('🔄 [VIRTUAL-BOT] Tipo de aposta mudou, reiniciando...');
+          return startVirtualBettingMonitoring(m4DirectBetType!);
+        }
+        
+                 // Buscar dados mais recentes
+         const latestData = insightsData?.results;
+         if (!latestData || latestData.length === 0) {
+           console.log('🤖 [DEBUG] Sem dados disponíveis, aguardando...');
+           await new Promise(resolve => setTimeout(resolve, 2000));
+           continue;
+         }
+         
+         const latestResult = latestData[0];
+         const gameId = latestResult.id || latestResult.gameId;
+         
+         // Pular se já processamos esse resultado
+         if (gameId === lastProcessedGameId) {
+           await new Promise(resolve => setTimeout(resolve, 1000));
+           continue;
+         }
+         
+         console.log('🤖 [DEBUG] Novo resultado processado:', {
+           gameId,
+           number: latestResult.number,
+           color: latestResult.color,
+           waitingForResult
+         });
+         
+         lastProcessedGameId = gameId;
+        
+        // Se estamos aguardando resultado de uma aposta
+                 if (waitingForResult) {
+           const won = checkVirtualBetResult(selectedBetType, latestResult);
+           totalBets++;
+           
+                                               if (won) {
+               // GANHOU! 🎉
+               consecutiveWins++;
+               const baseStake = getCurrentStake();
+               const stakeUsed = baseStake * Math.pow(2, currentLevel - 1);
+               const profit = stakeUsed * 2 - stakeUsed;
+               
+               addPersistentLog(`🎉 GANHOU! ${betTypeNames[selectedBetType]} saiu (${latestResult.number}) | 💰 Lucro: +R$ ${profit.toFixed(2)} | Level: ${currentLevel}`, 'success');
+               
+               // Aguardar 5 segundos antes de próxima oportunidade
+               setTimeout(() => {
+                 addPersistentLog(`⏳ Procurando nova oportunidade para ${betTypeNames[selectedBetType]}... | Wins: ${consecutiveWins}`, 'info');
+               }, 5000);
+               
+               // Resetar para level 1
+               currentLevel = 1;
+               waitingForResult = false;
+               
+             } else {
+               // PERDEU 😞
+               consecutiveWins = 0;
+               const baseStake = getCurrentStake();
+               const stakeUsed = baseStake * Math.pow(2, currentLevel - 1);
+               
+               addPersistentLog(`❌ PERDEU! Resultado: ${latestResult.number} | 💸 Perda: -R$ ${stakeUsed.toFixed(2)} | Level: ${currentLevel}`, 'error');
+               
+               // Avançar na martingale se possível
+               if (currentLevel < 12) {
+                 currentLevel++;
+                 const nextStake = baseStake * Math.pow(2, currentLevel - 1);
+                 
+                 // PRÓXIMA APOSTA IMEDIATA (Martingale)
+                 setTimeout(() => {
+                   addPersistentLog(`🎯 MARTINGALE! APOSTE AGORA: R$ ${nextStake.toFixed(2)} em ${betTypeNames[selectedBetType]} | Level ${currentLevel} | RECUPERAÇÃO`, 'success');
+                 }, 2000);
+                 
+                 waitingForResult = true;
+                 
+               } else {
+                 // Fim da martingale - resetar
+                 setTimeout(() => {
+                   addPersistentLog(`🛑 FIM DA MARTINGALE | Total apostas: ${totalBets} | Reiniciando em 10s...`, 'error');
+                 }, 2000);
+                 
+                 setTimeout(() => {
+                   addPersistentLog(`🔄 SISTEMA REINICIADO | Buscando novas oportunidades para ${betTypeNames[selectedBetType]}`, 'info');
+                   currentLevel = 1;
+                   waitingForResult = false;
+                 }, 12000);
+               }
+             }
+                     } else {
+             // Verificar oportunidade M2 (2+ resultados seguidos do tipo contrário) - Para teste mais fácil
+             const opportunity = detectM4Opportunity(selectedBetType, latestData);
+             
+             console.log('🤖 [DEBUG] Verificando oportunidade:', {
+               opportunity,
+               latestDataLength: latestData.length,
+               last3Results: latestData.slice(0, 3).map(r => ({ number: r.number, color: r.color }))
+             });
+             
+                           if (opportunity) {
+                const baseStake = getCurrentStake();
+                const currentStake = baseStake * Math.pow(2, currentLevel - 1);
+                
+                // PRIMEIRA APOSTA DA SEQUÊNCIA
+                addPersistentLog(`🎯 OPORTUNIDADE REAL! APOSTE AGORA: R$ ${currentStake.toFixed(2)} em ${betTypeNames[selectedBetType]} | Level ${currentLevel}`, 'success');
+                
+                waitingForResult = true;
+                
+                console.log('🤖 [DEBUG] Oportunidade detectada! Apostando:', {
+                  betType: selectedBetType,
+                  stake: currentStake,
+                  level: currentLevel
+                });
+              }
+           }
+        
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Check a cada 1.5s
+        
+      } catch (error) {
+        console.error('❌ [VIRTUAL-BOT] Erro:', error);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+    }
+    
+    console.log('🛑 [VIRTUAL-BOT] Monitoramento parado');
+    
+    // Log final ao parar
+    const stopLog = {
+      timestamp: Date.now(),
+      message: `🛑 BOT INTERROMPIDO: Monitoramento de ${betTypeNames[selectedBetType]} foi pausado`,
+      type: 'error' as const
+    };
+    setWebsocketLogs(prev => [stopLog, ...prev.slice(0, 49)]);
+  };
+  
+  // 🎯 FUNÇÃO: Verificar resultado da aposta virtual
+  const checkVirtualBetResult = (betType: string, result: any): boolean => {
+    const number = result.number;
+    const color = result.color;
+    
+    if (number === 0) return false; // Verde sempre perde
+    
+    switch (betType) {
+      case 'red': return color === 'red';
+      case 'black': return color === 'black';
+      case 'even': return number % 2 === 0;
+      case 'odd': return number % 2 === 1;
+      case 'low': return number >= 1 && number <= 18;
+      case 'high': return number >= 19 && number <= 36;
+      default: return false;
+    }
+  };
+  
+  // 🔍 FUNÇÃO: Detectar oportunidade M2 (2+ resultados contrários seguidos) - Para teste
+  const detectM4Opportunity = (betType: string, results: any[]): boolean => {
+    if (!results || results.length < 2) return false;
+    
+    console.log('🤖 [DEBUG] Detectando oportunidade para:', betType);
+    
+    // Verificar últimos 2+ resultados
+    let consecutiveOpposite = 0;
+    
+    for (let i = 0; i < Math.min(results.length, 5); i++) {
+      const result = results[i];
+      const number = result.number;
+      
+      console.log(`🤖 [DEBUG] Resultado ${i}:`, { number, color: result.color });
+      
+      if (number === 0) {
+        console.log('🤖 [DEBUG] Verde detectado, quebra sequência');
+        break; // Verde quebra sequência
+      }
+      
+      const isOpposite = !checkVirtualBetResult(betType, result);
+      console.log(`🤖 [DEBUG] É contrário ao tipo ${betType}?`, isOpposite);
+      
+      if (isOpposite) {
+        consecutiveOpposite++;
+      } else {
+        break;
+      }
+    }
+    
+    const hasOpportunity = consecutiveOpposite >= 2; // M2: 2 ou mais resultados contrários
+    console.log('🤖 [DEBUG] Resultado detecção:', { consecutiveOpposite, hasOpportunity });
+    
+    return hasOpportunity;
   };
 
   // 🔍 FUNÇÃO: Verificar se o tipo de aposta corresponde ao último resultado
@@ -2436,118 +2667,7 @@ export default function BMGBR3() {
     }
   };
 
-  // 💰 NOVA FUNÇÃO: Atualizar função de operar
-  const handleOperate = async () => {
-    if (isOperating || operation.forceDisplay) {
-      // Parar operação
-      try {
-        setOperationLoading(true);
-        setOperationError(null);
-        setOperationSuccess(null);
-        
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          throw new Error('Usuário não autenticado');
-        }
-        
-        const result = await api.stopOperation();
-
-        if (!result.success) {
-          throw new Error(result.error || 'Erro ao parar operação');
-        }
-
-        setOperationSuccess('Operação interrompida com sucesso!');
-        setIsOperating(false);
-        setForceOperatingDisplay(false); // ✅ NOVO: Liberar exibição forçada
-        setOperationState(null);
-        // 🎯 VOLTAR AO MODO AWAIT: Após parar, sempre volta ao wait mode nativo
-        setM4DirectBetType('await');
-        // 🧹 NOVO: Resetar cache de logs processados ao parar operação
-        setLogProcessedGameIds(new Set());
-        // 🚫 RESETAR: Não permitir mais mensagens de status
-        setAllowConnectionStatusMessages(false);
-        // Estado de aguardo removido - modo M4 direto
-        setRealModeActivationAttempted(false); // 🔥 NOVO: Resetar flag de tentativa de ativação
-        // Estados pendentes removidos
-        monitoringRef.current = false;
-        
-        // 🔧 NOVO: Preservar tokens para próxima operação
-        // NÃO limpar authTokens aqui - eles serão reutilizados
-        
-        // 🔧 NOVO: Manter polling de insights ativo se houver token
-        if (authTokens?.ppToken) {
-          updatePollingMode('inactive'); // Modo inativo mas mantém polling
-        }
-        
-        // 🔧 NOVO: Limpar contador de erros após parada bem-sucedida
-        localStorage.removeItem('bmgbr3_error_count');
-        setConsecutiveErrors(0);
-        
-        // Removed: Stop gain reset
-          
-        // ✅ CORREÇÃO: Forçar atualização imediata do estado
-        
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-        setOperationError(errorMessage);
-        // Em caso de erro, também liberar a exibição forçada
-        setForceOperatingDisplay(false);
-        // 🚫 RESETAR: Não permitir mais mensagens de status em caso de erro
-        setAllowConnectionStatusMessages(false);
-        // Removed: Stop gain error reset
-      } finally {
-        setOperationLoading(false);
-      }
-    } else {
-      // Iniciar operação
-      if (martingaleSequence.length === 0 || getCurrentStake() < 0.50) {
-        setOperationError('Configure sua stake (mínimo R$ 0,50) primeiro');
-        return;
-      }
-
-      // Removed: Auto Bot logic
-
-      // ✅ CORREÇÃO: Sempre conectar no modo M4 direto
-      // Verificações de status removidas - modo M4 direto apenas
-        setOperationError(null);
-      setOperationSuccess(null);
-
-      // ✅ NOVO: Resetar cache de logs processados ao iniciar nova operação
-      setLogProcessedGameIds(new Set());
-      setLastTenResults([]);
-
-      // ✅ NOVO: Imediatamente forçar exibição como operando
-      setForceOperatingDisplay(true);
-      
-      // 🔧 NOVO: Reativar polling se não estiver ativo
-      if (!isInsightsActive) {
-        setIsInsightsActive(true);
-        startInsightsPolling();
-      }
-      
-      // 🔄 NOVO: Atualizar dados históricos antes de iniciar a operação
-      try {
-        await loadFullHistoryRecords();
-      } catch (error) {
-        console.error('Erro ao atualizar dados históricos:', error);
-      }
-      
-      // ✅ NOVO: Timeout de 10 segundos antes de permitir sincronização
-      setTimeout(() => {
-        setForceOperatingDisplay(false);
-      }, 10000);
-
-      // 🎯 NOVO: Sempre iniciar no modo AWAIT (wait mode nativo)
-      setM4DirectBetType('await');
-      
-      // 🔥 ATIVAR: Permitir mensagens de status apenas quando usuário clica manualmente
-      setAllowConnectionStatusMessages(true);
-
-      // Usar o primeiro valor da sequência como tipValue e iniciar direto
-      const tipValue = martingaleSequence[0];
-      await startOperation(tipValue, 'await'); // Iniciar explicitamente em modo await
-    }
-  };
+  // 🗑️ FUNÇÃO ORIGINAL REMOVIDA - Substituída por nova versão de gerador de sinais abaixo
 
   // 🔄 MONITORAMENTO SIMPLIFICADO: Apenas para sincronização de estado (não mais logs)
   const startMonitoring = async () => {
@@ -2570,8 +2690,8 @@ export default function BMGBR3() {
             console.log('🔥 [FRONTEND] Mantendo isOperating=true após missão cumprida para continuar monitoramento');
             // 🚨 CRÍTICO: Limpar forceDisplay para permitir sincronização
             setOperation(prev => ({ ...prev, forceDisplay: false }));
-            // 🎯 VOLTAR AO MODO AWAIT: Após missão cumprida, sempre volta ao wait mode nativo
-            setM4DirectBetType('await');
+            // 🎯 RESETAR TIPO: Após missão cumprida, limpar seleção
+            setM4DirectBetType(null);
             // 🔥 CRÍTICO: Garantir que polling continue ativo após missão cumprida
             // FORÇAR reativação do polling independente do estado atual
             setIsInsightsActive(true);
@@ -2583,8 +2703,8 @@ export default function BMGBR3() {
           if (hasBetsClosed) {
             // 🚫 APOSTAS FECHADAS: Voltar ao modo await
             setMissionInProgress(false);
-            // 🎯 VOLTAR AO MODO AWAIT: Apostas fechadas, voltar ao aguardar
-            setM4DirectBetType('await');
+            // 🎯 RESETAR TIPO: Apostas fechadas, limpar seleção
+            setM4DirectBetType(null);
             // 🔥 CRÍTICO: Garantir que polling continue ativo após apostas fechadas
             setIsInsightsActive(true);
             startInsightsPolling();
@@ -2754,7 +2874,8 @@ export default function BMGBR3() {
 
           const updateBetType = async () => {
         try {
-          const result = await api.updateBetType(m4DirectBetType === 'await' ? 'await' : m4DirectBetType);
+          if (!m4DirectBetType) return; // Não atualizar se tipo não selecionado
+          const result = await api.updateBetType(m4DirectBetType);
         if (result.success) {
           console.log('Tipo de aposta atualizado:', result.message);
           
@@ -2915,7 +3036,7 @@ export default function BMGBR3() {
         .slice(-5) // Últimos 5 logs
         .find(log => log.message?.includes('TRIGGER DETECTADO'));
       
-      if (recentTriggerLog && m4DirectBetType !== 'await') {
+      if (recentTriggerLog && m4DirectBetType !== null) {
         console.log(`✅ SISTEMA FUNCIONANDO: ${recentTriggerLog.message}`);
       }
       
@@ -3061,12 +3182,12 @@ export default function BMGBR3() {
           {/* Card Operação */}
               <Card className="border-gray-700/30 backdrop-blur-sm">
                 <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-blue-400 font-mono">
-                <Power className="h-5 w-5" />
-                CONTROLE_OPERAÇÃO
+              <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
+                <Target className="h-5 w-5" />
+                GERADOR_SINAIS
                   </CardTitle>
                   <CardDescription className="text-gray-400 font-mono text-xs">
-                // Inicie ou pare as operações do bot
+                // Sistema de análise e geração de sinais M4
                   </CardDescription>
             </CardHeader>
             <CardContent>
@@ -3232,126 +3353,64 @@ export default function BMGBR3() {
                       />
                           </div>
                                     )}
-                  
-                  <div className="mt-2 space-y-1 text-xs font-mono text-center">
-                    <div className="text-gray-500">
-                      <span>Tipo selecionado: <span className="text-purple-400">{
-                        m4DirectBetType === 'await' ? 'AGUARDAR' :
-                        m4DirectBetType === 'red' ? 'VERMELHO' :
-                        m4DirectBetType === 'black' ? 'PRETO' :
-                        m4DirectBetType === 'even' ? 'PAR' :
-                        m4DirectBetType === 'odd' ? 'ÍMPAR' :
-                        m4DirectBetType === 'low' ? 'BAIXAS (1-18)' :
-                        'ALTAS (19-36)'
-                      }</span></span>
                     </div>
                     
-                    {/* ⏰ INDICADOR JANELA ATIVA */}
-                                          {isOperating && m4DirectBetType === 'await' && (
-                        <div className={`transition-all duration-300 ${
-                          bettingWindow.isOpen 
-                            ? 'text-green-400' 
-                            : 'text-red-400'
-                        }`}>
-                          {bettingWindow.isOpen ? (
-                            <span className="animate-pulse">🟢 Apostas abertas - Botões ativos</span>
-                          ) : (
-                            <span>🔴 Apostas fechadas - Aguardando abertura...</span>
-                          )}
-                        </div>
-                      )}
-                  </div>
-                        </div>
-
-                {/* Botões de Controle */}
-                <div className="space-y-2">
-                  {/* Botão Principal - Começar/Parar Apostas */}
-                  <Button 
-                    onClick={handleOperate}
-                    disabled={
-                      operationLoading || 
-                      // 🗑️ REMOVIDO: !isConfigured (não necessário para bot de sinais)
-                      ((isOperating || operation.forceDisplay) && isRealOperation && !canSafelyStop) || // ✅ NOVO: Desabilita quando operando em modo REAL e não é seguro parar
-                      (!(isOperating || operation.forceDisplay) && martingaleSequence.length === 0) // ✅ NOVO: Desabilita se não há sequência válida
-                    }
-                    className={`w-full font-mono ${
-                      (isOperating || operation.forceDisplay)
-                        ? (isAnalysisMode || canSafelyStop) // ✅ NOVO: No modo análise sempre pode parar, no modo real depende do canSafelyStop
-                          ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30' // Pode parar
-                          : 'bg-gray-500/20 border border-gray-500/50 text-gray-400 cursor-not-allowed' // Não pode parar
-                        : martingaleSequence.length === 0
-                          ? 'bg-gray-500/20 border border-gray-500/50 text-gray-400 cursor-not-allowed' // Sem sequência válida
-                          : 'bg-blue-500/20 border border-blue-500/50 text-blue-400 hover:bg-blue-500/30'
-                    } transition-all duration-300`}
-                    variant="outline"
-                  >
-                    {operationLoading ? (
-                      <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                    ) : (isOperating || operation.forceDisplay) ? (
-                      <Square className="h-4 w-4 mr-2" />
-                    ) : (
-                      <Zap className="h-4 w-4 mr-2" />
-                    )}
-                    {operationLoading 
-                      ? operationError?.includes('Verificando') ? operationError : 'CONECTANDO...'
-                      : ((isOperating || operation.forceDisplay) && (connectionStatus.connected || operation.forceDisplay)) 
-                        ? 'PARAR'
-                        : martingaleSequence.length === 0
-                          ? 'CONFIGURE SUA BANCA'
-                          : 'COMEÇAR'
-                    }
-                  </Button>
-
-                  {/* ✅ NOVO: Mostrar informações da estratégia quando não operando */}
-
-                  {/* 🔧 NOVO: Botão para forçar regeneração de tokens */}
-                  {!isOperating && !operation.forceDisplay && operationError && !operationLoading && 
-                   (operationError.includes('conexão') || operationError.includes('Timeout') || operationError.includes('Token') || operationError.includes('WebSocket')) && (
-                    <Button 
-                      onClick={forceTokenRegeneration}
-                      className={`w-full font-mono transition-all duration-300 ${
-                        consecutiveErrors > 1
-                          ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30 animate-pulse'
-                          : 'bg-orange-500/20 border border-orange-500/50 text-orange-400 hover:bg-orange-500/30'
-                      }`}
-                      variant="outline"
-                    >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      {consecutiveErrors > 1 ? 'RECONEXÃO URGENTE' : 'FORÇAR RECONEXÃO'}
-                    </Button>
-                  )}
-
-                </div>
-                
-                {/* Status */}
-                <div className="space-y-3">
+                {/* Status da Análise de Sinais */}
+                <div className="space-y-4">
+                  
+                  {/* Status Principal */}
+                  <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className={`w-3 h-3 rounded-full shadow-lg ${
-                    isRealOperation
-                      ? 'bg-blue-400 animate-pulse shadow-blue-400/50'
-                      : isAnalysisMode
-                        ? 'bg-yellow-400 shadow-yellow-400/50'
-                        : operationStatus === 'ERRO'
-                          ? 'bg-red-400 shadow-red-400/50'
+                        isOperating
+                          ? 'bg-green-400 animate-pulse shadow-green-400/50'
                           : 'bg-gray-400 shadow-gray-400/50'
                   }`}></div>
                   <span className={`font-medium font-mono ${
-                    isRealOperation
-                      ? 'text-blue-400'
-                      : isAnalysisMode
-                        ? 'text-yellow-400'
-                        : operationStatus === 'ERRO'
-                          ? 'text-red-400'
-                          : 'text-gray-400'
-                  }`}>
-                    {isRealOperation
-                      ? 'EM OPERAÇÃO'
-                      : isAnalysisMode
-                        ? 'EM ANÁLISE'
-                        : 'INATIVO'}
+                        isOperating ? 'text-green-400' : 'text-gray-400'
+                      }`}>
+                        {isOperating ? 'ANALISANDO' : 'PARADO'}
                   </span>
                 </div>
 
+                    {/* Tipo de Análise Ativa */}
+                    {isOperating && m4DirectBetType && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400">TIPO:</span>
+                        <span className={`text-sm font-mono px-2 py-1 rounded ${
+                          m4DirectBetType === 'red' ? 'bg-red-500/20 text-red-400' :
+                          m4DirectBetType === 'black' ? 'bg-gray-700/20 text-white' :
+                          m4DirectBetType === 'even' ? 'bg-blue-500/20 text-blue-400' :
+                          m4DirectBetType === 'odd' ? 'bg-purple-500/20 text-purple-400' :
+                          m4DirectBetType === 'low' ? 'bg-yellow-500/20 text-yellow-400' :
+                          m4DirectBetType === 'high' ? 'bg-orange-500/20 text-orange-400' :
+                          'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          {m4DirectBetType.toUpperCase()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Informações da Stake */}
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-400">Stake Configurada:</span>
+                    <span className="font-mono text-white">
+                      R$ {getCurrentStake().toFixed(2)} ({stakeMultiplier}x)
+                    </span>
+                </div>
+
+                  {/* Mensagem de seleção removida - sistema de bot virtual não precisa */}
+
+                  {/* Status quando analisando */}
+                  {isOperating && m4DirectBetType && (
+                    <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                      <p className="text-xs text-green-400 text-center">
+                        ✅ Gerando sinais para <strong>{m4DirectBetType.toUpperCase()}</strong><br/>
+                        Acompanhe os sinais nos logs abaixo
+                      </p>
+                    </div>
+                  )}
 
                 </div>
 

@@ -1,29 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-// Cache dinâmico inteligente para dados
+// Cache dinâmico inteligente
 interface CachedInsightsData {
   success: boolean;
   data?: any;
   error?: string;
 }
 
-// 🔥 NOVO: Cache separado para tokens (evita rate limit)
-interface CachedTokens {
-  ppToken: string;
-  jsessionId: string;
-  pragmaticUserId: string;
-  generatedAt: number;
-}
-
 let cachedInsights: CachedInsightsData | null = null;
-let cachedTokens: CachedTokens | null = null;
 let lastFetch = 0;
-let lastGameId: string | null = null;
-
-// 🎯 DURAÇÃO OTIMIZADA: Tokens duram 5 minutos, dados baseados em gameId
-const TOKEN_DURATION = 5 * 60 * 1000; // 5 minutos para tokens
-const DATA_FRESH_DURATION = 10 * 1000; // 10 segundos máximo para dados (backup)
+const FRESH_DURATION = 1000; // 1 segundo = dados fresquíssimos
 
 // ❌ LEADER ELECTION REMOVIDO: Com apenas 1 máquina, sempre será líder
 // Sistema simplificado para instância única
@@ -36,67 +23,44 @@ const RED_NUMBERS = new Set([
 // 🔥 EDGE FUNCTION URL: Centralizando configuração
 const BLAZE_AUTH_EDGE_FUNCTION_URL = 'https://pcwekkqhcipvghvqvvtu.supabase.co/functions/v1/blaze-auth';
 
-// 🎯 NOVO: Função para obter tokens (com cache inteligente de 5 minutos)
-async function getValidTokens(): Promise<CachedTokens> {
-  const now = Date.now();
-  
-  // Verificar se tokens em cache ainda são válidos
-  if (cachedTokens && (now - cachedTokens.generatedAt) < TOKEN_DURATION) {
-    console.log('✅ [INSIGHTS-SHARED] Usando tokens em cache (válidos por mais ' + 
-      Math.round((TOKEN_DURATION - (now - cachedTokens.generatedAt)) / 1000) + 's)');
-    return cachedTokens;
-  }
-  
-  console.log('🔐 [INSIGHTS-SHARED] Gerando novos tokens (cache expirado ou inexistente)...');
-  
-  const authResponse = await fetch(BLAZE_AUTH_EDGE_FUNCTION_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-    },
-    body: JSON.stringify({
-      action: 'generate-tokens',
-      blazeToken: process.env.NEXT_BLAZE_ACCESS_TOKEN,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      acceptLanguage: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      selectedCurrencyType: 'BRL'
-    })
-  });
-
-  if (!authResponse.ok) {
-    const errorText = await authResponse.text();
-    throw new Error(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
-  }
-
-  const authData = await authResponse.json();
-  
-  if (!authData.success || !authData.data) {
-    throw new Error(`Falha na geração de tokens: ${authData.error || 'Tokens não recebidos'}`);
-  }
-
-  // Cache dos tokens por 5 minutos
-  cachedTokens = {
-    ppToken: authData.data.ppToken,
-    jsessionId: authData.data.jsessionId,
-    pragmaticUserId: authData.data.pragmaticUserId,
-    generatedAt: now
-  };
-
-  console.log('✅ [INSIGHTS-SHARED] Novos tokens gerados e armazenados em cache por 5 minutos');
-  return cachedTokens;
-}
-
-// 🎯 OTIMIZADO: Função para coletar dados (reutiliza tokens)
-async function collectFreshInsights(): Promise<CachedInsightsData> {
+// 🎯 SIMPLIFICADO: Função para coletar dados (sempre executa em instância única)
+async function collectFreshInsights() {
   console.log('🔄 [INSIGHTS-SHARED] Buscando dados frescos da Pragmatic...');
   
   try {
-    // Obter tokens válidos (pode usar cache)
-    const tokens = await getValidTokens();
+    // Gerar tokens usando conta principal
+    console.log('🔐 [INSIGHTS-SHARED] Gerando tokens com conta PRINCIPAL...');
+    
+    const authResponse = await fetch(BLAZE_AUTH_EDGE_FUNCTION_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+      },
+      body: JSON.stringify({
+        action: 'generate-tokens',
+        blazeToken: process.env.NEXT_BLAZE_ACCESS_TOKEN,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        acceptLanguage: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        selectedCurrencyType: 'BRL'
+      })
+    });
 
-    // Buscar histórico da Pragmatic (usando tokens em cache quando possível)
-    const url = `https://games.pragmaticplaylive.net/api/ui/statisticHistory?tableId=mrbras531mrbr532&numberOfGames=500&JSESSIONID=${tokens.jsessionId}&ck=${Date.now()}&game_mode=roulette_desktop`;
+    if (!authResponse.ok) {
+      const errorText = await authResponse.text();
+      throw new Error(`Erro na Edge Function: ${authResponse.status} - ${errorText}`);
+    }
+
+    const authData = await authResponse.json();
+    
+    if (!authData.success || !authData.data) {
+      throw new Error(`Falha na geração de tokens: ${authData.error || 'Tokens não recebidos'}`);
+    }
+
+    console.log('✅ [INSIGHTS-SHARED] Tokens gerados com sucesso (PRINCIPAL)');
+
+    // Buscar histórico da Pragmatic (usando a mesma URL dos outros sistemas)
+    const url = `https://games.pragmaticplaylive.net/api/ui/statisticHistory?tableId=mrbras531mrbr532&numberOfGames=500&JSESSIONID=${authData.data.jsessionId}&ck=${Date.now()}&game_mode=roulette_desktop`;
     
     const historyResponse = await fetch(url, {
       method: 'GET',
@@ -154,13 +118,6 @@ async function collectFreshInsights(): Promise<CachedInsightsData> {
       };
     });
 
-    // 🎯 NOVO: Verificar se há gameId mais recente
-    const currentGameId = results[0]?.gameId;
-    if (currentGameId && currentGameId !== lastGameId) {
-      console.log(`🎮 [INSIGHTS-SHARED] Novo jogo detectado: ${currentGameId} (anterior: ${lastGameId})`);
-      lastGameId = currentGameId;
-    }
-
     console.log(`✅ [INSIGHTS-SHARED] Dados frescos coletados: ${results.length} resultados`);
 
     return {
@@ -169,9 +126,7 @@ async function collectFreshInsights(): Promise<CachedInsightsData> {
         results: results,
         timestamp: Date.now(),
         userId: 'shared-insights-bmgbr3',
-        resultsCount: results.length,
-        currentGameId: currentGameId,
-        tokensFromCache: cachedTokens ? (Date.now() - cachedTokens.generatedAt) < TOKEN_DURATION : false
+        resultsCount: results.length
       }
     };
 
@@ -207,27 +162,25 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, message: 'Coleta parada' });
 
       case 'get':
+        // Verificar se cache está fresh
         const now = Date.now();
-        
-        // 🎯 CACHE INTELIGENTE: Verificar se precisa atualizar baseado em tempo E gameId
-        const isDataFresh = cachedInsights && (now - lastFetch) < DATA_FRESH_DURATION;
-        
-        if (isDataFresh) {
-          // Retornar dados do cache se ainda estão frescos
-          console.log('📦 [INSIGHTS-SHARED] Retornando dados do cache (ainda frescos)');
+        const isCacheFresh = cachedInsights && (now - lastFetch) < FRESH_DURATION;
+
+        if (isCacheFresh) {
+          // Retornar dados do cache
           return NextResponse.json(cachedInsights);
         }
 
-        // Cache expirado ou inexistente - coletar dados
-        console.log('🔄 [INSIGHTS-SHARED] Cache de dados expirado, atualizando...');
+        // Cache expirado - coletar dados frescos
+        console.log('🔄 [INSIGHTS-SHARED] Cache expirado, coletando dados frescos...');
         
         const freshData = await collectFreshInsights();
         
-        // Atualizar cache de dados
+        // Atualizar cache
         cachedInsights = freshData;
         lastFetch = now;
         
-        console.log('✅ [INSIGHTS-SHARED] Cache de dados atualizado');
+        console.log('✅ [INSIGHTS-SHARED] Cache atualizado com dados frescos');
         
         return NextResponse.json(freshData);
 

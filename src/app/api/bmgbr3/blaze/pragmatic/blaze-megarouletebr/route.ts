@@ -8,7 +8,7 @@ import {
   debugAuth
 } from '../auth';
 import { getBaseUrl } from '@/lib/utils';
-import { SimpleSessionAffinity } from '@/lib/simple-session-affinity';
+// import { SimpleSessionAffinity } from '@/lib/simple-session-affinity'; // ❌ DESABILITADO para 1 máquina
 
 interface MegaRouletteConfig {
   userId: string;
@@ -497,26 +497,10 @@ const STAKE_LEVELS = [
 // Função principal POST
 export async function POST(request: NextRequest) {
   try {
-    // 🔗 AFINIDADE DE SESSÃO: Verificar se deve processar nesta instância
-    // 🆔 BYPASS: Permitir chamadas internas sem afinidade
+    // ❌ SESSION AFFINITY REMOVIDO: Com apenas 1 máquina, não é necessário
+    // 🎯 SIMPLIFICADO: Processamento direto em instância única
+    console.log(`✅ [API-BMGBR3] Processamento direto (1 máquina)`);
     const isInternalCall = request.headers.get('x-internal-call') === 'true';
-    
-    if (!isInternalCall && !SimpleSessionAffinity.shouldServeUser(request)) {
-      const cookies = request.headers.get('cookie') || '';
-      const sessionInstanceId = cookies.match(/fly-instance-id=([^;]+)/)?.[1];
-      
-      if (sessionInstanceId) {
-        // 🛡️ PROTEÇÃO: Verificar se há loop de redirecionamentos
-        const loopCheck = SimpleSessionAffinity.checkForLoop(request);
-        if (loopCheck.hasLoop) {
-          console.error(`❌ [SESSION-AFFINITY] LOOP detectado na rota principal! Forçando aceitação.`);
-          // Continuar processamento na instância atual
-        } else {
-          console.log(`🔄 [SESSION-AFFINITY] Redirecionando para instância: ${sessionInstanceId} (tentativa ${loopCheck.redirectCount + 1})`);
-          return SimpleSessionAffinity.createReplayResponse(sessionInstanceId, request);
-        }
-      }
-    }
 
     // 💾 LIMPEZA: Limpar backups expirados periodicamente
     // Removido: limpeza simplificada
@@ -596,7 +580,7 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case 'bet-connect':
       case 'connect':
-        return createSessionResponse(await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
+        return await connectToBettingGame(userId, tipValue, clientIP, userFingerprint, {
           userAgent: userFingerprint?.userAgent || clientUserAgent,
           language: clientLanguage,
           accept: clientAccept,
@@ -610,25 +594,25 @@ export async function POST(request: NextRequest) {
           pixelRatio: userFingerprint?.pixelRatio,
           hardwareConcurrency: userFingerprint?.hardwareConcurrency,
           connectionType: userFingerprint?.connectionType
-        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased, m4DirectBetType, isStandbyMode));
+        }, authTokens, forceClientSideAuth, customMartingaleSequence, stakeBased, m4DirectBetType, isStandbyMode);
       
       case 'start-operation':
-        return createSessionResponse(await startSimpleOperation(userId));
+        return await startSimpleOperation(userId);
       
       case 'stop-operation':
-        return createSessionResponse(await stopSimpleOperation(userId));
+        return await stopSimpleOperation(userId);
       
       case 'get-websocket-logs':
-      return createSessionResponse(await getWebSocketLogs(userId));
+      return await getWebSocketLogs(userId);
       
             case 'get-operation-report':
-        return createSessionResponse(await getOperationReport(userId));
+        return await getOperationReport(userId);
       
       case 'reset-operation-report':
-        return createSessionResponse(await resetOperationReport(userId));
+        return await resetOperationReport(userId);
       
       case 'get-connection-status':
-        return createSessionResponse(await getConnectionStatus(userId));
+        return await getConnectionStatus(userId);
       
       
       
@@ -1349,31 +1333,24 @@ export async function POST(request: NextRequest) {
         }
       
       default:
-      return createSessionResponse(NextResponse.json({
+      return NextResponse.json({
         success: false,
           error: `Ação "${action}" não implementada`
-    }, { status: 400 }));
+    }, { status: 400 });
     }
 
   } catch (error) {
-    return createSessionResponse(NextResponse.json({
+    return NextResponse.json({
       success: false,
       error: 'Erro interno do servidor'
-    }, { status: 500 }));
+    }, { status: 500 });
   }
 }
 
-// 🔗 HELPER: Wrapper para adicionar cookie de afinidade de sessão
-function createSessionResponse(response: NextResponse): NextResponse {
-  const instanceId = SimpleSessionAffinity.getCurrentInstanceId();
-  
-  // Adicionar cookie de afinidade de sessão
-  response.headers.set('Set-Cookie', 
-    `fly-instance-id=${instanceId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
-  );
-  
-  return response;
-}
+// ❌ HELPER REMOVIDO: Cookie de afinidade não necessário com 1 máquina
+// function createSessionResponse(response: NextResponse): NextResponse {
+//   // Função removida - não necessária para instância única
+// }
 
 // Funções de token removidas (usamos Edge Function)
 

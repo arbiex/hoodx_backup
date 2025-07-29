@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getBaseUrl } from '@/lib/utils';
-import { SimpleSessionAffinity } from '@/lib/simple-session-affinity';
+// import { SimpleSessionAffinity } from '@/lib/simple-session-affinity'; // ❌ DESABILITADO para 1 máquina
 
 interface BetRequest {
   userId: string;
@@ -39,34 +39,18 @@ const BET_CODES: { [key: string]: string } = {
 
 export async function POST(request: NextRequest) {
   try {
-    // 🔗 AFINIDADE DE SESSÃO: Verificar se deve processar nesta instância
-    // 🆔 BYPASS: Permitir chamadas internas sem afinidade
+    // ❌ SESSION AFFINITY REMOVIDO: Com apenas 1 máquina, não é necessário
+    // 🎯 SIMPLIFICADO: Processamento direto em instância única
+    console.log(`✅ [BET-BMGBR3] Processamento direto (1 máquina)`);
     const isInternalCall = request.headers.get('x-internal-call') === 'true';
-    
-    if (!isInternalCall && !SimpleSessionAffinity.shouldServeUser(request)) {
-      const cookies = request.headers.get('cookie') || '';
-      const sessionInstanceId = cookies.match(/fly-instance-id=([^;]+)/)?.[1];
-      
-      if (sessionInstanceId) {
-        // 🛡️ PROTEÇÃO: Verificar se há loop de redirecionamentos
-        const loopCheck = SimpleSessionAffinity.checkForLoop(request);
-        if (loopCheck.hasLoop) {
-          console.error(`❌ [SESSION-AFFINITY-BMGBR3-BET] LOOP detectado! Forçando aceitação.`);
-          // Continuar processamento na instância atual
-        } else {
-          console.log(`🔄 [SESSION-AFFINITY-BMGBR3-BET] Redirecionando para instância: ${sessionInstanceId} (tentativa ${loopCheck.redirectCount + 1})`);
-          return SimpleSessionAffinity.createReplayResponse(sessionInstanceId, request);
-        }
-      }
-    }
 
     const { userId, amount, betCode, prediction, tableId = 'mrbras531mrbr532', maxWaitTime = 30000 }: BetRequest = await request.json();
 
     if (!userId) {
-      return createBMGBR3BetSessionResponse(NextResponse.json({
+      return NextResponse.json({
         success: false,
         error: 'userId é obrigatório'
-      }, { status: 400 }));
+      }, { status: 400 });
     }
 
     if (!amount || amount < 0.5) {
@@ -473,14 +457,7 @@ export async function GET(request: NextRequest) {
   });
 }
 
-// 🔗 HELPER: Wrapper para adicionar cookie de afinidade de sessão no bet BMGBR3
-function createBMGBR3BetSessionResponse(response: NextResponse): NextResponse {
-  const instanceId = SimpleSessionAffinity.getCurrentInstanceId();
-  
-  // Adicionar cookie de afinidade de sessão
-  response.headers.set('Set-Cookie', 
-    `fly-instance-id=${instanceId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
-  );
-  
-  return response;
-} 
+// ❌ HELPER REMOVIDO: Cookie de afinidade não necessário com 1 máquina
+// function createBMGBR3BetSessionResponse(response: NextResponse): NextResponse {
+//   // Função removida - não necessária para instância única
+// } 

@@ -18,7 +18,9 @@ import MatrixRain from '@/components/MatrixRain';
 import Modal, { useModal } from '@/components/ui/modal';
 import InlineAlert from '@/components/ui/inline-alert';
 import useBmgbr3Api from '@/hooks/useBmgbr3Api';
+import { useCredits } from '@/hooks/useCredits';
 import { useAuth } from '@/hooks/useAuth';
+import CreditPurchaseModal from '@/components/CreditPurchaseModal';
 import useTimerManager from '@/hooks/useTimerManager';
 
 
@@ -65,8 +67,9 @@ export default function BMGBR3() {
   // 🔄 NOVO: Hook customizado para API
   const api = useBmgbr3Api();
 
-  // 🔄 NOVO: Hook para autenticação
+  // 🔄 NOVO: Hooks para autenticação e créditos
   const { user } = useAuth();
+  const { balance: creditsBalance, isLoading: creditsLoading } = useCredits(user?.id);
 
   // 🗑️ REMOVIDO: Sistema de controle de sessão múltipla
 
@@ -80,6 +83,9 @@ export default function BMGBR3() {
   const [userEmail, setUserEmail] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Estado para modal de créditos
+  const [creditModalOpen, setCreditModalOpen] = useState(false);
 
   // ✅ NOVO: Estado para tokens de autenticação
   const [authTokens, setAuthTokens] = useState<{
@@ -242,7 +248,22 @@ export default function BMGBR3() {
   // 🚫 NOVO: Controle global para exibir mensagens de status de conexão
   const [allowConnectionStatusMessages, setAllowConnectionStatusMessages] = useState(false);
   
-  // 🗑️ REMOVIDO: Estados para token da Blaze (não necessários para bot de sinais)
+  // Estados para token da Blaze
+  const blazeConfigModal = useModal();
+  const [blazeToken, setBlazeToken] = useState('');
+  const [isConfigured, setIsConfigured] = useState(false);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [userTokens, setUserTokens] = useState<Array<{
+    casino_name: string;
+    casino_code: string;
+    token: string;
+    is_active: boolean;
+  }>>([]);
+  const [alertMessage, setAlertMessage] = useState<{ 
+    type: 'success' | 'error' | 'warning' | 'info', 
+    message: string 
+  } | null>(null);
   
   // Estados para relatório
   const [operationReport, setOperationReport] = useState<{
@@ -835,7 +856,7 @@ export default function BMGBR3() {
 
   useEffect(() => {
     checkUser();
-    // 🗑️ REMOVIDO: checkBlazeConfiguration() (não necessário para bot de sinais)
+    checkBlazeConfiguration();
     loadHistoryRecords();
     loadFullHistoryRecords();
   }, []);
@@ -1959,9 +1980,77 @@ export default function BMGBR3() {
 
   // 🔇 Componente SmallResultRouletteSlot removido - não utilizado
 
-  // 🗑️ REMOVIDO: checkBlazeConfiguration e handleOpenModal (não necessários para bot de sinais)
+  const checkBlazeConfiguration = async () => {
+    try {
+      setIsLoadingStatus(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-  // 🗑️ REMOVIDO: handleConfigureBlaze (não necessário para bot de sinais)
+      const { data, error } = await supabase
+        .from('user_tokens')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('casino_code', 'BLAZE');
+
+      if (error) {
+        return;
+      }
+
+      setUserTokens(data || []);
+      setIsConfigured(data && data.length > 0 && data.some(token => 
+        token.is_active && token.token && token.token.trim() !== ''
+      ));
+    } catch (error) {
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  };
+
+  const handleOpenModal = () => {
+    const blazeTokenData = userTokens.find(token => token.casino_code === 'BLAZE');
+    const currentToken = blazeTokenData?.token || '';
+    setBlazeToken(currentToken);
+    setAlertMessage(null);
+    blazeConfigModal.openModal();
+  };
+
+  const handleConfigureBlaze = async () => {
+    try {
+      setConfigLoading(true);
+      const tokenValue = blazeToken.trim();
+      
+        const { data, error } = await supabase.rpc('configure_casino_token', {
+          p_casino_name: 'Blaze',
+          p_casino_code: 'BLAZE',
+          p_token: tokenValue || '',
+          p_is_active: tokenValue ? true : false
+        });
+
+      if (error) {
+        throw error;
+      }
+
+          setAlertMessage({
+        type: 'success',
+        message: 'Token da Blaze configurado com sucesso!'
+          });
+
+      await checkBlazeConfiguration();
+      
+      setTimeout(() => {
+          blazeConfigModal.closeModal();
+          setAlertMessage(null);
+      }, 2000);
+
+    } catch (error: any) {
+      setAlertMessage({
+        type: 'error',
+        message: `Erro ao configurar token: ${error.message}`
+      });
+    } finally {
+      setConfigLoading(false);
+    }
+  };
 
   // 💰 NOVA FUNÇÃO: Atualizar função de início de operação para usar a sequência personalizada
   const startOperation = async (tipValue: number, forcedBetType?: 'await' | 'red' | 'black' | 'even' | 'odd' | 'low' | 'high' | 'standby', showConnectionStatus: boolean = true) => {
@@ -3046,9 +3135,93 @@ export default function BMGBR3() {
             </div>
           )}
           
+          {/* Blaze Token Card */}
+          <button
+            onClick={handleOpenModal}
+            className={`
+              w-full p-3 sm:p-4 rounded-xl sm:rounded-2xl border backdrop-blur-sm transition-all duration-300 hover:scale-[1.02]
+              ${isConfigured 
+                ? 'bg-green-500/5 border-green-500/30 shadow-lg shadow-green-500/20' 
+                : 'bg-red-500/5 border-red-500/30 shadow-lg shadow-red-500/20'
+              }
+            `}
+            style={{ backgroundColor: isConfigured ? '#131619' : '#1a1416' }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`
+                  p-2 rounded-lg
+                  ${isConfigured 
+                    ? 'bg-green-500/20 text-green-400' 
+                    : 'bg-red-500/20 text-red-400'
+                  }
+                `}>
+                  <Key className="h-5 w-5" />
+                </div>
+                <div className="text-left">
+                  <h3 className={`text-sm font-semibold font-mono ${
+                    isConfigured ? 'text-green-400' : 'text-red-400'
+                  }`}>
+                    🔑 ACESSO_BLAZE
+                  </h3>
+                  <p className="text-xs text-gray-400 font-mono">
+                    {`// Credenciais de autenticação para sistema Blaze`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-3 py-1 rounded-full text-xs font-mono font-semibold ${
+                  isConfigured 
+                    ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                    : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                }`}>
+                  {isConfigured ? 'CONFIGURADO' : 'NÃO_CONFIGURADO'}
+                </span>
+                <Settings className={`h-4 w-4 ${
+                  isConfigured ? 'text-green-400' : 'text-red-400'
+                }`} />
+              </div>
+            </div>
+          </button>
 
-
-
+          {/* 💰 NOVO: Card de Créditos Disponíveis */}
+          <Card className="border-gray-700/30 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-green-400 font-mono">
+                <Coins className="h-5 w-5" />
+                CRÉDITOS
+              </CardTitle>
+              <CardDescription className="text-gray-400 font-mono text-xs">
+                {`// Saldo para operações`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Saldo Créditos */}
+                <div className="text-center py-4">
+                  <div className="flex items-center justify-center gap-3 mb-2">
+                    <Coins className="h-8 w-8 text-green-400" />
+                    <div className="text-3xl font-bold text-green-400 font-mono">
+                      {creditsLoading ? '...' : `${creditsBalance?.toFixed(2) || '0.00'}`}
+                    </div>
+                  </div>
+                  <div className="text-sm text-gray-400 font-mono">
+                    DISPONÍVEL
+                  </div>
+                </div>
+                
+                {/* Botão Comprar Créditos */}
+                <Button
+                  onClick={() => setCreditModalOpen(true)}
+                  className="w-full bg-green-500/20 border border-green-500/50 text-green-400 hover:bg-green-500/30 font-mono text-sm"
+                  variant="outline"
+                >
+                  <Coins className="h-4 w-4 mr-2" />
+                  COMPRAR_CRÉDITOS
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
 
 
@@ -3270,7 +3443,7 @@ export default function BMGBR3() {
                     onClick={handleOperate}
                     disabled={
                       operationLoading || 
-                      // 🗑️ REMOVIDO: !isConfigured (não necessário para bot de sinais)
+                      !isConfigured || 
                       ((isOperating || operation.forceDisplay) && isRealOperation && !canSafelyStop) || // ✅ NOVO: Desabilita quando operando em modo REAL e não é seguro parar
                       (!(isOperating || operation.forceDisplay) && martingaleSequence.length === 0) // ✅ NOVO: Desabilita se não há sequência válida
                     }
@@ -3572,11 +3745,90 @@ export default function BMGBR3() {
         </div>
       </div>
 
-      {/* 🗑️ REMOVIDO: Modal de Configuração do Token Blaze (não necessário para bot de sinais) */}
+      {/* Modal de Configuração do Token Blaze */}
+      <Modal
+        isOpen={blazeConfigModal.isOpen}
+        onClose={() => {
+          setBlazeToken('');
+          setAlertMessage(null);
+          blazeConfigModal.closeModal();
+        }}
+        title={isConfigured ? 'EDITAR_TOKEN_BLAZE' : 'CONFIG_BLAZE'}
+        description={isConfigured ? 'Atualize seu token de autenticação Blaze' : 'Configure seu token de autenticação Blaze'}
+        type="info"
+        actions={{
+          primary: {
+            label: isConfigured ? 'ATUALIZAR_TOKEN' : 'SALVAR_TOKEN',
+            onClick: handleConfigureBlaze,
+            loading: configLoading,
+            disabled: false
+          },
+          secondary: {
+            label: 'CANCELAR',
+            onClick: () => {
+              setBlazeToken('');
+              setAlertMessage(null);
+              blazeConfigModal.closeModal();
+            }
+          }
+        }}
+      >
+        <div className="space-y-4">
+          {alertMessage && (
+            <InlineAlert
+              type={alertMessage.type}
+              message={alertMessage.message}
+            />
+          )}
+          
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-gray-300 font-mono">
+              TOKEN_ACESSO
+            </label>
+            <input
+              type="text"
+              value={blazeToken}
+              onChange={(e) => setBlazeToken(e.target.value)}
+              placeholder="Cole seu token Blaze aqui..."
+              className="w-full p-2 sm:p-3 bg-gray-800/50 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+            />
+            <p className="text-xs text-gray-400 font-mono">
+              {`// Token será criptografado e armazenado com segurança`}
+            </p>
+          </div>
+
+          <div className="p-3 sm:p-4 bg-gray-800/20 border border-gray-600/30 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <Settings className="h-4 w-4 text-blue-400" />
+              <span className="text-sm font-semibold text-blue-400 font-mono">COMO_OBTER_TOKEN</span>
+            </div>
+            <div className="text-xs text-gray-300 font-mono space-y-1">
+              <p>1. Faça login na sua conta Blaze</p>
+              <p>2. Abra as Ferramentas do Desenvolvedor (F12)</p>
+              <p>3. Vá para Application → Local Storage</p>
+              <p>4. Selecione &quot;https://blaze.bet.br&quot;</p>
+              <p>5. Encontre &quot;ACCESS_TOKEN&quot; e copie o valor</p>
+              <p>6. Cole no campo acima</p>
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       {/* 🗑️ REMOVIDO: Modal de Controle de Sessão */}
 
-
+      {/* Modal de Compra de Créditos */}
+      {user && (
+        <CreditPurchaseModal
+          isOpen={creditModalOpen}
+          onClose={() => setCreditModalOpen(false)}
+          onSuccess={(amount: number, transactionId: string) => {
+            // Não é necessário fazer nada específico aqui pois o hook useCredits
+            // já atualiza automaticamente quando há mudanças
+            console.log(`✅ Créditos adicionados: ${amount}`);
+          }}
+          userId={user.id}
+        />
+      )}
 
       {/* Modal de Estratégia Removido - Agora usamos diretamente o card CONFIGURAR_BANCA */}
     </div>
